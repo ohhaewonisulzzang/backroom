@@ -361,7 +361,7 @@ try {
 
   // 8) 혼자 남은 Alice 가 죽거나 남은 상태 → health 확인
   const health = await (await fetch(`${URL}/health`)).json();
-  check(health.rooms.some(r => r.name === 'smoke' && r.players === 1), '/health 에 방 상태 반영');
+  check(health.ok && health.rooms >= 1 && health.players >= 1 && !JSON.stringify(health).includes('smoke'), '/health 는 방 수/인원만 (방 코드 비공개)');
 
   a.s.disconnect();
 } catch (e) {

@@ -304,7 +304,8 @@ export class GameRoom {
     const elapsed = Math.min(1, (now - p.lastUpdate) / 1000);
     const maxStep = CONFIG.PLAYER.SPRINT * elapsed * 1.5 + 32;
     const moved = Math.hypot(s.x - p.x, s.y - p.y);
-    const solid = this.map.isSolid(Math.floor(s.x / TS), Math.floor(s.y / TS));
+    // 도착 칸이 벽이거나, 이동 경로가 벽을 뚫고 지나가면 거부 (벽 통과 치트 방지)
+    const solid = this.map.isSolid(Math.floor(s.x / TS), Math.floor(s.y / TS)) || !hasLOS(this.map, p.x, p.y, s.x, s.y);
     p.lastUpdate = now;
     if (moved > maxStep || solid) {
       this.io.to(id).emit('correct', { x: p.x, y: p.y });

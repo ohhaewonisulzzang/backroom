@@ -38,14 +38,19 @@ export function attachGameServer(io, { testMode = false } = {}) {
   io.on('connection', socket => {
     let room = null;
     const fail = message => socket.emit('joinError', { message });
+    // 클라이언트가 보낸 값은 믿지 않는다: 객체가 아니면 {} 로 바꾸고, 핸들러 예외가 서버 전체를 죽이지 않게 막는다
+    const on = (event, fn) => socket.on(event, data => {
+      try { fn(data && typeof data === 'object' ? data : {}); }
+      catch (e) { console.error(`[socket ${event}]`, e); }
+    });
 
-    socket.on('createRoom', (data = {}) => {
+    on('createRoom', data => {
       if (room) return;
       room = makeRoom(newCode(), { lobby: true });
       room.addToLobby(socket, sanitizeName(data.name));
     });
 
-    socket.on('joinRoom', (data = {}) => {
+    on('joinRoom', data => {
       if (room) return;
       const r = rooms.get(sanitizeCode(data.code));
       if (!r || r.solo) return fail('그런 코드의 방이 없습니다.');
@@ -55,13 +60,13 @@ export function attachGameServer(io, { testMode = false } = {}) {
       else r.addPlayer(socket, sanitizeName(data.name));
     });
 
-    socket.on('solo', (data = {}) => {
+    on('solo', data => {
       if (room) return;
       room = makeRoom('SOLO-' + newCode(), { solo: true });
       room.addPlayer(socket, sanitizeName(data.name), data.color);
     });
 
-    socket.on('join', (data = {}) => {      // 예전 방식 (이름으로 방 지정)
+    on('join', data => {      // 예전 방식 (이름으로 방 지정)
       if (room) return;
       const roomName = sanitizeRoom(data.room);
       const r = rooms.get(roomName) ?? makeRoom(roomName, {});
@@ -70,21 +75,21 @@ export function attachGameServer(io, { testMode = false } = {}) {
       r.addPlayer(socket, sanitizeName(data.name));
     });
 
-    socket.on('setColor', data => room?.setColor(socket.id, data?.color));
-    socket.on('startMatch', () => room?.startMatch(socket.id));
-    socket.on('pause', data => room?.setPaused(socket.id, data?.paused));
-    socket.on('leaveRoom', () => {
+    on('setColor', data => room?.setColor(socket.id, data?.color));
+    on('startMatch', () => room?.startMatch(socket.id));
+    on('pause', data => room?.setPaused(socket.id, data?.paused));
+    on('leaveRoom', () => {
       if (!room) return;
       socket.leave(room.name);
       room.removePlayer(socket.id);
       room = null;
     });
-    socket.on('state', s => room?.onState(socket.id, s));
-    socket.on('hide', data => room?.onHide(socket.id, data));
-    socket.on('test', data => room?.onTest(socket.id, data));
-    socket.on('useItem', data => room?.onUseItem(socket.id, data));
-    socket.on('emote', data => room?.onEmote(socket.id, data));
-    socket.on('solvePuzzle', data => room?.onSolvePuzzle(socket.id, data));
+    on('state', s => room?.onState(socket.id, s));
+    on('hide', data => room?.onHide(socket.id, data));
+    on('test', data => room?.onTest(socket.id, data));
+    on('useItem', data => room?.onUseItem(socket.id, data));
+    on('emote', data => room?.onEmote(socket.id, data));
+    on('solvePuzzle', data => room?.onSolvePuzzle(socket.id, data));
     socket.on('disconnect', () => room?.removePlayer(socket.id));
   });
 
@@ -94,7 +99,9 @@ export function attachGameServer(io, { testMode = false } = {}) {
       return {
         ok: true,
         testMode,
-        rooms: [...rooms.values()].map(r => ({ name: r.name, players: r.players.size, round: r.round, phase: r.phase })),
+        // 방 코드는 공개하지 않는다 (알면 누구나 들어올 수 있으므로). 개수만 보여준다
+        rooms: rooms.size,
+        players: [...rooms.values()].reduce((n, r) => n + r.players.size, 0),
       };
     },
   };
