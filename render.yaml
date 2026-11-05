@@ -1,0 +1,15 @@
+# Render 배포 설정 (https://render.com → New → Blueprint → 이 저장소 선택)
+# socket.io 가 WebSocket 을 계속 유지해야 하므로 서버리스(Vercel)가 아닌 상시 실행 웹 서비스로 띄운다.
+services:
+  - type: web
+    name: backrooms
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: BACKROOMS_TEST
+        value: "0"
