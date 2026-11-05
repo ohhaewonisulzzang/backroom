@@ -2,6 +2,7 @@ import { CONFIG, TS, T } from '../../shared/config.js';
 import { moveEntity } from '../../shared/physics.js';
 import { Input } from './input.js';
 import { Sound } from './sound.js';
+import { angleDiff } from '../../shared/utils.js';
 
 /** 로컬 플레이어 입력 처리 (클라이언트 예측 이동). 서버는 결과 위치를 검증한다. */
 /** opts.infinite = 스태미나 무한 (질주 레벨) */
@@ -12,11 +13,13 @@ export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   if (Input.down('KeyS', 'ArrowDown')) iy += 1;
   if (Input.down('KeyA', 'ArrowLeft')) ix -= 1;
   if (Input.down('KeyD', 'ArrowRight')) ix += 1;
-  const moving = ix !== 0 || iy !== 0;
-  if (moving) { const l = Math.hypot(ix, iy); ix /= l; iy /= l; } // 8방향 정규화
+  const T = Input.touch;
+  if (T.active && ix === 0 && iy === 0) { ix = T.move.x; iy = T.move.y; }   // 휴대폰/태블릿: 왼쪽 스틱
+  const moving = Math.hypot(ix, iy) > 0.15;
+  if (moving) { const l = Math.hypot(ix, iy); ix /= l; iy /= l; } else { ix = iy = 0; } // 방향만 쓰고 속도는 걷기/달리기로
 
-  p.crouching = Input.down('KeyC');                       // 웅크리기: 느리지만 발소리가 나지 않음
-  const wantSprint = moving && !p.crouching && Input.down('ShiftLeft', 'ShiftRight');
+  p.crouching = Input.down('KeyC') || (T.active && T.crouch);   // 웅크리기: 느리지만 발소리가 나지 않음
+  const wantSprint = moving && !p.crouching && (Input.down('ShiftLeft', 'ShiftRight') || (T.active && T.sprint));
   if (p.boostT > 0) p.boostT -= dt;
   if (wantSprint && !p.exhausted && p.stamina > 0) {
     p.sprinting = true;
@@ -38,6 +41,12 @@ export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   p.stepAcc += moved;
   if (p.stepAcc > (p.sprinting ? 46 : 36)) { p.stepAcc = 0; if (!p.crouching) Sound.step(p.sprinting); }
 
+  if (T.active) {
+    // 터치: 오른쪽 스틱으로 비추는 방향. 스틱을 놓고 있으면 걷는 방향으로 부드럽게 돌아간다 (서 있으면 그대로)
+    if (T.aim !== null) p.angle = T.aim;
+    else if (moving) p.angle += angleDiff(Math.atan2(iy, ix), p.angle) * Math.min(1, dt * 10);
+    return;
+  }
   // 마우스 방향 회전
   const sx = (p.x - cam.x) * scale, sy = (p.y - cam.y) * scale;
   p.angle = Math.atan2(Input.mouse.y - sy, Input.mouse.x - sx);

@@ -14,7 +14,7 @@ html, body {
   color: var(--yellow);
   user-select: none;
 }
-canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; }
+canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; touch-action: none; }
 
 #overlay {
   position: fixed; inset: 0;
@@ -209,3 +209,35 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; }
 .bestiary-card > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .bestiary-preview { flex: none; width: 140px; height: 140px; image-rendering: pixelated; background: rgba(0,0,0,.6); border: 1px solid var(--line); }
 @media (max-width: 520px) { .bestiary-card { flex-direction: column; align-items: center; } }
+
+/* ---------- 터치 조작 (휴대폰/태블릿) ---------- */
+.touch-ui { position: fixed; inset: 0; z-index: 12; pointer-events: none; touch-action: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.touch-zone { position: absolute; top: 0; bottom: 0; width: 50%; pointer-events: auto; touch-action: none; }
+.touch-zone.left { left: 0; }
+.touch-zone.right { right: 0; }
+.stick-base {
+  position: absolute; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%;
+  border: 2px solid rgba(216,196,106,.35); background: rgba(0,0,0,.25); pointer-events: none;
+}
+.stick-knob {
+  position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%;
+  background: rgba(216,196,106,.4); border: 2px solid rgba(216,196,106,.7);
+}
+.touch-btn {
+  pointer-events: auto; touch-action: none; font-family: inherit; font-size: 18px; color: var(--yellow);
+  background: rgba(8,6,2,.55); border: 1px solid var(--yellow-dim); min-width: 64px; min-height: 44px; padding: 4px 10px;
+}
+.touch-btn.big { font-size: 28px; min-height: 64px; border-radius: 50%; }
+.touch-btn.on { background: rgba(216,196,106,.3); border-color: var(--yellow); }
+.touch-top { position: absolute; top: 12px; right: 12px; display: flex; gap: 8px; pointer-events: none; }
+.touch-actions {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px; pointer-events: none;
+}
+.touch-talk {
+  position: absolute; right: 100px; top: 50%; transform: translateY(-50%); pointer-events: auto;
+  display: flex; flex-direction: column; gap: 6px; background: rgba(8,6,2,.85); border: 1px solid var(--line); padding: 8px;
+}
+/* hud.js drawInventory 와 같은 자리 (아래 가운데, 46px 칸 4개, 간격 6px, 바닥에서 18px) */
+.touch-slots { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: grid; grid-template-columns: repeat(4, 46px); gap: 6px; pointer-events: none; }
+.touch-slots button { pointer-events: auto; touch-action: none; width: 46px; height: 46px; padding: 0; background: transparent; border: none; -webkit-tap-highlight-color: transparent; }

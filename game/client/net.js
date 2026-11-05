@@ -49,6 +49,7 @@ export class NetClient {
   leaveRoom() { this.socket?.emit('leaveRoom'); }
   pause(paused) { this.socket?.emit('pause', { paused }); }
   useItem(slot) { this.socket?.emit('useItem', { slot }); }
+  dropItem(slot) { this.socket?.emit('dropItem', { slot }); }
   emote(i) { this.socket?.emit('emote', { i }); }
   /** 퍼즐 단말기 정답 제출 — 판정은 서버가 한다 (맞으면 keyCollected, 틀리면 puzzleAlarm) */
   solvePuzzle(index, answer) { this.socket?.emit('solvePuzzle', { index, answer }); }

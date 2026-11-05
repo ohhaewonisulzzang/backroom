@@ -5,6 +5,9 @@ export const metadata = {
   description: '2D top-down multiplayer Backrooms horror prototype',
 };
 
+// 휴대폰에서 두 손가락 확대/더블탭 확대로 화면이 움직이지 않게
+export const viewport = { width: 'device-width', initialScale: 1, maximumScale: 1, userScalable: false, viewportFit: 'cover' };
+
 export default function RootLayout({ children }) {
   return (
     <html lang="ko">

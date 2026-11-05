@@ -30,6 +30,7 @@ export default function BackroomsGame() {
   const [settings, setSettings] = useState(loadSettings);
   const [puzzle, setPuzzle] = useState(null);       // 열린 퍼즐 단말기 { index, puzzle, wrongAt }
   const [toast, setToast] = useState(null);         // 퍼즐 결과 한 줄 알림
+  const isTouch = useIsTouch();                     // 휴대폰/태블릿이면 화면 조작 버튼을 띄운다
 
   useEffect(() => {
     let disposed = false;
@@ -108,7 +109,128 @@ export default function BackroomsGame() {
           sfx={(k, a) => engine()?.sfx(k, a)} />
       )}
       {toast && <div className="pz-toast">{toast}</div>}
+      {isTouch && overlay.kind === 'hidden' && !pauseOpen && <TouchControls engine={engine} />}
       {testOpen && <TestPanel onCmd={(c, a) => engine()?.test(c, a)} onClose={() => setTestOpen(false)} />}
+    </div>
+  );
+}
+
+// ================================================================ 터치 조작 (휴대폰/태블릿)
+function useIsTouch() {
+  const [touch, setTouch] = useState(false);
+  useEffect(() => {
+    const mq = matchMedia('(pointer: coarse)');
+    const update = () => setTouch(mq.matches || (navigator.maxTouchPoints > 0 && !matchMedia('(pointer: fine)').matches));
+    update();
+    mq.addEventListener?.('change', update);
+    return () => mq.removeEventListener?.('change', update);
+  }, []);
+  return touch;
+}
+
+/**
+ * 손가락을 댄 곳에 생기는 가상 스틱. onChange(x, y, len) — x,y 는 -1~1, len 은 0~1. 손을 떼면 onEnd().
+ * 왼쪽 절반 = 이동, 오른쪽 절반 = 손전등 방향.
+ */
+function TouchStick({ side, onChange, onEnd }) {
+  const [knob, setKnob] = useState(null);           // { ox, oy, dx, dy } 화면 좌표
+  const origin = useRef(null);
+  const pid = useRef(null);
+  const R = 56;
+  const end = e => {
+    if (e.pointerId !== pid.current) return;
+    pid.current = null; origin.current = null; setKnob(null); onEnd();
+  };
+  return (
+    <div className={`touch-zone ${side}`}
+      onPointerDown={e => {
+        if (pid.current !== null) return;
+        pid.current = e.pointerId;
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        origin.current = { x: e.clientX, y: e.clientY };
+        setKnob({ ox: e.clientX, oy: e.clientY, dx: 0, dy: 0 });
+        onChange(0, 0, 0);
+      }}
+      onPointerMove={e => {
+        if (e.pointerId !== pid.current || !origin.current) return;
+        let dx = e.clientX - origin.current.x, dy = e.clientY - origin.current.y;
+        const len = Math.hypot(dx, dy);
+        if (len > R) { dx = (dx / len) * R; dy = (dy / len) * R; }
+        onChange(dx / R, dy / R, Math.min(1, len / R));
+        setKnob({ ox: origin.current.x, oy: origin.current.y, dx, dy });
+      }}
+      onPointerUp={end} onPointerCancel={end}>
+      {knob && (
+        <div className="stick-base" style={{ left: knob.ox, top: knob.oy }}>
+          <div className="stick-knob" style={{ transform: `translate(${knob.dx}px, ${knob.dy}px)` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TouchControls({ engine }) {
+  const [crouch, setCrouch] = useState(false);
+  const [talk, setTalk] = useState(false);
+  const hold = useRef(null);
+  const T = () => engine()?.touch;
+  useEffect(() => {
+    const t = T();
+    if (t) t.active = true;
+    return () => { engine()?.resetTouch(); const t2 = T(); if (t2) t2.crouch = false; };
+  }, []);
+  const stop = e => e.stopPropagation();
+  const Btn = ({ code, label, className = '', onTap }) => (
+    <button className={`touch-btn ${className}`}
+      onPointerDown={e => { stop(e); const t = T(); if (t) t.active = true; if (onTap) onTap(); else engine()?.press(code); }}>
+      {label}
+    </button>
+  );
+  // 인벤토리 칸: 짧게 누르면 사용, 길게(0.5초) 누르면 버리기
+  const cancelHold = () => { clearTimeout(hold.current?.timer); hold.current = null; };
+  const slotDown = (e, i) => {
+    stop(e);
+    cancelHold();
+    hold.current = { i, timer: setTimeout(() => { hold.current = null; navigator.vibrate?.(30); engine()?.dropItem(i); }, 500) };
+  };
+  const slotUp = i => {
+    if (hold.current?.i !== i) return;
+    cancelHold();
+    engine()?.useItem(i);
+  };
+  return (
+    <div className="touch-ui">
+      <TouchStick side="left"
+        onChange={(x, y, len) => { const t = T(); if (!t) return; t.active = true; t.move.x = x; t.move.y = y; t.sprint = len > 0.92; }}
+        onEnd={() => { const t = T(); if (!t) return; t.move.x = 0; t.move.y = 0; t.sprint = false; }} />
+      <TouchStick side="right"
+        onChange={(x, y, len) => { const t = T(); if (!t) return; t.active = true; if (len > 0.2) t.aim = Math.atan2(y, x); }}
+        onEnd={() => { const t = T(); if (t) t.aim = null; }} />
+      <div className="touch-top">
+        <Btn code="Space" label="관전" />
+        <Btn code="Escape" label="Ⅱ" />
+      </div>
+      <div className="touch-actions">
+        <Btn code="KeyE" label="E" className="big" />
+        <Btn code="KeyF" label="손전등" />
+        <Btn label={crouch ? '웅크림' : '웅크리기'} className={crouch ? 'on' : ''}
+          onTap={() => { const v = !crouch; setCrouch(v); const t = T(); if (t) t.crouch = v; }} />
+        <Btn label="말하기" className={talk ? 'on' : ''} onTap={() => setTalk(v => !v)} />
+      </div>
+      {talk && (
+        <div className="touch-talk" onPointerDown={stop}>
+          {(engine()?.emoteLines || []).map((l, i) => (
+            <button key={i} className="touch-btn" onClick={() => { engine()?.emote(i); setTalk(false); }}>{l}</button>
+          ))}
+        </div>
+      )}
+      <div className="touch-slots">
+        {[0, 1, 2, 3].map(i => (
+          <button key={i} aria-label={`아이템 ${i + 1}`}
+            onPointerDown={e => slotDown(e, i)} onPointerUp={() => slotUp(i)}
+            onPointerCancel={cancelHold} onPointerLeave={() => { if (hold.current?.i === i) cancelHold(); }} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -216,7 +338,8 @@ function ControlsText({ onBack }) {
   return (
     <div className="menu-text">
       <p><b>WASD</b> / <b>방향키</b> 이동 · <b>마우스</b> 조준<br /><b>SHIFT</b> 달리기 · <b>C</b> 웅크리기(조용히 걷기)<br />
-        <b>F</b> 손전등 · <b>E</b> 사물함/탁자에 숨기, 퍼즐 단말기 열기 · <b>1~4</b> 아이템 사용<br /><b>,</b> 감정 표현(말하기) · <b>SPACE</b> 관전 전환 · <b>ESC</b> 메뉴</p>
+        <b>F</b> 손전등 · <b>E</b> 사물함/탁자에 숨기, 퍼즐 단말기 열기 · <b>1~4</b> 아이템 사용 · <b>G</b> 누른 채 <b>1~4</b> 아이템 버리기<br /><b>,</b> 감정 표현(말하기) · <b>SPACE</b> 관전 전환 · <b>ESC</b> 메뉴</p>
+      <p className="dim">휴대폰/태블릿: 왼손 스틱 이동(끝까지 밀면 달리기) · 오른손 스틱 손전등 방향(놓으면 걷는 쪽을 비춤)<br />아이템 칸 누르기 = 사용, 길게 누르기 = 버리기</p>
       <p className="dim">카메라: 플래시로 엔티티 기절 · 살충제: 나방 퇴치<br />조명탄: 빛 + 소리 미끼 · 나침반: 열쇠/출구 방향<br />스테미너 드링크: 지치지 않음 · 아몬드 워터: 정신력 회복</p>
       <p className="dim">LEVEL ! — 괴물 떼가 밀려온다. 장애물과 웅덩이를 피해 오른쪽 끝 출구까지 달려라.</p>
       <p className="dim">정신력은 시간이 지나면, 특히 어둠 속에서 줄어든다. 낮아지면 환각이 보이고, 바닥나면... 터진다.</p>

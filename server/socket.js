@@ -17,6 +17,7 @@ const sanitizeCode = v => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''
  *  startMatch                 → 방장만: 게임 시작 → 모두 'init'
  *  leaveRoom                  → 방 나가기
  *  pause      {paused}        → ESC 메뉴 (혼자 하기에서만 실제 일시정지)
+ *  dropItem   {slot}          → 인벤토리 아이템을 발밑에 버리기
  *  join       {name, room}    → (예전 방식) 이름으로 방에 바로 입장
  */
 export function attachGameServer(io, { testMode = false } = {}) {
@@ -88,6 +89,7 @@ export function attachGameServer(io, { testMode = false } = {}) {
     on('hide', data => room?.onHide(socket.id, data));
     on('test', data => room?.onTest(socket.id, data));
     on('useItem', data => room?.onUseItem(socket.id, data));
+    on('dropItem', data => room?.onDropItem(socket.id, data));
     on('emote', data => room?.onEmote(socket.id, data));
     on('solvePuzzle', data => room?.onSolvePuzzle(socket.id, data));
     socket.on('disconnect', () => room?.removePlayer(socket.id));

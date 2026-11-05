@@ -654,6 +654,14 @@ export function startGame({ canvas, ui }) {
   Game.initMenu();
 
   Input.init();
+  const canAct = () => Game.phase === 'game' && !Game.paused && Game.local?.alive && Game.roundPhase === 'playing' && Game.puzzleOpen < 0;
+  const useSlot = i => { if (i < CONFIG.INVENTORY_SIZE && Game.inv[i]) net.useItem(i); };
+  const dropSlot = i => {
+    if (i >= CONFIG.INVENTORY_SIZE || !Game.inv[i] || Game.local.hidden) return;
+    net.dropItem(i);
+    Sound.click();
+    Game.msg(`${ITEM_TYPES[Game.inv[i].type]?.name ?? '아이템'} 을(를) 버렸다`, 1.5);
+  };
   Input.onPress('Escape', () => {
     if (Game.phase === 'ending') { Game.skipCine(); return; }
     if (Game.phase !== 'game') return;
@@ -668,9 +676,10 @@ export function startGame({ canvas, ui }) {
   });
   for (let n = 1; n <= 6; n++) {
     Input.onPress(`Digit${n}`, () => {
-      if (Game.phase !== 'game' || Game.paused || !Game.local?.alive || Game.roundPhase !== 'playing' || Game.puzzleOpen >= 0) return;
+      if (!canAct()) return;
       if (Game.emoteOpen) { net.emote(n - 1); Game.emoteOpen = false; return; }      // 감정 표현
-      if (n <= CONFIG.INVENTORY_SIZE && Game.inv[n - 1]) net.useItem(n - 1);       // 아이템 사용
+      if (Input.down('KeyG')) dropSlot(n - 1);                                       // G 를 누른 채 숫자 → 버리기
+      else useSlot(n - 1);                                                           // 아이템 사용
     });
   }
   Input.onPress('KeyF', () => {
@@ -739,6 +748,14 @@ export function startGame({ canvas, ui }) {
       Sound.setHum(on ? 0.3 : 1);
     },
     get isSolo() { return Game.solo; },
+    /** 터치 조작 (휴대폰/태블릿) */
+    touch: Input.touch,
+    press(code) { Input.press(code); },
+    resetTouch() { Input.resetTouch(); },
+    useItem(i) { if (canAct()) useSlot(i); },
+    dropItem(i) { if (canAct()) dropSlot(i); },
+    emote(i) { if (canAct()) net.emote(i); },
+    get emoteLines() { return CONFIG.EMOTE.LINES; },
     /** 퍼즐 패널(React) → 정답 제출 / 닫기 / 효과음 */
     solvePuzzle(index, answer) { if (Game.puzzleOpen === index) net.solvePuzzle(index, answer); },
     closePuzzle() { Game.closePuzzle(); },

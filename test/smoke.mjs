@@ -256,6 +256,17 @@ try {
   const used = await solo.waitFor('itemUsed', d => d.type === 'camera');
   const inv2 = await solo.waitFor('inventory', d => d.inv[0]?.uses === 2);
   check(!!used && inv2.inv[0].uses === 2, '카메라 사용 → itemUsed 브로드캐스트, 남은 횟수 2');
+  // 12-1) 아이템 버리기: 발밑에 남은 횟수 그대로 떨어지고, 버린 사람은 제자리에서 바로 다시 줍지 않는다
+  solo.s.emit('dropItem', { slot: 0 });
+  const dropped = await solo.waitFor('itemSpawned', d => d.type === 'camera' && d.uses === 2);
+  const inv3 = await solo.waitFor('inventory', d => d.inv.length === 0);
+  await sleep(100);
+  solo.s.emit('state', { x: cam.x + 1, y: cam.y, angle: 0, flashlight: true, sprinting: false, crouching: false });
+  await sleep(250);
+  const last = [...solo.log].reverse().find(e => e.ev === 'inventory').data;
+  check(!!dropped && inv3.inv.length === 0 && last.inv.length === 0 && Math.hypot(dropped.x - cam.x, dropped.y - cam.y) < 20,
+    '아이템 버리기 → 발밑에 남은 횟수(2) 그대로, 버린 자리에서 바로 다시 줍지 않음');
+  solo.s.emit('dropItem', null);                                    // 잘못된 데이터도 서버가 버틴다
   solo.s.emit('emote', { i: 1 });
   const em = await solo.waitFor('emote', d => d.i === 1);
   solo.s.emit('emote', { i: 2 });                                  // 쿨다운 안이라 무시

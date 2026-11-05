@@ -333,10 +333,15 @@ export class GameRoom {
     });
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
-      if (Math.hypot(it.x - p.x, it.y - p.y) >= CONFIG.PICKUP_RADIUS) continue;
+      const d = Math.hypot(it.x - p.x, it.y - p.y);
+      if (it.lockedFor === p.id) {                                  // 방금 버린 사람은 한 번 멀어져야 다시 주울 수 있다
+        if (d > CONFIG.PICKUP_RADIUS * 2) delete it.lockedFor;
+        continue;
+      }
+      if (d >= CONFIG.PICKUP_RADIUS) continue;
       if (p.inv.length >= CONFIG.INVENTORY_SIZE) continue;          // 가방이 가득 참
       this.items.splice(i, 1);
-      p.inv.push({ type: it.type, uses: ITEM_TYPES[it.type].uses });
+      p.inv.push({ type: it.type, uses: it.uses ?? ITEM_TYPES[it.type].uses });   // 버려진 아이템은 남은 횟수 그대로
       this.emit('itemPicked', { id: it.id, type: it.type, by: p.id });
       this.sendInventory(p);
     }
@@ -415,6 +420,19 @@ export class GameRoom {
     if (it.uses <= 0) p.inv.splice(slot | 0, 1);
     this.sendInventory(p);
     this.emit('itemUsed', fx);
+  }
+
+  /** 인벤토리 slot 번 아이템을 발밑에 버린다 (남은 사용 횟수 유지, 다른 사람이 주울 수 있음) */
+  onDropItem(id, { slot } = {}) {
+    const p = this.players.get(id);
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused) return;
+    const i = slot | 0, it = p.inv[i];
+    if (!it) return;
+    p.inv.splice(i, 1);
+    const drop = { id: ++this.itemSeq, type: it.type, uses: it.uses, x: Math.round(p.x), y: Math.round(p.y + 6), lockedFor: id };
+    this.items.push(drop);
+    this.sendInventory(p);
+    this.emit('itemSpawned', { ...drop });
   }
 
   /** 감정 표현: 말풍선 + 목소리. 목소리는 소리라서 귀 밝은 엔티티가 듣는다 */
