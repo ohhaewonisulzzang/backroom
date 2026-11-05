@@ -40,3 +40,13 @@ game = attachGameServer(io, { testMode });
 httpServer.listen(port, () => {
   console.log(`Backrooms (Next.js ${dev ? 'dev' : 'prod'} + socket.io) ready on http://localhost:${port}${testMode ? '  [TEST MODE: \` 키]' : ''}`);
 });
+
+// Render 무료 플랜은 15분간 요청이 없으면 서버를 재운다.
+// 10분마다 자기 공개 주소(/health)를 호출해서 계속 깨어 있게 한다. (KEEP_AWAKE=0 이면 끔)
+const publicUrl = process.env.RENDER_EXTERNAL_URL;
+if (!dev && publicUrl && process.env.KEEP_AWAKE !== '0') {
+  setInterval(() => {
+    fetch(`${publicUrl}/health`).catch(e => console.warn('keep-awake ping 실패:', e.message));
+  }, 10 * 60 * 1000).unref();
+  console.log(`keep-awake: 10분마다 ${publicUrl}/health 호출`);
+}

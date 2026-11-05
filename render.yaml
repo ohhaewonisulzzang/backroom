@@ -1,5 +1,6 @@
 # Render 배포 설정 (https://render.com → New → Blueprint → 이 저장소 선택)
 # socket.io 가 WebSocket 을 계속 유지해야 하므로 서버리스(Vercel)가 아닌 상시 실행 웹 서비스로 띄운다.
+# 무료 플랜은 15분간 요청이 없으면 잠들지만, server.mjs 가 10분마다 자기 /health 를 호출해서 깨어 있게 한다.
 services:
   - type: web
     name: backrooms
