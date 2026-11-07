@@ -851,10 +851,14 @@ export class GameRoom {
     const i = index | 0, st = this.level.stations[i];
     if (!st || o.prog[i] >= 1 || !finite(delta) || delta <= 0) return;
     if (Math.hypot(st.x - p.x, st.y - p.y) > MISSION.STATION_DIST * 1.6) return;
-    const now = Date.now();
-    const allowed = Math.min(0.25, (now - (p.turnAt || 0)) / 1000) * MISSION.TURN_RATE * Math.PI * 2 + 0.3;   // 한 번에 최대 0.25초 분량
+    // 토큰 버킷: 초당 TURN_RATE 바퀴만큼 허용량이 차오르고(최대 0.3초 분량), 돌린 만큼 빠진다.
+    // 메시지를 아무리 많이 보내도 시간당 돌릴 수 있는 양은 같다
+    const now = Date.now(), rate = MISSION.TURN_RATE * Math.PI * 2, burst = rate * 0.3;
+    p.turnBank = Math.min(burst, (p.turnBank ?? burst) + Math.max(0, now - (p.turnAt || now)) / 1000 * rate);
     p.turnAt = now;
-    const d = Math.min(delta, allowed);
+    const d = Math.min(delta, p.turnBank);
+    if (d <= 0) return;
+    p.turnBank -= d;
     p.workUntil = now + 500;
     o.prog[i] = Math.min(1, o.prog[i] + d / (o.turns * Math.PI * 2));
     if (o.prog[i] >= 1) { o.done++; this.missionProgress(o.done / o.total, id, 'activate'); }

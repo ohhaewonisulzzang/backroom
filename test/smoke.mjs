@@ -423,6 +423,10 @@ try {
   await sleep(200);
   const clip = [...ac.log].reverse().find(e => e.ev === 'snapshot' && e.data.obj)?.data.obj;
   check(clip.prog[vi] > 0 && clip.prog[vi] < 0.5, `한 번에 크게 돌려도 조금만 인정 (${clip.prog[vi]})`);
+  for (let n = 0; n < 300; n++) ac.s.emit('turnValve', { index: vi, delta: 1.0 });   // 한꺼번에 쏟아부어도
+  await sleep(250);
+  const flood = [...ac.log].reverse().find(e => e.ev === 'snapshot' && e.data.obj)?.data.obj;
+  check(flood.prog[vi] < 0.75 && !ac.log.some(e => e.ev === 'objective' && e.data.kind === 'activate'), `메시지를 연타해도 돌리는 속도 제한은 그대로 (${flood.prog[vi]})`);
   for (let n = 0; n < 40 && !ac.log.some(e => e.ev === 'objective' && e.data.kind === 'activate'); n++) { ac.s.emit('turnValve', { index: vi, delta: 1.0 }); await sleep(70); }
   const turned = ac.log.find(e => e.ev === 'objective' && e.data.kind === 'activate')?.data;
   check(turned?.obj.prog[vi] === 1 && turned.obj.done === 1, `시계 방향으로 계속 돌리면 밸브 잠김 (${turned?.obj.done}/4)`);
