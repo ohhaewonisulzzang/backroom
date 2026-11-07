@@ -284,3 +284,6 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 .key-btn.wait { color: #9fe0a0; border-color: #6edc78; animation: keyblink 1s infinite; }
 @keyframes keyblink { 50% { opacity: .5; } }
 .loop-btn.on { color: #9fe0a0; border-color: #6edc78; }
+.ctrl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; width: 100%; }
+.ctrl-row { display: flex; justify-content: space-between; gap: 8px; font-size: 20px; color: var(--text); border-bottom: 1px solid rgba(74,66,34,.5); padding: 1px 0; }
+.ctrl-row b { color: var(--yellow); font-weight: normal; white-space: nowrap; }

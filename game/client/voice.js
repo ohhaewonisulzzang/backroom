@@ -112,7 +112,7 @@ export const Voice = {
       await this.autoOutput();
       return true;
     } catch (e) {
-      this.error = e?.name === 'NotAllowedError' ? '마이크 권한이 거부됐다. 브라우저 주소창의 권한 설정에서 허용해 줘.' : '마이크를 열 수 없다.';
+      this.error = e?.name === 'NotAllowedError' ? '마이크 권한이 거부됐다.' : '마이크를 열 수 없다.';
       return false;
     }
   },
@@ -170,7 +170,7 @@ export const Voice = {
     const outs = await this.devices('audiooutput');
     const cur = outs.find(d => d.deviceId === (this.settings().outputId || 'default'));
     if (cur && isHandsFree(cur.label) && deviceName(cur.label) === deviceName(lbl)) return '';
-    return '지금 마이크가 블루투스 통화용(수화기/Hands-Free)이다. 출력 장치도 같은 이어폰의 수화기(Hands-Free)로 골라야 소리가 들린다 — 스테레오는 마이크를 쓰는 동안 꺼진다.';
+    return '블루투스 수화기 마이크를 쓰면 출력도 같은 수화기로 골라야 들린다.';
   },
   /** 고른 출력 장치로 "삐" 소리 (출력 테스트) */
   testOutput() {

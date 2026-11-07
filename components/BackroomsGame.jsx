@@ -362,8 +362,8 @@ function SettingsForm({ settings, onSettings, onBack, engine }) {
           </label>
           <label className="check"><input type="checkbox" checked={settings.shake !== false} onChange={e => onSettings({ shake: e.target.checked })} /> 화면 흔들림</label>
           <label className="check"><input type="checkbox" checked={settings.menuScares !== false} onChange={e => onSettings({ menuScares: e.target.checked })} /> 메인 화면 점프스케어</label>
-          <label className="check"><input type="checkbox" checked={settings.deathScares !== false} onChange={e => onSettings({ deathScares: e.target.checked })} /> 사망 점프스케어 (괴물이 덮쳐 오는 화면)</label>
-          <label className="check"><input type="checkbox" checked={settings.gore !== false} onChange={e => onSettings({ gore: e.target.checked })} /> 잔인한 연출 (피 · 살점 · 핏자국)</label>
+          <label className="check"><input type="checkbox" checked={settings.deathScares !== false} onChange={e => onSettings({ deathScares: e.target.checked })} /> 사망 점프스케어</label>
+          <label className="check"><input type="checkbox" checked={settings.gore !== false} onChange={e => onSettings({ gore: e.target.checked })} /> 잔인한 연출</label>
         </>
       )}
       {tab === 'voice' && <VoiceSettings engine={engine} />}
@@ -377,15 +377,14 @@ function ControlsText({ onBack, engine }) {
   const K = a => keyLabel(engine?.()?.input?.binds?.[a]);
   return (
     <div className="menu-text">
-      <p><b>{K('up')}{K('left')}{K('down')}{K('right')}</b> / <b>방향키</b> 이동 · <b>마우스</b> 조준<br /><b>{K('sprint')}</b> 달리기 · <b>{K('crouch')}</b> 웅크리기(조용히 걷기)<br />
-        <b>{K('flashlight')}</b> 손전등 · <b>{K('interact')}</b> 숨기 / 퍼즐 / 밸브 / 말 걸기 / 풍선 · <b>{K('slot1')}~{K('slot4')}</b> 아이템 사용 · <b>{K('drop')}</b> 누른 채 아이템 키 = 버리기<br />
-        <b>{K('emote')}</b> 감정 표현 (1~6 대사, 7 뻐큐 · 8 가리키기 · 9·0 춤) · <b>{K('chat')}</b> 채팅 · <b>{K('mic')}</b> 마이크 켜기/끄기 · <b>{K('skip')}</b> 관전 전환 (길게: 영상 건너뛰기) · <b>ESC</b> 메뉴</p>
-      <p className="dim">키는 설정 → 키 설정에서 바꿀 수 있다. 보이스 챗은 설정 → 보이스 챗에서 켠다.</p>
-      <p className="dim">휴대폰/태블릿: 왼손 스틱 이동(끝까지 밀면 달리기) · 오른손 스틱 손전등 방향(놓으면 걷는 쪽을 비춤)<br />아이템 칸 누르기 = 사용, 길게 누르기 = 버리기</p>
-      <p className="dim">카메라: 플래시로 엔티티 기절 · 살충제: 나방 퇴치<br />조명탄: 빛 + 소리 미끼 · 나침반: 열쇠/출구 방향<br />스테미너 드링크: 지치지 않음 · 아몬드 워터: 정신력 회복</p>
-      <p className="dim">LEVEL ! — 괴물 떼가 밀려온다. 장애물과 웅덩이를 피해 오른쪽 끝 출구까지 달려라.</p>
-      <p className="dim">정신력은 시간이 지나면, 특히 어둠 속에서 줄어든다. 낮아지면 환각이 보이고, 바닥나면... 터진다.</p>
-      <p className="dim">열쇠 5개를 모아 출구를 열고 탈출하라.<br />Level 1 부터는 열쇠 몇 개가 퍼즐 단말기 안에 잠겨 있다 (한붓 그리기, 기억력).<br />기억력을 틀리면 경보가 울려 엔티티가 몰려온다. 엔티티에게 닿으면 즉사. 쫓기기 전에 숨어라.</p>
+      <div className="ctrl-grid">
+        {[[`${K('up')}${K('left')}${K('down')}${K('right')}`, '이동'], ['마우스', '조준'], [K('sprint'), '달리기'], [K('crouch'), '웅크리기'],
+          [K('flashlight'), '손전등'], [K('interact'), '상호작용'], [`${K('slot1')}~${K('slot4')}`, '아이템'], [`${K('drop')}+아이템`, '버리기'],
+          [K('emote'), '감정 표현'], [K('chat'), '채팅'], [K('mic'), '마이크'], [K('skip'), '관전'], ['ESC', '메뉴']].map(([k, a]) => (
+          <div key={a} className="ctrl-row"><b>{k}</b><span>{a}</span></div>
+        ))}
+      </div>
+      <p className="dim">미션을 끝내면 출구가 열린다.</p>
       <button className="menu-btn" onClick={onBack}>← 뒤로</button>
     </div>
   );

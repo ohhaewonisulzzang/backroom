@@ -6,10 +6,10 @@
  */
 export const ACTIONS = [
   ['up', '위로 이동', 'KeyW'], ['down', '아래로 이동', 'KeyS'], ['left', '왼쪽으로 이동', 'KeyA'], ['right', '오른쪽으로 이동', 'KeyD'],
-  ['sprint', '달리기', 'ShiftLeft'], ['crouch', '웅크리기', 'KeyC'], ['flashlight', '손전등', 'KeyF'], ['interact', '상호작용 (숨기·퍼즐·밸브·말 걸기)', 'KeyE'],
+  ['sprint', '달리기', 'ShiftLeft'], ['crouch', '웅크리기', 'KeyC'], ['flashlight', '손전등', 'KeyF'], ['interact', '상호작용', 'KeyE'],
   ['slot1', '아이템 1', 'Digit1'], ['slot2', '아이템 2', 'Digit2'], ['slot3', '아이템 3', 'Digit3'], ['slot4', '아이템 4', 'Digit4'],
-  ['drop', '버리기 (누른 채 아이템 키)', 'KeyG'], ['emote', '감정 표현', 'Comma'], ['chat', '채팅', 'Enter'], ['mic', '마이크 켜기/끄기', 'KeyM'],
-  ['skip', '관전 전환 / 길게: 영상 건너뛰기', 'Space'],
+  ['drop', '버리기 (+아이템 키)', 'KeyG'], ['emote', '감정 표현', 'Comma'], ['chat', '채팅', 'Enter'], ['mic', '마이크', 'KeyM'],
+  ['skip', '관전 / 건너뛰기(길게)', 'Space'],
 ];
 export const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(([a, , k]) => [a, k]));
 /** 바꿀 수 없는 보조 키 (방향키 이동, 오른쪽 Shift) */

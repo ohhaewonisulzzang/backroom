@@ -48,7 +48,7 @@ export function VoiceSettings({ engine }) {
   return (
     <div className="voice-settings">
       <label className="check">
-        <input type="checkbox" checked={s.enabled} disabled={busy} onChange={e => set({ enabled: e.target.checked })} /> 보이스 챗 사용 (같은 방 사람과 대화)
+        <input type="checkbox" checked={s.enabled} disabled={busy} onChange={e => set({ enabled: e.target.checked })} /> 보이스 챗
       </label>
       {V.error && <div className="error">{V.error}</div>}
       {s.enabled && (
@@ -59,51 +59,44 @@ export function VoiceSettings({ engine }) {
               {devices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || `마이크 ${d.deviceId.slice(0, 6)}`}</option>)}
             </select>
           </label>
-          <label>출력 장치 (게임 소리 + 목소리)
+          <label>출력 장치
             <select value={s.manualOutput ? s.outputId : '__auto'} disabled={!V.sinkSupported} onChange={e => setOut(e.target.value)}>
-              <option value="__auto">자동 — 마이크와 같은 기기{!s.manualOutput && s.outputId ? ` (${outputs.find(o => o.deviceId === s.outputId)?.label || '선택됨'})` : ' (시스템 기본)'}</option>
+              <option value="__auto">자동{!s.manualOutput && s.outputId ? ` (${outputs.find(o => o.deviceId === s.outputId)?.label || ''})` : ''}</option>
               <option value="">시스템 기본</option>
               {outputs.filter(d => d.deviceId !== 'default' && d.deviceId !== 'communications').map(d => (
-                <option key={d.deviceId} value={d.deviceId}>{d.deviceId === rec ? '★ 추천 — ' : ''}{d.label || `스피커 ${d.deviceId.slice(0, 6)}`}</option>
+                <option key={d.deviceId} value={d.deviceId}>{d.deviceId === rec ? '★ ' : ''}{d.label || `스피커 ${d.deviceId.slice(0, 6)}`}</option>
               ))}
             </select>
           </label>
           <div className="pz-row">
-            <span className="dim">마이크: {V.micLabel || '없음'}</span>
-            <button type="button" className="pz-btn" onClick={() => V.testOutput()}>출력 테스트 (삐)</button>
+            <button type="button" className="pz-btn" onClick={() => V.testOutput()}>출력 테스트</button>
           </div>
           {warn && <div className="error">{warn}</div>}
-          {!V.sinkSupported && <p className="dim">이 브라우저는 출력 장치 선택을 지원하지 않는다 (크롬/엣지 권장).</p>}
-          <p className="dim">블루투스 이어폰(갤럭시 버즈 등)은 <b>스테레오</b>(음악용)와 <b>수화기/헤드셋 (Hands-Free)</b>(통화용) 두 장치로 잡힌다.
-            마이크를 <b>수화기</b>로 쓰면 이어폰 전체가 통화 모드가 되어 스테레오 쪽은 소리가 안 난다 → 출력도 <b>수화기</b>로 골라야 한다 (음질은 통화 수준).
-            좋은 음질로 들으려면 마이크는 노트북 내장 마이크를, 출력은 스테레오를 쓰자. "출력 테스트"로 바로 확인할 수 있다.</p>
+          {!V.sinkSupported && <p className="dim">출력 장치 선택은 크롬/엣지만 된다.</p>}
           <label>마이크 볼륨 {Math.round(s.inputGain * 100)}%
             <input type="range" min="0" max="3" step="0.05" value={s.inputGain} onChange={e => set({ inputGain: Number(e.target.value) })} />
           </label>
-          <label>마이크 감도 — 이 선을 넘는 소리만 보낸다 (낮을수록 작은 소리도 잡힘, 0 = 항상 보냄)
+          <label>마이크 감도 (0 = 항상 보냄)
             <div className="mic-meter">
               <div className="mic-level" ref={meter} />
               <div className="mic-mark" ref={mark} style={{ left: `${Math.round(s.threshold * 100)}%` }} />
             </div>
             <input type="range" min="0" max="0.5" step="0.01" value={s.threshold} onChange={e => set({ threshold: Number(e.target.value) })} />
           </label>
-          <label>들리는 목소리 볼륨 {Math.round(s.outputVolume * 100)}%
+          <label>목소리 볼륨 {Math.round(s.outputVolume * 100)}%
             <input type="range" min="0" max="3" step="0.05" value={s.outputVolume} onChange={e => set({ outputVolume: Number(e.target.value) })} />
           </label>
           <div className="pz-row">
             <button type="button" className={`pz-btn loop-btn${V.loopback ? ' on' : ''}`} onClick={() => { V.setLoopback(!V.loopback); refresh(); }}>
-              {V.loopback ? '■ 루프백 테스트 끄기' : '▶ 루프백 테스트 (내 목소리 듣기)'}
+              {V.loopback ? '■ 루프백 끄기' : '▶ 루프백 테스트'}
             </button>
           </div>
           <label className="check">
-            <input type="checkbox" checked={s.micOn} onChange={() => { V.toggleMic(); refresh(); }} /> 마이크 켜짐 — 게임 중 <b>{micKey}</b> 키로 켜고 끔
+            <input type="checkbox" checked={s.micOn} onChange={() => { V.toggleMic(); refresh(); }} /> 마이크 켜짐 (<b>{micKey}</b>)
           </label>
-          <label className="check"><input type="checkbox" checked={!!s.echo} onChange={e => set({ echo: e.target.checked })} /> 에코 제거 (스피커 소리가 마이크로 다시 들어가는 것 막기)</label>
-          <label className="check"><input type="checkbox" checked={!!s.noise} onChange={e => set({ noise: e.target.checked })} /> 노이즈 억제 (잡음 줄이기 — 작은 목소리가 끊길 수 있음)</label>
-          <label className="check"><input type="checkbox" checked={!!s.agc} onChange={e => set({ agc: e.target.checked })} /> 자동 음량 보정 (끄면 내 목소리 크기 그대로)</label>
-          <p className="dim">가까이(2~3칸)는 또렷하게, 멀어질수록 작고 먹먹하게 들린다 (약 25칸 넘으면 안 들림). 벽 너머는 더 작게.<br />
-            죽으면 산 사람에게는 목소리가 들리지 않는다. 목소리도 소리라서 귀 밝은 엔티티가 듣는다.<br />
-            루프백 테스트는 헤드폰을 끼고 하자 (스피커면 울린다).</p>
+          <label className="check"><input type="checkbox" checked={!!s.echo} onChange={e => set({ echo: e.target.checked })} /> 에코 제거</label>
+          <label className="check"><input type="checkbox" checked={!!s.noise} onChange={e => set({ noise: e.target.checked })} /> 노이즈 억제</label>
+          <label className="check"><input type="checkbox" checked={!!s.agc} onChange={e => set({ agc: e.target.checked })} /> 자동 음량 보정</label>
         </>
       )}
     </div>
@@ -145,7 +138,7 @@ export function KeySettings({ engine }) {
           </div>
         ))}
       </div>
-      <p className="dim">방향키 이동, 오른쪽 SHIFT 달리기는 항상 쓸 수 있다. ESC(메뉴)와 `(테스트)는 바꿀 수 없다.<br />다른 동작이 쓰던 키를 고르면 두 키가 서로 바뀐다.</p>
+      <p className="dim">이미 쓰는 키를 고르면 서로 바뀐다.</p>
       <button type="button" className="menu-btn" onClick={() => { setBinds({ ...DEFAULT_BINDS }); I.setBinds({ ...DEFAULT_BINDS }); }}>기본값으로</button>
     </div>
   );
