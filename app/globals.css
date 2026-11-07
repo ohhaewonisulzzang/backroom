@@ -241,3 +241,46 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 /* hud.js drawInventory 와 같은 자리 (아래 가운데, 46px 칸 4개, 간격 6px, 바닥에서 18px) */
 .touch-slots { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: grid; grid-template-columns: repeat(4, 46px); gap: 6px; pointer-events: none; }
 .touch-slots button { pointer-events: auto; touch-action: none; width: 46px; height: 46px; padding: 0; background: transparent; border: none; -webkit-tap-highlight-color: transparent; }
+
+/* ---------- 밸브 / 크랭크 돌리기 ---------- */
+.valve-svg { max-width: 280px; cursor: grab; }
+.valve-svg:active { cursor: grabbing; }
+.arcade-svg { border: 2px solid #5a2a8a; cursor: crosshair; }
+
+/* ---------- 채팅 ---------- */
+.chat-box { position: fixed; left: 16px; bottom: 74px; z-index: 14; width: min(420px, calc(100vw - 32px)); pointer-events: none; font-size: 19px; }
+.chat-box.open { pointer-events: auto; }
+.chat-list { max-height: 34vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.chat-box.open .chat-list { background: rgba(0, 0, 0, 0.55); padding: 6px 8px; border: 1px solid var(--line); }
+.chat-line { color: #e8dcae; text-shadow: 0 1px 2px #000, 0 0 4px #000; word-break: break-all; transition: opacity .4s; }
+.chat-input { width: 100%; margin-top: 4px; font-family: inherit; font-size: 19px; color: var(--text); background: rgba(8, 8, 4, 0.9); border: 1px solid var(--yellow-dim); padding: 5px 8px; outline: none; }
+
+/* ---------- 설정 탭 / 보이스 / 키 설정 ---------- */
+/* 설정/조작법/도감: 넓은 어두운 판 + 작은 로고. 스크롤은 바깥 한 겹만, 가로 스크롤 없음 */
+.menu-col { overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #4a4222 transparent; }
+.menu-col::-webkit-scrollbar { width: 6px; height: 0; }
+.menu-col::-webkit-scrollbar-thumb { background: #4a4222; }
+.menu-col::-webkit-scrollbar-track { background: transparent; }
+.menu-col:has(.settings-form), .menu-col:has(.menu-text) {
+  width: min(560px, calc(100vw - 32px)); background: rgba(8, 6, 2, 0.86); border: 1px solid var(--line); padding: 16px 20px;
+}
+.menu-col:has(.settings-form) .logo h1, .menu-col:has(.menu-text) .logo h1 { font-size: clamp(36px, 5vw, 52px); }
+.menu-col:has(.settings-form) .logo h2, .menu-col:has(.menu-text) .logo h2 { font-size: 18px; }
+.settings-form > *, .menu-text > p { width: 100%; box-sizing: border-box; }
+.settings-form > .menu-btn { width: auto; }
+.tabs { display: flex; gap: 6px; margin-bottom: 6px; }
+.tab { flex: 1; white-space: nowrap; font-family: inherit; font-size: 20px; cursor: pointer; color: var(--muted); background: rgba(216,196,106,.05); border: 1px solid var(--line); padding: 4px 8px; }
+.tab.on { color: var(--yellow); border-color: var(--yellow-dim); background: rgba(216,196,106,.16); }
+.voice-settings select { width: 100%; font-family: inherit; font-size: 18px; color: var(--text); background: #0c0a06; border: 1px solid var(--line); padding: 4px; margin-top: 4px; }
+.mic-meter { position: relative; height: 12px; margin: 6px 0 4px; background: #151208; border: 1px solid var(--line); }
+.mic-level { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: #8a7a3a; }
+.mic-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #f0dc8c; }
+.menu-btn.on { border-left-color: #6edc78; color: #9fe0a0; }
+.key-list { display: flex; flex-direction: column; gap: 4px; }
+.key-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 19px; color: var(--text); }
+.key-row > span { flex: 1; min-width: 0; }
+.key-btn { flex: none; min-width: 130px; font-family: inherit; font-size: 19px; cursor: pointer; color: #f0dc8c; background: #15120a; border: 1px solid var(--yellow-dim); padding: 2px 10px; }
+.key-btn:hover { background: #2a2414; }
+.key-btn.wait { color: #9fe0a0; border-color: #6edc78; animation: keyblink 1s infinite; }
+@keyframes keyblink { 50% { opacity: .5; } }
+.loop-btn.on { color: #9fe0a0; border-color: #6edc78; }

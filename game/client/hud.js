@@ -1,4 +1,4 @@
-import { CONFIG, TS, T, SUIT_HEX, levelLabel } from '../../shared/config.js';
+import { CONFIG, TS, T, SUIT_HEX, MISSION, MISSION_TEXT, levelLabel, missionKind } from '../../shared/config.js';
 import { itemIcon } from './sprites.js';
 
 const fmtTime = t => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
@@ -32,6 +32,20 @@ export class Hud {
     }
     g.fillStyle = '#ffe58a';
     for (const k of game.keys) if (!k.collected && game.explored[k.ty * m.w + k.tx]) g.fillRect(k.tx * s, k.ty * s, s, s);
+    const o = game.obj;
+    if (o?.type === 'deliver') {
+      g.fillStyle = '#ffb446';
+      for (const pt of o.parts) if (pt.s === 0) { const tx = Math.floor(pt.x / TS), ty = Math.floor(pt.y / TS); if (game.explored[ty * m.w + tx]) g.fillRect(tx * s, ty * s, s, s); }
+      const dp = game.level.depot;
+      if (dp) { g.fillStyle = game.exitUnlocked ? '#6edc78' : '#ffd25a'; g.fillRect(dp.tx * s - 1, dp.ty * s - 1, s + 2, s + 2); }
+    }
+    if (o?.type === 'activate') {
+      game.level.stations.forEach((st, i) => {
+        if (!game.explored[st.ty * m.w + st.tx]) return;
+        g.fillStyle = (o.prog[i] || 0) >= 1 ? '#6edc78' : '#ff8a5a';
+        g.fillRect(st.tx * s - 1, st.ty * s - 1, s + 2, s + 2);
+      });
+    }
     g.fillStyle = '#9fd4e8';
     for (const it of game.items) {
       const tx = Math.floor(it.x / TS), ty = Math.floor(it.y / TS);
@@ -51,8 +65,16 @@ export class Hud {
 
     // 질주 레벨: 열쇠 대신 진행 막대 (나 / 동료 / 괴물 떼 위치)
     if (game.horde) this.drawRunBar(ctx, game, W);
-    // 열쇠 (팀 공유)
-    for (let i = 0; i < (game.horde ? 0 : CONFIG.KEY_COUNT); i++) {
+    // 미션 (팀 공유): 열쇠 아이콘 / 부품·장치 개수 / 남은 시간
+    if (!game.horde) this.drawMission(ctx, game);
+    // Level 94: 밤 경고
+    if (game.night === 'warn' || game.night === 'night') {
+      ctx.textAlign = 'center'; ctx.font = '30px VT323, monospace';
+      ctx.fillStyle = game.night === 'night' ? `rgba(255,80,60,${0.7 + Math.sin(game.time * 6) * 0.3})` : 'rgba(255,220,120,0.95)';
+      ctx.fillText(game.night === 'night' ? (p.hidden ? '밤 — 숨어 있어라...' : '밤이다! 숨어라!') : '종이 울린다 — 밤이 온다. 옷장에 숨어라', W / 2, 64);
+      ctx.textAlign = 'left';
+    }
+    for (let i = 0; i < (game.horde || game.obj ? 0 : game.keys.length); i++) {
       const x = 26 + i * 30, y = 62, got = i < game.keysCollected;
       ctx.strokeStyle = got ? '#e6c24e' : '#4a4222'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.stroke();
@@ -106,6 +128,7 @@ export class Hud {
     }
 
     this.drawInventory(ctx, game, W, H);
+    this.drawMic(ctx, game, H);
     if (game.compassT > 0 && p.alive) this.drawCompass(ctx, game, W, H);
     if (game.emoteOpen) this.drawEmoteWheel(ctx, game, W, H);
 
@@ -131,6 +154,39 @@ export class Hud {
       ctx.fillStyle = pl === p ? '#fff3c4' : (SUIT_HEX[pl.color] || pl.color);
       ctx.fillRect(mx + (pl.x / TS) * s - 1.5, my + (pl.y / TS) * s - 1.5, 3, 3);
     }
+  }
+
+  /** 열쇠가 아닌 미션: "퓨즈 2/4  (들고 있음 1)" / "밸브 1/4" / "체크아웃까지 01:42" */
+  drawMission(ctx, game) {
+    const o = game.obj;
+    if (!o) return;
+    const M = game.level.mission, TXT = MISSION_TEXT[missionKind(M)] || {};
+    let text;
+    if (o.type === 'survive') text = game.exitUnlocked ? `${TXT.unit} — 출구가 열렸다` : `${TXT.unit}까지 ${fmtTime(Math.ceil(o.left))}${game.local?.hidden ? '  (숨어만 있으면 시간이 멈춘다)' : ''}`;
+    else {
+      text = `${TXT.unit} ${o.done}/${o.total}`;
+      if (o.type === 'deliver') {
+        const held = o.parts.filter(pt => pt.s === 1 && pt.c === game.myId).length;
+        if (held) text += `  (들고 있음 ${held}/${MISSION.CARRY})`;
+      }
+      if (game.exitUnlocked) text += '  — 출구가 열렸다';
+    }
+    ctx.font = '20px VT323, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillStyle = game.exitUnlocked ? '#6edc78' : o.type === 'survive' && o.left < 15 && Math.floor(game.time * 4) % 2 ? '#ff6a4a' : '#e6c24e';
+    ctx.fillText(text, 20, 50);
+  }
+
+  /** 보이스 챗 마이크 상태 (왼쪽 아래): 꺼짐 = 빨간 사선, 켜짐 = 회색, 말하는 중 = 초록 */
+  drawMic(ctx, game, H) {
+    const V = game.voice;
+    if (!V?.enabled) return;
+    const x = 26, y = H - 40, on = V.micOn, talk = V.speaking;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x - 12, y - 16, 24, 32);
+    ctx.fillStyle = !on ? '#7a3a30' : talk ? '#6edc78' : '#b9a552';
+    ctx.fillRect(x - 4, y - 11, 8, 13); ctx.fillRect(x - 1, y + 5, 2, 5); ctx.fillRect(x - 5, y + 10, 10, 2);
+    ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 7, 0.1, Math.PI - 0.1); ctx.stroke();
+    if (!on) { ctx.strokeStyle = '#e0503a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x - 9, y + 11); ctx.lineTo(x + 9, y - 13); ctx.stroke(); }
+    if (on && V.level > 0.01) { ctx.fillStyle = 'rgba(110,220,120,0.8)'; ctx.fillRect(x + 14, y + 12 - 24 * V.level, 3, 24 * V.level); }
   }
 
   /** 질주 레벨 진행 막대: 위 가운데. 붉은 영역 = 괴물 떼, 점 = 플레이어, 오른쪽 끝 = 출구 */
@@ -173,7 +229,14 @@ export class Hud {
   drawCompass(ctx, game, W, H) {
     const p = game.local, map = game.map;
     let tx, ty;
-    if (game.exitUnlocked) { const e = game.level.exitIdx; tx = (e % map.w) * TS + TS / 2; ty = ((e / map.w) | 0) * TS + TS / 2; }
+    const o = game.obj;
+    const nearest = list => { let best = Infinity; for (const k of list) { const d = Math.hypot(k.x - p.x, k.y - p.y); if (d < best) { best = d; tx = k.x; ty = k.y; } } };
+    if (game.exitUnlocked || o?.type === 'survive') { const e = game.level.exitIdx; tx = (e % map.w) * TS + TS / 2; ty = ((e / map.w) | 0) * TS + TS / 2; }
+    else if (o?.type === 'deliver') {
+      const held = o.parts.filter(pt => pt.s === 1 && pt.c === game.myId).length, ground = o.parts.filter(pt => pt.s === 0);
+      if (held >= MISSION.CARRY || (held && !ground.length)) nearest([game.level.depot]); else nearest(ground);
+    }
+    else if (o?.type === 'activate') nearest(game.level.stations.filter((st, i) => (o.prog[i] || 0) < 1));
     else {
       let best = Infinity;
       for (const k of game.keys) { if (k.collected) continue; const d = Math.hypot(k.x - p.x, k.y - p.y); if (d < best) { best = d; tx = k.x; ty = k.y; } }
@@ -190,13 +253,23 @@ export class Hud {
 
   /** 감정 표현 고르기 (, 키 → 숫자 1~6) */
   drawEmoteWheel(ctx, game, W, H) {
-    const lines = CONFIG.EMOTE.LINES, w = 220, h = lines.length * 26 + 14, x = Math.round(W / 2 - w / 2), y = H - 90 - h;
+    const lines = CONFIG.EMOTE.LINES, acts = [['7', '뻐큐'], ['8', '가리키기'], ['9', '춤 1 (들썩)'], ['0', '춤 2 (빙글)']];
+    const rowH = 26, colW = 210, h = Math.max(lines.length, acts.length) * rowH + 40, w = colW * 2 + 24;
+    const x = Math.round(W / 2 - w / 2), y = H - 90 - h;
     ctx.fillStyle = 'rgba(8,6,2,0.88)'; ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = '#8a7a3a'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-    ctx.font = '20px VT323, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.font = '16px VT323, monospace'; ctx.fillStyle = '#8a7a3a';
+    ctx.fillText('대사', x + 12, y + 8); ctx.fillText('동작', x + colW + 24, y + 8);
+    ctx.font = '20px VT323, monospace';
     lines.forEach((l, i) => {
-      ctx.fillStyle = '#8a7a3a'; ctx.fillText(String(i + 1), x + 12, y + 8 + i * 26);
-      ctx.fillStyle = '#e8d890'; ctx.fillText(l, x + 36, y + 8 + i * 26);
+      ctx.fillStyle = '#8a7a3a'; ctx.fillText(String(i + 1), x + 12, y + 30 + i * rowH);
+      ctx.fillStyle = '#e8d890'; ctx.fillText(l, x + 36, y + 30 + i * rowH);
+    });
+    acts.forEach(([k, l], i) => {
+      ctx.fillStyle = '#8a7a3a'; ctx.fillText(k, x + colW + 24, y + 30 + i * rowH);
+      ctx.fillStyle = '#9fe0a0'; ctx.fillText(l, x + colW + 48, y + 30 + i * rowH);
     });
   }
+
 }

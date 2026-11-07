@@ -1,15 +1,18 @@
-import { CONFIG, TS, T, levelInfo, levelLabel, ITEM_TYPES, SUIT_HEX } from '../../shared/config.js';
+import { CONFIG, TS, T, MISSION, levelInfo, levelLabel, ITEM_TYPES, SUIT_HEX } from '../../shared/config.js';
 import { generateLevel } from '../../shared/map.js';
 import { clamp } from '../../shared/utils.js';
 import { ClientPlayer, ClientMonster } from './entities.js';
 import { updateLocalPlayer } from './controller.js';
-import { Input } from './input.js';
+import { Input, keyLabel } from './input.js';
+import { Voice } from './voice.js';
+import { hasLOS } from '../../shared/physics.js';
 import { Sound } from './sound.js';
 import { NetClient } from './net.js';
 import { Renderer } from './renderer.js';
 import { makeStoryCast, storyScript, playStoryEvents } from './story.js';
 import { DEATH_DURATION, addGore } from './deaths.js';
 import { discoverLevel } from './bestiary.js';
+import { GESTURES } from './sprites.js';
 
 /** startGame() 에서 채워지는 런타임 의존성. UI 는 React 쪽 어댑터. */
 let renderer = null, net = null, UI = null;
@@ -29,11 +32,17 @@ const Game = {
   myId: null, roomName: '', round: 0, roundPhase: 'playing',
   level: null, map: null, explored: null,
   keys: [], keysCollected: 0, exitUnlocked: false,
+  obj: null, machineT: 0,     // 열쇠가 아닌 미션 상태 (서버 objPayload) / 장치 작동음 타이머
+  night: null, toxicT: 0, loudT: 0,   // Level 94 밤 단계 / 초록 물에 서 있던 시간(화면 연출) / 큰 엔티티 발소리 타이머
   local: null, remotes: new Map(), monster: null, monsters: [], danger: 0, killerType: null,
   lockerShake: [], nearLocker: -1, levelIndex: 0,
   gore: [], hallu: [], halluT: 0, deathSeed: 1,
   horde: null,                // Level ! 괴물 떼 { x, tx(서버 값), speed }   // 핏자국·살점 / 정신력 환각 (가짜 스마일러)
   nearPuzzle: -1, puzzleOpen: -1,   // 퍼즐 단말기: 가까운 것 / 열려 있는 것 (열쇠 번호)
+  nearStation: -1, valveOpen: -1,   // 밸브/크랭크: 가까운 것 / 열려 있는 것 (장치 번호)
+  nearNpc: null, nearBalloon: -1, popped: new Set(),
+  voice: Voice, get skipKey() { return keyLabel(Input.binds.skip); },
+  chatOpen: false, skipHold: 0,   // 채팅 입력 중 (게임 입력 막음) / 영상 건너뛰기 키를 누르고 있는 시간   // 말 걸 수 있는 파티 푸퍼 / 터뜨릴 수 있는 풍선 / 터진 풍선
   items: [], testMode: false, test: { god: false, fullbright: false },
   cam: { x: 0, y: 0 }, shake: 0,
   flicker: { intensity: 1, timer: 1, dropT: 0 },
@@ -91,6 +100,19 @@ const Game = {
     this.puzzleOpen = -1;
     UI.closePuzzle?.(result);
   },
+  // ------------------------------------------------------------ 밸브 / 크랭크
+  openValve(i) {
+    if (this.obj?.type !== 'activate' || (this.obj.prog[i] || 0) >= 1) return;
+    this.valveOpen = i;
+    Input.keys.clear();
+    Sound.click();
+    UI.showValve?.({ index: i, kind: this.level.mission.kind, turns: this.obj.turns || 3 });
+  },
+  closeValve() {
+    if (this.valveOpen < 0) return;
+    this.valveOpen = -1;
+    UI.closeValve?.();
+  },
 
   loadRound(d) {
     this.round = d.round;
@@ -104,6 +126,9 @@ const Game = {
     this.keys = this.level.keys.map((k, i) => ({ ...k, collected: !!d.keys[i] }));
     this.keysCollected = this.keys.filter(k => k.collected).length;
     this.exitUnlocked = d.exitUnlocked;
+    this.obj = d.obj || null;
+    this.night = d.night || null; this.toxicT = 0;
+    this.popped = new Set(d.popped || []);
 
     this.remotes = new Map();
     let me = null;
@@ -124,6 +149,7 @@ const Game = {
     this.horde = d.horde ? { x: d.horde.x, tx: d.horde.x, speed: d.horde.speed, roarT: 2 } : null;
     if (this.levelIndex === 0) this.totalTime = 0;
     this.closePuzzle();
+    this.closeValve();
     // 처음 Level 0: 오프닝(친구들과 촬영하다 노클립) → 레벨 인트로
     if (d.phase === 'playing' && d.story && this.levelIndex === 0) {
       const cast = makeStoryCast(d.players, this.myId);
@@ -203,6 +229,11 @@ const Game = {
     this.shake = Math.max(0, this.shake - dt * 14);
     this.lockMsgT -= dt; this.alertMsgT -= dt;
     if (!this.settings.shake) this.shake = 0;
+    // 영상(오프닝/엔딩) 건너뛰기: 건너뛰기 키를 1초 동안 꾹 누른다
+    const skippable = this.cine && ((this.cine.type === 'story' && this.cine.t > 1) || (this.cine.type === 'ending' && this.cine.t > 3));
+    if (skippable && Input.held('skip') && !this.chatOpen) { this.skipHold += dt; if (this.skipHold >= 1) { this.skipHold = 0; this.skipCine(); } }
+    else this.skipHold = 0;
+    this.updateVoice(dt);
     if (this.cine) {
       const prevT = this.cine.t;
       this.cine.t += dt;
@@ -211,7 +242,12 @@ const Game = {
     }
     if (this.phase === 'ending') return;
     if (this.phase !== 'game') { this.updateMenu(dt); return; }
-    for (const pl of this.allPlayers()) if (pl.bubble && (pl.bubble.t -= dt) <= 0) pl.bubble = null;
+    for (const pl of this.allPlayers()) {
+      if (pl.bubble && (pl.bubble.t -= dt) <= 0) pl.bubble = null;
+      // 이모트 동작: 시간이 다 되거나, 움직이거나 숨거나 죽으면 풀린다
+      const G = pl.gesture;
+      if (G && ((G.t += dt) > GESTURES[G.g].dur || (pl.moving && G.t > 0.15) || pl.hidden || !pl.alive)) pl.gesture = null;
+    }
     for (const f of this.fx) f.t += dt;
     this.fx = this.fx.filter(f => f.t < f.dur);
     this.flares = this.flares.filter(f => f.until > this.time);
@@ -246,8 +282,41 @@ const Game = {
       if (this.nearPuzzle >= 0) this.nearLocker = -1;
     }
     if (this.puzzleOpen >= 0 && (!p.alive || p.hidden || this.roundPhase !== 'playing')) this.closePuzzle();
+    // 가까운 밸브/크랭크 (사물함보다 우선)
+    this.nearStation = -1;
+    const O = this.obj;
+    if (O?.type === 'activate' && p.alive && !p.hidden && this.roundPhase === 'playing') {
+      let best = CONFIG.PUZZLE.USE_DIST + 8;
+      this.level.stations.forEach((st, i) => {
+        if ((O.prog[i] || 0) >= 1) return;
+        const d = Math.hypot(st.x - p.x, st.y - p.y);
+        if (d < best) { best = d; this.nearStation = i; }
+      });
+      if (this.nearStation >= 0) this.nearLocker = -1;
+    }
+    // 파티 푸퍼 (말 걸기) / 풍선 (터뜨리기) — 사물함보다 우선
+    this.nearNpc = null; this.nearBalloon = -1;
+    if (p.alive && !p.hidden && this.roundPhase === 'playing' && this.nearPuzzle < 0 && this.nearStation < 0) {
+      let best = CONFIG.ENTITY.partyPooper.talk;
+      for (const m of this.monsters) {
+        if (m.type !== 'partyPooper' || m.state !== 'idle') continue;
+        const d = Math.hypot(m.x - p.x, m.y - p.y);
+        if (d < best) { best = d; this.nearNpc = m; }
+      }
+      if (!this.nearNpc && this.level.info.decor === 'balloons') {
+        let bb = CONFIG.BALLOON.USE_DIST;
+        this.level.decor.forEach((d, i) => {
+          if (d.kind !== 'balloon' || this.popped.has(i)) return;
+          const dd = Math.hypot(d.x - p.x, d.y - p.y);
+          if (dd < bb) { bb = dd; this.nearBalloon = i; }
+        });
+      }
+      if (this.nearNpc || this.nearBalloon >= 0) this.nearLocker = -1;
+    }
+    if (this.valveOpen >= 0 && (!p.alive || p.hidden || this.roundPhase !== 'playing' || (O?.prog?.[this.valveOpen] || 0) >= 1 ||
+      Math.hypot(this.level.stations[this.valveOpen].x - p.x, this.level.stations[this.valveOpen].y - p.y) > MISSION.STATION_DIST * 1.5)) this.closeValve();
     const intro = (this.cine?.type === 'intro' && this.cine.t < 3.4) || this.cine?.type === 'story';
-    if (this.paused || intro || this.puzzleOpen >= 0) {
+    if (this.paused || intro || this.puzzleOpen >= 0 || this.valveOpen >= 0 || this.chatOpen) {
       // ESC 메뉴 / 인트로 연출 / 퍼즐 푸는 중: 이동 입력 무시. (멀티에서는 서버가 계속 돌아가므로 위치 전송만 유지해 끊기지 않게)
       if (p.alive && !this.solo && this.roundPhase === 'playing') { p.sprinting = false; p.crouching = false; net.sendState(p, dt); }
     } else if (p.alive && p.hidden && this.roundPhase === 'playing') {
@@ -260,6 +329,27 @@ const Game = {
     for (const m of this.monsters) m.interpolate(dt);
 
     this.updateHallucinations(dt);
+    if (this.machineT > 0) this.machineT -= dt;
+    // 하이드로리티스: 초록 물에 서 있으면 시야가 어두워진다 (판정은 서버)
+    if (this.level.info.toxic) {
+      const Z = CONFIG.HAZARD;
+      if (p.alive && this.level.isToxic(Math.floor(p.x / TS), Math.floor(p.y / TS))) this.toxicT += dt;
+      else this.toxicT = Math.max(0, this.toxicT - dt * Z.TOXIC_RECOVER);
+      if (this.toxicT > 0.5 && (this.heartT2 = (this.heartT2 || 0) - dt) <= 0) { Sound.heartbeat(0.2 + this.toxicT / Z.TOXIC_KILL * 0.5); this.heartT2 = 0.9 - this.toxicT / Z.TOXIC_KILL * 0.5; }
+    }
+    // 큰 엔티티 소리: 동네 감시자·클럼프 쿵쿵, 아라네아 다다닥, 페이슬링 전기톱
+    if ((this.loudT -= dt) <= 0) {
+      this.loudT = 0.4;
+      const v0 = this.viewTarget();
+      for (const m of this.monsters) {
+        if (!m.moving && m.type !== 'faceling') continue;
+        const near = clamp(1 - Math.hypot(m.x - v0.x, m.y - v0.y) / (TS * 14), 0, 1);
+        if (near <= 0) continue;
+        if (m.type === 'watch' || m.type === 'clump') { if (Math.random() < 0.6) Sound.stomp(near * (m.type === 'watch' ? 1 : 0.6)); }
+        else if (m.type === 'aranea' && m.state === 'chase') Sound.skitter(near);
+        else if (m.type === 'faceling') Sound.chainsaw(near * (m.state === 'chase' ? 1 : 0.5));
+      }
+    }
     // 괴물 떼: 서버 값 사이를 예측해서 부드럽게 (속도대로 밀고, 서버 값으로 살짝 당김)
     const H = this.horde;
     if (H && this.roundPhase === 'playing' && !(this.paused && this.solo) && this.cine?.type !== 'intro') {
@@ -323,8 +413,8 @@ const Game = {
     if (this.cine?.type === 'intro' || this.cine?.type === 'story') {
       // 인트로: 멀리서 플레이어 쪽으로 천천히 내려오는 카메라
       const u = this.cine.type === 'story' ? 0 : Math.min(1, this.cine.t / 3.2), e = u * u * (3 - 2 * u);
-      this.cam.x = view.x - vw / 2 + this.cine.data.fromX * (1 - e);
-      this.cam.y = view.y - vh / 2 + this.cine.data.fromY * (1 - e);
+      this.cam.x = view.x - vw / 2 + (this.cine.data.fromX || 0) * (1 - e);
+      this.cam.y = view.y - vh / 2 + (this.cine.data.fromY || 0) * (1 - e);
     }
   },
 
@@ -381,6 +471,41 @@ const Game = {
     }
   },
 
+  /**
+   * 보이스 챗 거리 볼륨 (최대 10칸):
+   *  1칸 안은 100%, 그 뒤로 한 칸마다 일정하게 줄어(약 9%씩) 10칸에서 8% 로 희미하게, 10칸을 넘으면 안 들린다.
+   *  멀어질수록 조금씩 먹먹해진다. 벽 너머는 조금 작고 먹먹하게, 사물함 속은 살짝 먹먹하게. 좌우 방향도 들린다.
+   *  죽은 사람(관전)은 모두의 목소리를 듣지만, 산 사람에게 죽은 사람 목소리는 들리지 않는다. 대기방에선 모두 같은 크기.
+   */
+  updateVoice(dt) {
+    const FULL = 1, MAX = 10, AT_MAX = 0.08;    // 칸 단위
+    Voice.update(dt, id => {
+      if (this.phase !== 'game' || !this.local) return { gain: 1, pan: 0 };
+      const sp = this.playerById(id), me = this.local;
+      if (!sp) return { gain: 0.8, pan: 0 };
+      if (!me.alive) return { gain: 0.8, pan: 0 };
+      if (!sp.alive) return { gain: 0, pan: 0 };
+      const dx = sp.x - me.x, tiles = Math.hypot(dx, sp.y - me.y) / TS;
+      let g;
+      if (tiles <= FULL) g = 1;
+      else if (tiles <= MAX) g = 1 - (tiles - FULL) / (MAX - FULL) * (1 - AT_MAX);   // 한 칸마다 같은 만큼씩
+      else g = Math.max(0, AT_MAX * (1 - (tiles - MAX) / 0.5));                       // 10칸 넘으면 0.5칸 안에 사라짐
+      let cutoff = 16000 * Math.pow(0.85, Math.max(0, tiles - FULL));                 // 10칸에서 약 3.7kHz
+      if (g > 0 && this.map && !hasLOS(this.map, me.x, me.y, sp.x, sp.y)) { g *= 0.6; cutoff *= 0.5; }
+      if (sp.hidden || me.hidden) { g *= 0.8; cutoff *= 0.6; }
+      return { gain: g, pan: Math.max(-0.8, Math.min(0.8, dx / (TS * 6))), cutoff: Math.max(800, cutoff) };
+    });
+  },
+
+  // ------------------------------------------------------------ 채팅
+  openChat() {
+    if (this.chatOpen || (this.phase !== 'game' && this.phase !== 'lobby') || this.puzzleOpen >= 0 || this.valveOpen >= 0) return;
+    this.chatOpen = true;
+    Input.keys.clear();
+    UI.openChat?.();
+  },
+  closeChat() { this.chatOpen = false; Input.keys.clear(); UI.closeChat?.(); },
+
   endCine() {
     const c = this.cine;
     this.cine = null;
@@ -412,6 +537,8 @@ const nameOf = id => Game.playerById(id)?.name ?? '누군가';
 
 /** 메인 메뉴로 돌아가기 */
 function toMenu(error = '', screen = 'main') {
+  Voice.leaveRoom();
+  if (Game.chatOpen) Game.closeChat();
   Game.phase = 'menu';
   Game.paused = false; Game.serverPaused = false; Game.solo = false;
   Game.cine = null; Game.pendingLobby = null; Game.inv = []; Game.emoteOpen = false;
@@ -421,14 +548,23 @@ function toMenu(error = '', screen = 'main') {
 }
 
 const handlers = {
+  onChat(m) {
+    UI.chatMessage?.(m);
+    const p = Game.phase === 'game' ? Game.playerById(m.id) : null;
+    if (p && p.alive && !m.dead) p.bubble = { text: m.text.length > 28 ? m.text.slice(0, 27) + '…' : m.text, t: 3.2 };
+    if (m.id !== Game.myId) Sound.click();
+  },
+  onRtc({ from, d }) { Voice.onSignal(from, d); },
   onLobby(state) {
     if (Game.phase === 'ending') { Game.pendingLobby = state; return; }
     Game.phase = 'lobby';
     Game.lobby = state;
+    Voice.joinRoom(net.id);
     UI.showLobby({ ...state, myId: net.id });
   },
   onInit(d) {
     Game.myId = d.id;
+    Voice.joinRoom(d.id);
     Game.solo = String(d.room || '').startsWith('SOLO-');
     Game.paused = false; Game.serverPaused = false;
     Game.testMode = !!d.testMode;
@@ -462,6 +598,7 @@ const handlers = {
     }
     if (Game.monsters.length !== ids.size) Game.monsters = Game.monsters.filter(m => ids.has(m.id));
     if (s.horde && Game.horde) { Game.horde.tx = s.horde.x; Game.horde.speed = s.horde.speed; }
+    if (s.obj) Game.obj = s.obj;
   },
   onPlayerJoined(s) {
     const rp = new ClientPlayer(s);
@@ -469,6 +606,7 @@ const handlers = {
     Game.remotes.set(s.id, rp);
   },
   onPlayerLeft({ id }) {
+    Voice.drop(id);
     const rp = Game.remotes.get(id);
     Game.remotes.delete(id);
   },
@@ -482,6 +620,30 @@ const handlers = {
       Sound.unlock();
     }
   },
+  /** Level Fun: 풍선이 터짐 (큰 소리 — 근처 파티고어가 온다) */
+  onBalloonPopped({ index, by, x, y, item }) {
+    Game.popped.add(index);
+    const view = Game.viewTarget();
+    const near = view ? clamp(1 - Math.hypot(x - view.x, y - view.y) / (TS * 12), 0, 1) : 0;
+    if (near > 0 || by === Game.myId) Sound.pop(by === Game.myId ? 1 : near);
+    Game.fx.push({ kind: 'pop', x, y, t: 0, dur: 0.7 });
+    if (item && by === Game.myId) { Sound.unlock(); UI.notify?.(`풍선 속에서 ${ITEM_TYPES[item]?.name ?? '아이템'} 이(가) 떨어졌다!`); }
+  },
+  /** Level 94: 밤 예고 / 밤 / 낮 */
+  onNight({ phase }) {
+    Game.night = phase;
+    if (phase === 'warn') { Sound.bell(1); UI.notify?.('밤이 온다 — 옷장(사물함)에 숨어라!'); }
+    else if (phase === 'night') { Sound.introSting(); Game.shake = Math.max(Game.shake, 6); }
+    else UI.notify?.('날이 밝았다');
+  },
+  /** 미션 진행 (부품 줍기/배달/떨어뜨림, 장치 완료, 생존 시간 끝) */
+  onObjective({ kind, by, obj, unlocked }) {
+    if (obj) Game.obj = obj;
+    const mine = by === Game.myId;
+    if (kind === 'pick') Sound.pickup(mine ? 1 : 0.4);
+    else if (kind === 'deliver' || kind === 'activate') Sound.puzzleOk();
+    if (unlocked) { Game.exitUnlocked = true; Sound.unlock(); UI.notify?.('출구가 열렸다!'); }
+  },
   onPlayerDied({ id, entityType, x, y }) {
     const who = Game.playerById(id);
     if (who) addGore(Game, x ?? who.x, y ?? who.y, entityType, SUIT_HEX[who.color] || '#e7b92e');
@@ -492,6 +654,7 @@ const handlers = {
       Game.deathT = Game.deathDuration;
       Game.deathSeed = (Math.random() * 1e9) | 0;
       Game.closePuzzle();
+      Game.closeValve();
       Game.hallu = [];
       Sound.death(Game.killerType);
       Game.shake = 20;
@@ -535,6 +698,19 @@ const handlers = {
         break;
       case 'yelp':
         if (near > 0) Sound.yelp(near);
+        break;
+      case 'knock':
+        if (near > 0) Sound.knock(near);
+        break;
+      case 'shatter':
+        if (near > 0) { Sound.shatter(near); if (near > 0.5) Game.shake = Math.max(Game.shake, 8 * near); }
+        break;
+      case 'teleport':
+        if (near > 0) Sound.warp(Math.max(0.3, near));
+        break;
+      case 'poof':        // 안내를 마친 파티 푸퍼가 사라진다
+        Game.fx.push({ kind: 'poof', x: e.x, y: e.y, t: 0, dur: 0.8 });
+        if (near > 0) Sound.warp(near * 0.6);
         break;
     }
   },
@@ -609,6 +785,16 @@ const handlers = {
     const near = view ? clamp(1 - Math.hypot(p.x - view.x, p.y - view.y) / (TS * 12), 0, 1) : 0;
     if (near > 0) Sound.speak(text, near);
   },
+  onGesture({ id, g }) {
+    const p = Game.playerById(id);
+    if (!p || !GESTURES[g]) return;
+    p.gesture = { g, t: 0 };
+    if (g.startsWith('dance')) {
+      const view = Game.viewTarget();
+      const near = view ? clamp(1 - Math.hypot(p.x - view.x, p.y - view.y) / (TS * 12), 0, 1) : 0;
+      if (near > 0) Sound.danceTune(near, g === 'dance2');
+    }
+  },
   onGameComplete(d) {
     Game.deathT = 0; Game.pendingRoundEnd = null;
     Game.phase = 'ending';
@@ -654,7 +840,7 @@ export function startGame({ canvas, ui }) {
   Game.initMenu();
 
   Input.init();
-  const canAct = () => Game.phase === 'game' && !Game.paused && Game.local?.alive && Game.roundPhase === 'playing' && Game.puzzleOpen < 0;
+  const canAct = () => Game.phase === 'game' && !Game.paused && Game.local?.alive && Game.roundPhase === 'playing' && Game.puzzleOpen < 0 && Game.valveOpen < 0 && !Game.chatOpen;
   const useSlot = i => { if (i < CONFIG.INVENTORY_SIZE && Game.inv[i]) net.useItem(i); };
   const dropSlot = i => {
     if (i >= CONFIG.INVENTORY_SIZE || !Game.inv[i] || Game.local.hidden) return;
@@ -663,42 +849,63 @@ export function startGame({ canvas, ui }) {
     Game.msg(`${ITEM_TYPES[Game.inv[i].type]?.name ?? '아이템'} 을(를) 버렸다`, 1.5);
   };
   Input.onPress('Escape', () => {
-    if (Game.phase === 'ending') { Game.skipCine(); return; }
     if (Game.phase !== 'game') return;
-    if (Game.cine?.type === 'story') { Game.skipCine(); return; }
     if (Game.emoteOpen) { Game.emoteOpen = false; return; }
     if (Game.puzzleOpen >= 0) { Game.closePuzzle(); return; }
+    if (Game.valveOpen >= 0) { Game.closeValve(); return; }
+    if (Game.cine?.type === 'story') return;          // 오프닝은 건너뛰기 키를 길게
     UI.togglePause?.();
   });
-  Input.onPress('Enter', () => Game.skipCine());
-  Input.onPress('Comma', () => {
+  Input.onAction('chat', () => { if (!Game.paused) Game.openChat(); });
+  Input.onAction('mic', () => {
+    if (!Voice.enabled) { UI.notify?.('보이스 챗이 꺼져 있다 — 설정 → 보이스 챗에서 켜라'); return; }
+    const on = Voice.toggleMic();
+    Sound.click();
+    UI.notify?.(on ? '마이크 켜짐' : '마이크 꺼짐');
+  });
+  Input.onAction('emote', () => {
     if (Game.phase === 'game' && !Game.paused && Game.local?.alive) { Game.emoteOpen = !Game.emoteOpen; Sound.click(); }
   });
+  // 감정 표현 창이 열려 있으면 숫자 1~6 = 대사 고르기 (고정 키)
   for (let n = 1; n <= 6; n++) {
-    Input.onPress(`Digit${n}`, () => {
-      if (!canAct()) return;
-      if (Game.emoteOpen) { net.emote(n - 1); Game.emoteOpen = false; return; }      // 감정 표현
-      if (Input.down('KeyG')) dropSlot(n - 1);                                       // G 를 누른 채 숫자 → 버리기
-      else useSlot(n - 1);                                                           // 아이템 사용
+    Input.onPress(`Digit${n}`, () => { if (Game.emoteOpen && canAct()) { net.emote(n - 1); Game.emoteOpen = false; } });
+  }
+  // 동작: 7 뻐큐 · 8 가리키기 · 9 춤 1 · 0 춤 2
+  [['Digit7', 'finger'], ['Digit8', 'point'], ['Digit9', 'dance1'], ['Digit0', 'dance2']].forEach(([code, g]) => {
+    Input.onPress(code, () => { if (Game.emoteOpen && canAct()) { if (!Game.local.hidden) net.gesture(g); Game.emoteOpen = false; } });
+  });
+  for (let n = 1; n <= 4; n++) {
+    Input.onAction(`slot${n}`, () => {
+      if (!canAct() || Game.emoteOpen) return;
+      if (Input.held('drop')) dropSlot(n - 1);                                        // 버리기 키를 누른 채 → 버리기
+      else useSlot(n - 1);                                                            // 아이템 사용
     });
   }
-  Input.onPress('KeyF', () => {
+  Input.onAction('flashlight', () => {
     if (Game.paused) return;
     if (Game.phase === 'game' && Game.local?.alive && !Game.local.hidden) { Game.local.flashlight = !Game.local.flashlight; Sound.click(); }
   });
   Input.onPress('Backquote', () => { if (Game.phase === 'game' && Game.testMode) UI.toggleTest?.(); });
-  Input.onPress('KeyE', () => {
+  Input.onAction('interact', () => {
     if (Game.paused) return;
     if (Game.phase !== 'game' || !Game.local?.alive || Game.roundPhase !== 'playing' || Game.cine?.type === 'story') return;
     if (Game.puzzleOpen >= 0) { Game.closePuzzle(); return; }
+    if (Game.valveOpen >= 0) { Game.closeValve(); return; }
     if (Game.local.hidden) net.hide(null);
     else if (Game.nearPuzzle >= 0) Game.openPuzzle(Game.nearPuzzle);
+    else if (Game.nearStation >= 0) Game.openValve(Game.nearStation);
+    else if (Game.nearNpc) net.interact(Game.nearNpc.id);
+    else if (Game.nearBalloon >= 0) net.popBalloon(Game.nearBalloon);
     else if (Game.nearLocker >= 0) net.hide(Game.nearLocker);
   });
-  Input.onPress('Space', () => {
-    if (Game.cine?.type === 'story') { Game.skipCine(); return; }
+  Input.onAction('skip', () => {
+    if (Game.cine?.type === 'story' || Game.phase === 'ending') return;   // 영상은 길게 눌러야 건너뛴다
     if (Game.phase === 'game' && !Game.paused) Game.cycleSpectate();
   });
+  // 보이스 챗: 서버 중계 / 말하는 중 알림
+  Voice.signal = (to, d) => net.rtc(to, d);
+  Voice.onSpeaking = on => { if (Game.phase === 'game') net.speaking(on); };
+  Voice.onState = vc => net.voiceState(vc);
 
   let raf = 0, last = performance.now();
   const frame = now => {
@@ -711,11 +918,11 @@ export function startGame({ canvas, ui }) {
     raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
-  window.Game = Game; // 디버그용
+  window.Game = Game; Game.renderer = renderer; // 디버그용
 
   return {
     /** 첫 클릭 때 오디오 켜기 (브라우저 정책상 사용자 입력 이후에만 가능) */
-    unlockAudio() { Sound.init(); Sound.setVolume(Game.settings.volume); },
+    unlockAudio() { Sound.init(); Sound.setVolume(Game.settings.volume); Voice.autoStart(); },
     applySettings(s) { Object.assign(Game.settings, s); Sound.setVolume(Game.settings.volume); },
     solo(name, color) {
       if (Game.phase !== 'menu') return;
@@ -751,14 +958,31 @@ export function startGame({ canvas, ui }) {
     /** 터치 조작 (휴대폰/태블릿) */
     touch: Input.touch,
     press(code) { Input.press(code); },
+    pressAction(a) { Input.pressAction(a); },
+    /** 채팅 (React ChatBox) / 보이스 챗 / 키 설정 */
+    sendChat(text) { if (String(text || '').trim()) net.chat(String(text).slice(0, 120)); },
+    closeChat() { Game.closeChat(); },
+    voice: Voice,
+    input: Input,
+    get skipKey() { return keyLabel(Input.binds.skip); },
     resetTouch() { Input.resetTouch(); },
     useItem(i) { if (canAct()) useSlot(i); },
     dropItem(i) { if (canAct()) dropSlot(i); },
     emote(i) { if (canAct()) net.emote(i); },
+    gesture(g) { if (canAct() && !Game.local.hidden) net.gesture(g); },
+    get gestures() { return Object.entries(GESTURES).map(([g, d]) => [g, d.name]); },
     get emoteLines() { return CONFIG.EMOTE.LINES; },
     /** 퍼즐 패널(React) → 정답 제출 / 닫기 / 효과음 */
     solvePuzzle(index, answer) { if (Game.puzzleOpen === index) net.solvePuzzle(index, answer); },
     closePuzzle() { Game.closePuzzle(); },
+    /** 밸브 패널(React) → 시계 방향으로 돌린 각도 전송 / 진행도 읽기 / 닫기 */
+    turnValve(index, delta) {
+      if (Game.valveOpen !== index || !(delta > 0)) return;
+      net.turnValve(index, delta);
+      if (Game.machineT <= 0) { Sound.machine(Game.level.mission.kind); Game.machineT = 0.35; }
+    },
+    valveProgress(index) { return Game.obj?.prog?.[index] || 0; },
+    closeValve() { Game.closeValve(); },
     sfx(kind, arg) { if (kind === 'beep') Sound.beep(arg); else if (kind === 'wrong') Sound.puzzleWrong(); else Sound.click(); },
     startMatch() { if (Game.phase === 'lobby') net.startMatch(); },
     leaveRoom() { net.leaveRoom(); toMenu(); },

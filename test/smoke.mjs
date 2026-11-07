@@ -8,7 +8,9 @@ import { GameRoom } from '../server/GameRoom.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { io } from 'socket.io-client';
 import { generateLevel } from '../shared/map.js';
-import { TS } from '../shared/config.js';
+import { TS, LEVELS, MISSION, CONFIG } from '../shared/config.js';
+const LV = name => LEVELS.findIndex(L => L.name === name);
+const RUN = LV('RUN FOR YOUR LIFE'), END = LV('THE END');
 import { solve } from './puzzles.mjs';
 
 const PORT = 3999;
@@ -240,10 +242,10 @@ try {
   const peek = raw('Peek'); await peek.ready; peek.s.emit('joinRoom', { name: 'P', code: si.room.replace('SOLO-', '') });
   check(!!(await peek.waitFor('joinError')), '혼자 하기 방은 코드로 참가 불가');
   // 11) Level Fun: 파티고어만 등장 (테스트 명령으로 이동)
-  solo.s.emit('test', { cmd: 'setLevel', arg: 4 });
-  const fun = await solo.waitFor('round', d => d.level === 4);
+  solo.s.emit('test', { cmd: 'setLevel', arg: LV('THE PARTY') });
+  const fun = await solo.waitFor('round', d => d.level === LV('THE PARTY'));
   const ft = [...new Set(fun.monsters.map(m => m.type))].join(',');
-  check(ft === 'partygoer' && fun.monsters.every(m => m.state === 'guard'), `LEVEL FUN =) → 파티고어 ${fun.monsters.length}마리, 모두 제자리 감시`);
+  check(ft === 'partygoer' && fun.monsters.length === 6 && fun.monsters.every(m => m.state === 'guard'), `LEVEL FUN =) → 파티고어 ${fun.monsters.length}마리, 모두 제자리 감시`);
   // 12) 인벤토리 / 아이템 사용 / 감정 표현
   solo.s.emit('test', { cmd: 'spawnItem', arg: 'camera' });
   const cam = await solo.waitFor('itemSpawned', d => d.type === 'camera');
@@ -273,21 +275,23 @@ try {
   await sleep(250);
   check(em.id === solo.s.id && !solo.log.some(e => e.ev === 'emote' && e.data.i === 2), '감정 표현 → 모두에게 emote, 연속 사용은 쿨다운');
   // 13) 마지막 레벨(END) 탈출 → 엔딩
-  solo.s.emit('test', { cmd: 'setLevel', arg: 8 });
-  const endRound = await solo.waitFor('round', d => d.level === 8);
+  solo.s.emit('test', { cmd: 'setLevel', arg: END });
+  const endRound = await solo.waitFor('round', d => d.level === END);
   const et = [...new Set(endRound.monsters.map(m => m.type))].join(',');
   solo.s.emit('test', { cmd: 'unlockExit' });
   await solo.waitFor('keyCollected', d => d.unlocked);
   solo.s.emit('test', { cmd: 'tpExit' });
   const done = await solo.waitFor('gameComplete', () => true, 6000);
   check(et === 'scratcher' && done.escaped.includes('Solo'), `LEVEL END(스크래처) 탈출 → gameComplete 엔딩 (생존자 ${done.escaped.join(',')})`);
-  for (const [lv, want] of [[5, 'deathmoth,hound'], [6, 'wretch']]) {
+  for (const [lv, want] of [[LV('ABANDONED OFFICE'), 'wanderer,windows'], [LV('TERROR HOTEL'), 'deathmoth,hound'], [LV('LIGHTS OUT'), 'wretch'],
+    [LV('THE SUBURBS'), 'wanderer,watch,wretch'], [LV('FIELD OF WHEAT'), 'faceling'], [LV('THE POOLROOMS'), 'clump'], [LV('SCHOOL HALLS'), 'partyPooper,partygoer,smiler'],
+    [LV('MOTION'), 'animatedKing,animation'], [LV('COURTYARD OF WINDOWS'), 'aranea,windows'], [LV("KITTY'S HOUSE"), 'kitty']]) {
     const g = raw('L' + lv); await g.ready; g.s.emit('solo', { name: 'L' + lv });
     await g.waitFor('init');
     g.s.emit('test', { cmd: 'setLevel', arg: lv });
     const r = await g.waitFor('round', d => d.level === lv);
     const ty = [...new Set(r.monsters.map(m => m.type))].sort().join(',');
-    check(ty === want, `LEVEL ${lv} 엔티티 = ${ty}`);
+    check(ty === want, `${LEVELS[lv].name} 엔티티 = ${ty}`);
     g.s.disconnect();
   }
   solo.s.disconnect(); peek.s.disconnect();
@@ -300,10 +304,10 @@ try {
   check(si.story === true && hi.story === true, '멀티(방장 시작)도 첫 Level 0 에 오프닝');
   // 15) 퍼즐 단말기: 걸어 들어가도 안 주워지고, 오답 → 경보, 정답 → 열쇠
   pz.s.emit('test', { cmd: 'god' }); await pz.waitFor('testResult', d => d.cmd === 'god');
-  pz.s.emit('test', { cmd: 'setLevel', arg: 3 });
-  const r3 = await pz.waitFor('round', d => d.level === 3);
+  pz.s.emit('test', { cmd: 'setLevel', arg: 1 });
+  const r3 = await pz.waitFor('round', d => d.level === 1);
   check(!r3.story, '레벨 이동 후 라운드엔 오프닝 없음');
-  const lv3 = generateLevel(r3.seed, 3);
+  const lv3 = generateLevel(r3.seed, 1);
   let pzIdx = -1;
   for (let n = 0; n < 8 && pzIdx < 0; n++) {           // 가장 가까운 열쇠로 순간이동 → 퍼즐 단말기에 도착할 때까지
     const mark = pz.log.length;
@@ -355,20 +359,179 @@ try {
   const rn = raw('Run'); await rn.ready;
   rn.s.emit('solo', { name: 'Run' });
   await rn.waitFor('init');
-  rn.s.emit('test', { cmd: 'setLevel', arg: 7 });
-  const r7 = await rn.waitFor('round', d => d.level === 7);
-  const lv7 = generateLevel(r7.seed, 7);
+  rn.s.emit('test', { cmd: 'setLevel', arg: RUN });
+  const r7 = await rn.waitFor('round', d => d.level === RUN);
+  const lv7 = generateLevel(r7.seed, RUN);
   check(r7.exitUnlocked && r7.keys.length === 0 && r7.horde && r7.monsters.length === 0 && lv7.map.w === 241,
     `LEVEL ! → 출구 열림, 열쇠 0, 괴물 떼 시작 x=${r7.horde?.x}, 복도 ${lv7.map.w}칸`);
   const caught = await rn.waitFor('playerDied', d => d.entityType === 'horde', 15000);
   check(caught.id === rn.s.id, '가만히 있으면 괴물 떼에게 잡힘 (entityType=horde)');
   await rn.waitFor('roundEnd');
-  rn.s.emit('test', { cmd: 'setLevel', arg: 7 });
-  await rn.waitFor('round', d => d.level === 7 && d.round !== r7.round);
+  rn.s.emit('test', { cmd: 'setLevel', arg: RUN });
+  await rn.waitFor('round', d => d.level === RUN && d.round !== r7.round);
   rn.s.emit('test', { cmd: 'tpExit' });
   const runEnd = await rn.waitFor('roundEnd', d => d.escaped.includes('Run'), 8000);
-  check(runEnd.nextLevel === 8, `LEVEL ! 출구 탈출 → 다음은 END (${runEnd.nextLevel})`);
+  check(runEnd.nextLevel === END, `LEVEL ! 출구 탈출 → 다음은 END (${runEnd.nextLevel})`);
   rn.s.disconnect();
+
+  // 18) 미션: 배달 (Level 3 퓨즈) — 줍기(최대 2개) → 배전반에 넣기 → 다 넣으면 출구 열림
+  const dv = raw('Dv'); await dv.ready;
+  dv.s.emit('solo', { name: 'Dv' }); await dv.waitFor('init');
+  dv.s.emit('test', { cmd: 'god' }); await dv.waitFor('testResult', d => d.cmd === 'god');
+  dv.s.emit('test', { cmd: 'setLevel', arg: 3 });
+  const r3d = await dv.waitFor('round', d => d.level === 3);
+  check(r3d.keys.length === 0 && r3d.obj?.type === 'deliver' && r3d.obj.parts.length === 4 && !r3d.exitUnlocked, 'LEVEL 3 → 퓨즈 배달 미션 (열쇠 없음, 퓨즈 4개)');
+  let maxHeld = 0;
+  for (let n = 0; n < 14 && !dv.log.some(e => e.ev === 'objective' && e.data.unlocked); n++) {
+    const mark = dv.log.length;
+    dv.s.emit('test', { cmd: 'tpKey' });
+    await dv.waitFor('testResult', d => d.cmd === 'tpKey' && dv.log.indexOf(dv.log.find(e => e.data === d)) >= mark);
+    const o = [...dv.log].reverse().find(e => e.ev === 'objective')?.data.obj;
+    if (o) maxHeld = Math.max(maxHeld, o.parts.filter(pt => pt.s === 1).length);
+  }
+  const dvDone = dv.log.find(e => e.ev === 'objective' && e.data.unlocked)?.data;
+  check(dv.log.some(e => e.ev === 'objective' && e.data.kind === 'pick') && maxHeld === MISSION.CARRY && dvDone?.obj.done === 4,
+    `퓨즈 줍기 (한 번에 최대 ${maxHeld}개) → 배전반에 4개 → 출구 열림`);
+  // 배달: 부품을 든 채 죽으면 그 자리에 떨어진다
+  dv.s.emit('test', { cmd: 'setLevel', arg: 3 });
+  await dv.waitFor('round', d => d.level === 3 && d.round !== r3d.round);
+  dv.s.emit('test', { cmd: 'god' });
+  dv.s.emit('test', { cmd: 'tpKey' });
+  await dv.waitFor('objective', d => d.kind === 'pick' && d.obj.parts.some(pt => pt.s === 1));
+  await sleep(5000);
+  for (let i = 0; i < 4; i++) dv.s.emit('test', { cmd: 'drainSanity' });
+  const drop = await dv.waitFor('objective', d => d.kind === 'drop', 12000);
+  check(drop.obj.parts.every(pt => pt.s !== 1), '부품을 든 채 죽으면 그 자리에 떨어뜨림');
+  dv.s.disconnect();
+
+  // 19) 미션: 작동 (Level 2 밸브) — 옆에 서 있기만 해선 안 되고, turnValve 로 돌려야 한다 / 생존 (Level 5) — 남은 시간이 줄어든다
+  const ac = raw('Ac'); await ac.ready;
+  ac.s.emit('solo', { name: 'Ac' }); await ac.waitFor('init');
+  ac.s.emit('test', { cmd: 'god' }); await ac.waitFor('testResult', d => d.cmd === 'god');
+  ac.s.emit('test', { cmd: 'setLevel', arg: 2 });
+  const r2 = await ac.waitFor('round', d => d.level === 2);
+  const lv2 = generateLevel(r2.seed, 2);
+  check(lv2.stations.every(st => lv2.map.isSolid(st.tx, st.ty - 1)), '증기 밸브는 모두 벽에 붙어 있음');
+  ac.s.emit('test', { cmd: 'tpKey' });
+  await ac.waitFor('testResult', d => d.cmd === 'tpKey');
+  const at2 = [...ac.log].reverse().find(e => e.ev === 'correct').data;
+  const vi = lv2.stations.findIndex(st => Math.hypot(st.x - at2.x, st.y - at2.y) < 1);
+  await sleep(5500);                                               // 엔티티 대기 끝 + 가만히 서 있기
+  const idle = [...ac.log].reverse().find(e => e.ev === 'snapshot' && e.data.obj)?.data.obj;
+  check(vi >= 0 && idle.prog.every(v => v === 0), '밸브 옆에 서 있기만 해선 안 돌아감');
+  ac.s.emit('turnValve', { index: vi, delta: 1000 });               // 한 번에 너무 많이 돌리면 서버가 잘라낸다
+  await sleep(200);
+  const clip = [...ac.log].reverse().find(e => e.ev === 'snapshot' && e.data.obj)?.data.obj;
+  check(clip.prog[vi] > 0 && clip.prog[vi] < 0.5, `한 번에 크게 돌려도 조금만 인정 (${clip.prog[vi]})`);
+  for (let n = 0; n < 40 && !ac.log.some(e => e.ev === 'objective' && e.data.kind === 'activate'); n++) { ac.s.emit('turnValve', { index: vi, delta: 1.0 }); await sleep(70); }
+  const turned = ac.log.find(e => e.ev === 'objective' && e.data.kind === 'activate')?.data;
+  check(turned?.obj.prog[vi] === 1 && turned.obj.done === 1, `시계 방향으로 계속 돌리면 밸브 잠김 (${turned?.obj.done}/4)`);
+  ac.s.emit('test', { cmd: 'unlockExit' });
+  const acDone = await ac.waitFor('objective', d => d.unlocked);
+  check(acDone.obj.done === 4, '밸브 4개 다 잠그면 출구 열림');
+  ac.s.emit('test', { cmd: 'setLevel', arg: LV('TERROR HOTEL') });
+  const r5 = await ac.waitFor('round', d => d.level === LV('TERROR HOTEL'));
+  await sleep(5500);
+  const sv = [...ac.log].reverse().find(e => e.ev === 'snapshot' && e.data.obj)?.data.obj;
+  check(r5.obj?.type === 'survive' && sv && sv.left < r5.obj.left && !r5.exitUnlocked, `LEVEL 5 생존 미션: 남은 시간 ${r5.obj?.left} → ${sv?.left}`);
+  ac.s.emit('test', { cmd: 'unlockExit' });
+  const svDone = await ac.waitFor('objective', d => d.unlocked && d.kind === 'survive');
+  check(!!svDone, '생존 시간이 끝나면 출구 열림');
+  ac.s.disconnect();
+
+  // 21) Level Fun 풍선: E 로 터뜨리면 소리(10칸)를 근처 파티고어가 듣고 온다, 아주 드물게 아이템
+  const bl = raw('Bl'); await bl.ready;
+  bl.s.emit('solo', { name: 'Bl' }); await bl.waitFor('init');
+  bl.s.emit('test', { cmd: 'god' }); await bl.waitFor('testResult', d => d.cmd === 'god');
+  bl.s.emit('test', { cmd: 'setLevel', arg: LV('THE PARTY') });
+  const rf = await bl.waitFor('round', d => d.level === LV('THE PARTY'));
+  check(generateLevel(rf.seed, LV('THE PARTY')).keys.every(k => k.puzzle?.type === 'arcade'), 'Level Fun 게임기 = 전부 파티 팝(아케이드)');
+  await sleep(5000);                                                // 엔티티 대기 끝
+  bl.s.emit('test', { cmd: 'clearEntities' });
+  bl.s.emit('test', { cmd: 'tpBalloon' });
+  const tb = await bl.waitFor('testResult', d => d.cmd === 'tpBalloon');
+  bl.s.emit('test', { cmd: 'spawnEntity', arg: 'partygoer' });       // 3~5칸 거리
+  await bl.waitFor('testResult', d => d.cmd === 'spawnEntity');
+  CONFIG.BALLOON.ITEM_CHANCE = 1;                                    // 같은 프로세스의 서버 — 아이템 확률을 잠깐 100% 로
+  bl.s.emit('popBalloon', { index: tb.index });
+  const pop = await bl.waitFor('balloonPopped', d => d.index === tb.index);
+  CONFIG.BALLOON.ITEM_CHANCE = 0.0001;
+  const heard = await bl.waitFor('snapshot', d => d.monsters.some(m => m.type === 'partygoer' && (m.state === 'investigate' || m.state === 'chase')), 3000).catch(() => null);
+  check(!!pop && !!pop.item && bl.log.some(e => e.ev === 'itemSpawned' && e.data.type === pop.item), `풍선 터뜨리기 → balloonPopped + (확률) 아이템 ${pop.item}`);
+  check(!!heard, '터지는 소리를 근처 파티고어가 듣고 확인하러 옴');
+  const bmark = bl.log.length;
+  bl.s.emit('popBalloon', { index: tb.index });                     // 이미 터진 풍선
+  await sleep(200);
+  check(!bl.log.slice(bmark).some(e => e.ev === 'balloonPopped'), '이미 터진 풍선은 다시 안 터짐');
+  bl.s.disconnect();
+
+  // 22) Level 52 파티 푸퍼: 말 걸면 남은 단말기까지 안내, 그 열쇠를 먹으면 사라진다
+  const pp = raw('Pp'); await pp.ready;
+  pp.s.emit('solo', { name: 'Pp' }); await pp.waitFor('init');
+  pp.s.emit('test', { cmd: 'god' }); await pp.waitFor('testResult', d => d.cmd === 'god');
+  pp.s.emit('test', { cmd: 'setLevel', arg: LV('SCHOOL HALLS') });
+  await pp.waitFor('round', d => d.level === LV('SCHOOL HALLS'));
+  await sleep(5000);
+  pp.s.emit('test', { cmd: 'tpPooper' });
+  const tp = await pp.waitFor('testResult', d => d.cmd === 'tpPooper');
+  pp.s.emit('interact', { mid: tp.mid });
+  const talk = await pp.waitFor('entityEvent', d => d.id === tp.mid && d.kind === 'voice');
+  const guiding = await pp.waitFor('snapshot', d => d.monsters.some(m => m.id === tp.mid && m.state === 'guide'));
+  check(talk.text === '따라와...' && !!guiding, '파티 푸퍼에게 말 걸기 → "따라와..." 하고 안내 시작');
+  pp.s.emit('test', { cmd: 'unlockExit' });                         // 열쇠를 전부 먹으면
+  const poof = await pp.waitFor('entityEvent', d => d.id === tp.mid && d.kind === 'poof', 3000).catch(() => null);
+  await sleep(200);
+  const ppAfter = [...pp.log].reverse().find(e => e.ev === 'snapshot').data;
+  check(!!poof && !ppAfter.monsters.some(m => m.id === tp.mid), '안내하던 열쇠를 먹으면 파티 푸퍼가 사라짐');
+  pp.s.disconnect();
+
+  // 23) 채팅 / 보이스 챗 중계 / 말하는 소리
+  const c1 = raw('C1'); await c1.ready;
+  c1.s.emit('createRoom', { name: 'Chatter' });
+  const lob = await c1.waitFor('lobby');
+  const c2 = raw('C2'); await c2.ready;
+  c2.s.emit('joinRoom', { name: 'Talker', code: lob.code });
+  await c2.waitFor('lobby', d => d.players.length === 2);
+  c1.s.emit('chat', { text: '  안녕하세요  ' + 'x'.repeat(200) });
+  const got = await c2.waitFor('chat');
+  check(got.name === 'Chatter' && got.text.startsWith('안녕하세요') && got.text.length === 120, `채팅: 같은 방에 전달, 제어문자 제거, 120자 제한 ("${got.text.slice(0, 8)}…")`);
+  c1.s.emit('chat', { text: '도배' });
+  await sleep(200);
+  check(!c2.log.some(e => e.ev === 'chat' && e.data.text === '도배'), '채팅: 0.6초 안에 연달아 보내면 무시');
+  c1.s.emit('rtc', { to: '*', d: { t: 'hello' } });
+  const hello = await c2.waitFor('rtc', d => d.d?.t === 'hello');
+  c2.s.emit('rtc', { to: c1.s.id, d: { t: 'sdp', type: 'offer', sdp: 'v=0' } });
+  const sdp = await c1.waitFor('rtc', d => d.d?.t === 'sdp');
+  c2.s.emit('rtc', { to: c1.s.id, d: { t: 'sdp', sdp: 'x'.repeat(20000) } });   // 너무 큰 데이터는 버림
+  await sleep(200);
+  check(hello.from === c1.s.id && sdp.from === c2.s.id && c1.log.filter(e => e.ev === 'rtc').length === 1, '보이스 챗 연결 정보: 같은 방에만 중계, 너무 크면 버림');
+  c1.s.emit('startMatch');
+  await c1.waitFor('init'); await c2.waitFor('init');
+  const room = game.rooms.get(lob.code), talker = room.players.get(c2.s.id);
+  c2.s.emit('speaking', { on: true });
+  await sleep(150);
+  check(talker.voiceUntil > Date.now(), '보이스 챗으로 말하면 서버가 "목소리 소리"로 처리 (귀 밝은 엔티티가 듣는다)');
+  c2.s.emit('voiceState', { vc: 2 });
+  const muted = await c1.waitFor('snapshot', d => d.players.some(p => p.id === c2.s.id && p.vc === 2));
+  c2.s.emit('voiceState', { vc: 'hack' });                             // 이상한 값은 무시
+  await sleep(150);
+  check(!!muted && talker.vc === 2, '보이스 상태(음소거)가 스냅샷으로 다른 사람에게 전달 (이름표 옆 아이콘)');
+  c2.s.emit('gesture', { g: 'finger' });
+  const gst = await c1.waitFor('gesture', d => d.id === c2.s.id);
+  c2.s.emit('gesture', { g: 'dance1' });                             // 1초 쿨다운
+  c2.s.emit('gesture', { g: 'nope' });
+  await sleep(200);
+  check(gst.g === 'finger' && c1.log.filter(e => e.ev === 'gesture').length === 1, '이모트 동작(뻐큐) → 모두에게 전달, 연타·이상한 값은 무시');
+  c1.s.disconnect(); c2.s.disconnect();
+
+  // 20) Level 94: 밤 주기 — 예고(warn) → 밤(night) 이벤트, 라운드 상태에 night 포함
+  const nt = raw('Nt'); await nt.ready;
+  nt.s.emit('solo', { name: 'Nt' }); await nt.waitFor('init');
+  nt.s.emit('test', { cmd: 'god' }); await nt.waitFor('testResult', d => d.cmd === 'god');
+  nt.s.emit('test', { cmd: 'setLevel', arg: LV('MOTION') });
+  const r94 = await nt.waitFor('round', d => d.level === LV('MOTION'));
+  check(r94.night === 'day' && r94.obj?.type === 'survive', 'LEVEL 94 → 낮에서 시작, 생존 미션');
+  nt.s.disconnect();
 
   // 8) 혼자 남은 Alice 가 죽거나 남은 상태 → health 확인
   const health = await (await fetch(`${URL}/health`)).json();

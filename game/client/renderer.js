@@ -1,4 +1,4 @@
-import { CONFIG, TS, levelLabel, levelInfo } from '../../shared/config.js';
+import { CONFIG, TS, MISSION, levelLabel, levelInfo, missionGoal, missionKind } from '../../shared/config.js';
 import { clamp } from '../../shared/utils.js';
 import { castRay } from '../../shared/physics.js';
 import { LightSystem } from './lighting.js';
@@ -6,6 +6,7 @@ import { buildMapTexture, TILE_PX } from './texture.js';
 import {
   ART, drawPlayer, drawMonster, drawMonsterGlow, drawMonsterEyes, drawJumpscareSprite,
   drawKey, drawTerminal, drawItem, drawLocker, drawExitSign, drawNameTag, drawBubble, drawPrompt, drawBalloonDecor, drawMothSwarm, humanPreview,
+  drawPart, drawDepot, drawStation, drawArcade, partIcon, drawPlayerGesture,
 } from './sprites.js';
 import { Hud } from './hud.js';
 import { drawStory } from './story.js';
@@ -117,6 +118,8 @@ export class Renderer {
     this.lights.drawLightPools(ctx, cam, vw, vh, game.time);
     drawGore(ctx, game);
     for (const key of game.keys) if (!key.collected && !key.puzzle) drawKey(ctx, key, game.time);
+    const obj = game.obj, mkind = missionKind(level.mission);
+    if (obj?.type === 'deliver') for (const pt of obj.parts) if (pt.s === 0) drawPart(ctx, pt, mkind, game.time);
     for (const it of game.items) drawItem(ctx, it, game.time);
 
     const inView = (o, m = TS) => o.x > cam.x - m && o.x < cam.x + vw + m && o.y > cam.y - m * 2 && o.y < cam.y + vh + m;
@@ -132,18 +135,36 @@ export class Renderer {
       if (!inView(lk)) return;
       actors.push({ y: lk.y - 6, draw: () => drawLocker(ctx, lk, game.time, game.lockerShake[i] || 0, 1, prop) });
     });
-    for (const d of level.decor || []) {
-      if (!inView(d)) continue;
+    for (const [di, d] of (level.decor || []).entries()) {
+      if (!inView(d) || (d.kind === 'balloon' && game.popped.has(di))) continue;
       if (d.kind === 'moths') actors.push({ y: d.y + 40, draw: () => drawMothSwarm(ctx, d, game.time) });
       else actors.push({ y: d.y - 2, draw: () => drawBalloonDecor(ctx, d, game.time) });
     }
     // 퍼즐 단말기 (열쇠가 안에 잠겨 있다)
-    for (const k of game.keys) if (k.puzzle && !k.collected && inView(k)) actors.push({ y: k.y + 4, draw: () => drawTerminal(ctx, k, game.time, game.puzzleOpen === game.keys.indexOf(k)) });
+    const arcade = mkind === 'games';    // Level Fun: 퍼즐 단말기 대신 스탠딩 아케이드 기계
+    for (const k of game.keys) if (k.puzzle && !k.collected && inView(k)) actors.push({ y: k.y + 4, draw: () => (arcade ? drawArcade : drawTerminal)(ctx, k, game.time, game.puzzleOpen === game.keys.indexOf(k)) });
     for (const f of game.flares) if (inView(f)) actors.push({ y: f.y, draw: () => this.drawFlareStick(ctx, f, game.time) });
+    // 미션 장치: 배달 장치(배전반/무전기), 작동 장치(밸브/발전기/펌프)
+    if (level.depot && obj?.type === 'deliver' && inView(level.depot)) {
+      actors.push({ y: level.depot.y + 4, draw: () => drawDepot(ctx, level.depot, mkind, obj.done, obj.total, game.time, game.exitUnlocked) });
+    }
+    if (obj?.type === 'activate') level.stations.forEach((st, i) => {
+      if (inView(st)) actors.push({ y: st.y + 4, draw: () => drawStation(ctx, st, mkind, obj.prog[i] || 0, game.time) });
+    });
     for (const p of game.allPlayers()) {
       if (!p.alive || p.hidden) continue;
       const a = p === view || p === game.local ? 1 : seen(p);
-      if (a > 0) actors.push({ y: p.y, draw: () => drawPlayer(ctx, p, a) });
+      if (a > 0) actors.push({ y: p.y, draw: () => {
+        if (p.gesture) drawPlayerGesture(ctx, p, game.time, a); else drawPlayer(ctx, p, a);
+        // 들고 있는 부품은 머리 위에 표시
+        if (obj?.type === 'deliver') {
+          const held = obj.parts.filter(pt => pt.s === 1 && pt.c === p.id);
+          held.forEach((pt, n) => {
+            const ic = partIcon(mkind);
+            ctx.globalAlpha = a; ctx.drawImage(ic, Math.round(p.x - (held.length * 9) + n * 18 - 3), Math.round(p.y - 86), ic.width * 1.5, ic.height * 1.5); ctx.globalAlpha = 1;
+          });
+        }
+      } });
     }
     const shownMonsters = [];
     for (const m of game.monsters) {
@@ -184,6 +205,7 @@ export class Renderer {
       if (!p.alive || p.hidden || p === view) continue;
       const a = seen(p);
       if (a > 0) drawNameTag(ctx, p, a * clamp(1.4 - Math.hypot(p.x - view.x, p.y - view.y) / CONFIG.VIEW_RANGE, 0.3, 1));
+      if (a > 0 && p.vc) { ctx.font = '14px VT323, monospace'; this.drawSpeaker(ctx, p.x + ctx.measureText(p.name).width / 2 + 11, p.y - 54, p.vc === 2, game.voice?.levelOf(p.id) || 0, a); }
     }
     for (const { m, a } of shownMonsters) if (m.bubble && m.bubble.t > 0) drawBubble(ctx, m.x, m.y, m.bubble.text, Math.min(1, m.bubble.t) * a, m.revealed ? 120 : 64);
     for (const p of game.allPlayers()) {   // 플레이어 감정 표현 말풍선
@@ -192,9 +214,19 @@ export class Renderer {
       if (a > 0) drawBubble(ctx, p.x, p.y, p.bubble.text, Math.min(1, p.bubble.t) * a, 64);
     }
     this.drawFx(ctx, map, game);
+    // 밸브/크랭크 옆: E 안내 / 배달 장치 옆: 개수
+    if (game.nearStation >= 0 && game.valveOpen < 0 && game.local.alive) {
+      const st = level.stations[game.nearStation], pr = Math.round((obj.prog[game.nearStation] || 0) * 100);
+      drawPrompt(ctx, st.x, st.y - 70, `E  ${mkind === 'generator' ? '크랭크' : '밸브'}${pr ? ` ${pr}%` : ''}`);
+    }
+    if (obj?.type === 'deliver' && level.depot && game.local.alive && Math.hypot(level.depot.x - game.local.x, level.depot.y - game.local.y) < TS * 2.5 && !game.exitUnlocked) {
+      drawPrompt(ctx, level.depot.x, level.depot.y - 46, `${obj.done}/${obj.total}`);
+    }
+    if (game.nearNpc && game.local.alive) drawPrompt(ctx, game.nearNpc.x, game.nearNpc.y - 84, 'E  말 걸기');
+    if (game.nearBalloon >= 0 && game.local.alive) { const b = level.decor[game.nearBalloon]; drawPrompt(ctx, b.x, b.y - 46, 'E  터뜨리기'); }
     if (game.nearPuzzle >= 0 && game.puzzleOpen < 0 && game.local.alive) {
       const k = game.keys[game.nearPuzzle];
-      drawPrompt(ctx, k.x, k.y - 58, 'E  퍼즐');
+      drawPrompt(ctx, k.x, k.y - (mkind === 'games' ? 92 : 58), mkind === 'games' ? 'E  게임' : 'E  퍼즐');
     }
     const near = game.nearLocker;
     if (near >= 0 && game.local.alive && !game.local.hidden) {
@@ -203,6 +235,7 @@ export class Renderer {
     }
 
     if (game.horde && game.deathT <= 0) this.drawHordeEdge(game);
+    this.drawNightFx(game);
     if (game.deathT > 0) drawDeathOverlay(this, game);
     else if (game.sanityLevel > 0 && game.local.alive) this.drawSanityFx(game);
     if (game.local.hidden && game.deathT <= 0) {
@@ -212,7 +245,7 @@ export class Renderer {
     if (game.flashT > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(255,255,248,${(game.flashT / 0.35) * 0.75})`; ctx.fillRect(0, 0, W, H); }
     this.drawPostFx(game);
     if (game.deathT <= 0) this.hud.draw(ctx, game, W, H, dt);
-    if (game.cine) this.drawCinematic(game);
+    if (game.cine) { this.drawCinematic(game); this.drawSkipHint(game); }
     if (game.paused) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H); }
   }
 
@@ -345,6 +378,16 @@ export class Renderer {
   drawFx(ctx, map, game) {
     for (const f of game.fx) {
       const u = f.t / f.dur;
+      if (f.kind === 'pop' || f.kind === 'poof') {     // 풍선 조각 / 파티 푸퍼가 사라지는 연기
+        const n = f.kind === 'pop' ? 10 : 14;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + f.x * 0.01, r = 6 + u * (f.kind === 'pop' ? 34 : 26);
+          ctx.fillStyle = f.kind === 'pop' ? `rgba(${i % 2 ? '216,49,43' : '232,197,58'},${1 - u})` : `rgba(140,170,220,${0.6 * (1 - u)})`;
+          const sz = f.kind === 'pop' ? 3 : 6 + u * 6;
+          ctx.fillRect(f.x + Math.cos(a) * r - sz / 2, f.y - 20 + Math.sin(a) * r - sz / 2 - (f.kind === 'poof' ? u * 20 : 0), sz, sz);
+        }
+        continue;
+      }
       if (f.kind === 'flash') {
         const range = 6 * 48, fov = Math.PI / 2.2, pts = [];
         for (let i = 0; i <= 20; i++) {
@@ -380,6 +423,43 @@ export class Renderer {
     }
   }
 
+  /**
+   * 이름표 옆 보이스 아이콘 (보이스 챗을 켠 사람에게 항상 표시):
+   *  켜짐 = 스피커 + 게이지 3칸 (목소리 크기만큼 차오름) / 음소거 = 빨간 X 가 그어진 스피커
+   */
+  drawSpeaker(ctx, x, y, muted, level, alpha = 1) {
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x - 6, y - 7, muted ? 16 : 22, 14);
+    ctx.fillStyle = muted ? '#8a5a50' : '#cfc6a6';
+    ctx.fillRect(x - 4, y - 2, 3, 5);
+    ctx.beginPath(); ctx.moveTo(x - 1, y - 2); ctx.lineTo(x + 3, y - 5); ctx.lineTo(x + 3, y + 6); ctx.lineTo(x - 1, y + 3); ctx.fill();
+    if (muted) {
+      ctx.strokeStyle = '#e0503a'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x + 5, y - 3); ctx.lineTo(x + 9, y + 3); ctx.moveTo(x + 9, y - 3); ctx.lineTo(x + 5, y + 3); ctx.stroke();
+    } else {
+      for (let i = 0; i < 3; i++) {                 // 게이지: 아래에서 위로 차오르는 막대 3개
+        const on = level > 0.08 + i * 0.22, h = 4 + i * 2;
+        ctx.fillStyle = on ? '#6edc78' : 'rgba(207,198,166,0.25)';
+        ctx.fillRect(x + 5 + i * 3.5, y + 3 - h, 2.5, h);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** 오프닝/엔딩: "SPACE 길게 눌러 건너뛰기" + 누르고 있는 만큼 차오르는 원 */
+  drawSkipHint(game) {
+    const c = game.cine;
+    if (!c || !((c.type === 'story' && c.t > 1) || (c.type === 'ending' && c.t > 3))) return;
+    const { ctx, W, H } = this, k = Math.min(1, game.skipHold);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = '20px VT323, monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(220,210,170,${0.5 + k * 0.5})`;
+    ctx.fillText(`${game.skipKey || 'SPACE'} 길게 눌러 건너뛰기`, W - 46, H - 24);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(220,210,170,0.25)'; ctx.beginPath(); ctx.arc(W - 26, H - 24, 10, 0, Math.PI * 2); ctx.stroke();
+    if (k > 0) { ctx.strokeStyle = '#f0dc8c'; ctx.beginPath(); ctx.arc(W - 26, H - 24, 10, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); ctx.stroke(); }
+  }
+
   /** 시네마틱 오버레이: 레터박스 + 레벨 제목 / 하울러 각성 / 노클립 탈출 */
   drawCinematic(game) {
     const { ctx, W, H } = this, c = game.cine, t = c.t;
@@ -401,6 +481,10 @@ export class Renderer {
         ctx.font = `${Math.round(Math.min(W, H) * 0.035)}px VT323, monospace`;
         ctx.fillStyle = `rgba(160,146,80,${ta * Math.min(1, Math.max(0, (t - 1.4) / 0.5))})`;
         ctx.fillText(name, W / 2, H * 0.52);
+        // 미션
+        ctx.font = `${Math.round(Math.min(W, H) * 0.03)}px VT323, monospace`;
+        ctx.fillStyle = `rgba(240,220,140,${ta * Math.min(1, Math.max(0, (t - 1.9) / 0.5))})`;
+        ctx.fillText(missionGoal(levelInfo(game.levelIndex).mission || { type: 'keys', count: 5 }), W / 2, H * 0.59);
       }
     } else if (c.type === 'awake') {
       const k = Math.sin(Math.min(1, t / c.dur) * Math.PI);
@@ -468,6 +552,7 @@ export class Renderer {
       }
     }
     this.drawPostFx({ danger: 0, deathT: 0, level: null });
+    this.drawSkipHint(game);
   }
 
   /**
@@ -518,6 +603,28 @@ export class Renderer {
     ctx.fillStyle = `rgba(255,90,70,${0.5 + 0.5 * pulse})`; ctx.fillText('◀◀', 14, H / 2);
   }
 
+  /**
+   * Level 94 밤: 예고(warn)엔 화면이 깜빡이고, 밤(night)엔 어둡고 붉은 테두리.
+   * Level 37 초록 물: 오래 서 있을수록 초록빛으로 어두워진다.
+   */
+  drawNightFx(game) {
+    const { ctx, W, H } = this;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (game.night === 'warn' && Math.floor(game.time * 4) % 2) { ctx.fillStyle = 'rgba(0,0,30,0.35)'; ctx.fillRect(0, 0, W, H); }
+    if (game.night === 'night') {
+      ctx.fillStyle = 'rgba(0,0,20,0.5)'; ctx.fillRect(0, 0, W, H);
+      const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.7);
+      v.addColorStop(0, 'rgba(80,0,0,0)'); v.addColorStop(1, `rgba(90,0,0,${0.5 + Math.sin(game.time * 3) * 0.15})`);
+      ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+    }
+    const tx = Math.min(1, game.toxicT / CONFIG.HAZARD.TOXIC_KILL);
+    if (tx > 0.02 && game.local.alive) {
+      const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * (0.5 - tx * 0.45), W / 2, H / 2, Math.max(W, H) * 0.7);
+      v.addColorStop(0, `rgba(30,70,10,${tx * 0.25})`); v.addColorStop(1, `rgba(5,15,0,${0.3 + tx * 0.7})`);
+      ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+    }
+  }
+
   /** 정신력이 낮을 때: 보랏빛 가장자리가 맥박치고, 화면이 살짝 어긋난다 */
   drawSanityFx(game) {
     const { ctx, W, H } = this, lv = game.sanityLevel;
@@ -550,7 +657,7 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'overlay';
     ctx.globalAlpha = 0.12;
-    ctx.fillStyle = { lobby: '#ffd25a', concrete: '#d8d0b0', pipes: '#d8904a', electrical: '#8aa0d8', fun: '#ff9a6a', run: '#ff3a2a' }[game.level?.info?.theme] || '#ffd25a';
+    ctx.fillStyle = { lobby: '#ffd25a', concrete: '#d8d0b0', pipes: '#d8904a', electrical: '#8aa0d8', fun: '#ff9a6a', run: '#ff3a2a', suburbs: '#5a7ad0', wheat: '#ffc860', pool: '#9ae0ff', school: '#c8e0b0', office: '#c8d0e0', motion: '#ffe0a0', courtyard: '#e0d0a0', kitty: '#ffb0d0' }[game.level?.info?.theme] || '#ffd25a';
     ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;

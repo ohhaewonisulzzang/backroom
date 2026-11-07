@@ -1,4 +1,4 @@
-import { CONFIG, TS, T, PLAYER_COLORS, ENTITY_TYPES, LEVELS, ITEM_TYPES, randomSuit } from '../shared/config.js';
+import { CONFIG, TS, T, PLAYER_COLORS, ENTITY_TYPES, LEVELS, ITEM_TYPES, MISSION, randomSuit } from '../shared/config.js';
 import { generateLevel } from '../shared/map.js';
 import { angleDiff } from '../shared/utils.js';
 import { hasLOS } from '../shared/physics.js';
@@ -32,6 +32,7 @@ export class GameRoom {
     this.restartAt = 0;
     this.level = null; this.map = null; this.monsters = [];
     this.keysCollected = []; this.exitUnlocked = false;
+    this.obj = null;                // 열쇠가 아닌 미션 상태 (배달 / 작동 / 생존)
     this.lockerOccupant = [];
     this.items = []; this.itemSeq = 0; this.entitySeq = 0;
     this.flares = []; this.flareSeq = 0;
@@ -47,6 +48,7 @@ export class GameRoom {
 
   /** Monster AI 가 사용하는 인터페이스 */
   allPlayers() { return this.players.values(); }
+  get nightPhase() { return this.night?.phase || 'day'; }
   onMonsterAlert(target, m) { this.emit('monsterAlert', { targetId: target ? target.id : null, id: m.id, type: m.type }); }
   onEntityEvent(m, kind, data = {}) {
     this.emit('entityEvent', { id: m.id, type: m.type, kind, x: Math.round(m.x), y: Math.round(m.y), ...data });
@@ -120,6 +122,7 @@ export class GameRoom {
     const p = this.players.get(id);
     if (!p) return;
     if (p.hidden && this.lockerOccupant[p.lockerId] === id) this.lockerOccupant[p.lockerId] = null;
+    if (this.phase === 'playing') this.dropParts(p);
     this.players.delete(id);
     this.emit('playerLeft', { id });
     this.log(`leave ${p.name} players=${this.players.size}`);
@@ -136,7 +139,7 @@ export class GameRoom {
     p.angle = Math.PI / 4;
     p.status = 'alive'; p.flashlight = true; p.sprinting = false;
     p.hidden = false; p.lockerId = -1; p.hideToggleAt = 0;
-    p.noise = 0; p.voiceUntil = 0; p.alarmUntil = 0; p.emoteAt = 0;
+    p.noise = 0; p.voiceUntil = 0; p.alarmUntil = 0; p.workUntil = 0; p.emoteAt = 0;
     p.sanity = CONFIG.SANITY.MAX;
     p.lastUpdate = Date.now();
   }
@@ -157,6 +160,12 @@ export class GameRoom {
     this.run = this.level.info.layout === 'run';
     this.horde = this.run ? { x: CONFIG.RUN.START_X, speed: CONFIG.RUN.SPEED, t: 0 } : null;
     if (this.run) this.exitUnlocked = true;
+    this.obj = this.initMission();
+    this.popped = new Set();        // Level Fun: 터진 풍선 (level.decor 번호)
+    this.noises = [];               // 바닥에서 난 소리 { x, y, r, until } — 소리 듣는 엔티티가 확인하러 온다
+    // Level 94: 밤 주기 (day → warn → night → day)
+    this.night = this.level.info.night ? { phase: 'day', t: CONFIG.NIGHT.every } : null;
+    for (const p of this.players.values()) p.toxic = 0;
     this.monsters = this.spawnEntities();
     this.items = this.spawnItems();
     this.flares = [];
@@ -169,6 +178,40 @@ export class GameRoom {
     this.snapAcc = 0;
     if (broadcast) this.emit('round', this.roundPayload());
     this.log(`round ${this.round} start level=${this.levelIndex} seed=${seed}`);
+  }
+
+  /** 미션 상태 초기화. keys / run 은 기존 열쇠 로직을 쓰므로 null */
+  initMission() {
+    const M = this.level.mission;
+    if (M.type === 'deliver') return { type: M.type, total: M.count, done: 0, parts: this.level.parts.map(pt => ({ x: pt.x, y: pt.y, s: 0, c: null })) };
+    if (M.type === 'activate') return { type: M.type, total: M.count, done: 0, turns: M.turns || 3, prog: this.level.stations.map(() => 0) };
+    if (M.type === 'survive') return { type: M.type, total: M.time, done: 0, left: M.time };
+    return null;
+  }
+
+  /** 클라이언트에 보내는 미션 상태 (작게) */
+  objPayload() {
+    const o = this.obj;
+    if (!o) return null;
+    if (o.type === 'deliver') return { type: o.type, total: o.total, done: o.done, parts: o.parts.map(pt => ({ x: Math.round(pt.x), y: Math.round(pt.y), s: pt.s, c: pt.c })) };
+    if (o.type === 'activate') return { type: o.type, total: o.total, done: o.done, prog: o.prog.map(v => Math.round(v * 100) / 100) };
+    return { type: o.type, total: o.total, done: o.done, left: Math.round(o.left * 10) / 10 };
+  }
+
+  /** 미션 진행도(0~1)에 따라 엔티티가 빨라지고, 다 끝나면 출구가 열린다 */
+  missionProgress(frac, by = null, kind = 'progress') {
+    for (const m of this.monsters) m.speedMul = 1 + MISSION.SPEED_BONUS * frac;
+    const wasOpen = this.exitUnlocked;
+    if (frac >= 1) this.exitUnlocked = true;
+    this.emit('objective', { kind, by, obj: this.objPayload(), unlocked: this.exitUnlocked && !wasOpen });
+  }
+
+  /** 들고 있던 부품을 그 자리에 떨어뜨린다 (사망 / 퇴장) */
+  dropParts(p) {
+    if (this.obj?.type !== 'deliver') return;
+    let n = 0;
+    for (const pt of this.obj.parts) if (pt.s === 1 && pt.c === p.id) { pt.s = 0; pt.c = null; pt.x = p.x + (n - 0.5) * 14; pt.y = p.y + 6; n++; }
+    if (n) this.missionProgress(this.obj.done / this.obj.total, p.id, 'drop');
   }
 
   /** 종류별 엔티티 배치. 스마일러는 어두운 구역, 나머지는 시작 지점에서 먼 곳. */
@@ -186,15 +229,26 @@ export class GameRoom {
     };
     const list = [];
     const counts = LEVELS[this.levelIndex].entities;
+    // 창문들: 북쪽이 벽인 바닥 (벽의 창문 바로 앞). 사물함·미션 물건 자리는 피한다
+    const taken = [...this.level.lockers, ...this.level.keys, ...this.level.parts, ...this.level.stations, ...(this.level.depot ? [this.level.depot] : [])];
+    const windowSpots = map.floorCells.filter(i => {
+      const x = i % map.w, y = (i / map.w) | 0;
+      return dist[i] >= 8 && map.tiles[i] === T.FLOOR && map.isSolid(x, y - 1) && !taken.some(o => Math.abs(o.tx - x) + Math.abs(o.ty - y) < 2);
+    });
     for (const type of ENTITY_TYPES) {
       for (let n = 0; n < (counts[type] || 0); n++) {
-        const pool = type === 'smiler' ? darkCells.filter(i => dist[i] >= 10) : far;
+        const pool = type === 'smiler' ? darkCells.filter(i => dist[i] >= 10)
+          : type === 'watch' || type === 'aranea' ? far.filter(i => this.level.wide[i])
+          : type === 'clump' ? far.filter(i => map.tiles[i] !== T.SLOW)
+          : type === 'windows' ? windowSpots
+          : far;
         const pos = type === 'howler' ? (n === 0 ? monsterSpawn : pick(far)) : pick(pool);
         if (!pos) continue;
         const m = new Monster(pos.x, pos.y, type, `${type}-${n}`);
         m.color = randomSuit();
         if (type === 'partygoer') m.faceOpen(map);
         if (type === 'deathmoth') m.clingToWall(map);
+        if (type === 'windows') { m.y = Math.floor(m.y / TS) * TS + 10; m.post = { x: m.x, y: m.y }; m.angle = Math.PI / 2; }   // 벽의 창문 바로 앞
         if (type === 'howler') m.timer = -n * CONFIG.ENTITY.howler.extraDelay;   // 하울러는 한 마리씩 차례로 깨어난다
         list.push(m);
       }
@@ -227,6 +281,9 @@ export class GameRoom {
       players: [...this.players.values()].map(p => p.serialize()),
       keys: [...this.keysCollected],
       exitUnlocked: this.exitUnlocked,
+      obj: this.objPayload(),
+      popped: [...(this.popped || [])],
+      night: this.night?.phase || null,
       monsters: this.monsters.map(m => m.serialize()),
       items: this.items,
       flares: this.flares,
@@ -312,6 +369,7 @@ export class GameRoom {
       return;
     }
     p.applyInput(s);
+    if (moved >= 1) p.lastMoveAt = now;     // 복도 감독: 멈춰 서 있는지 판단
     // 발소리: 움직이고 있으면 들리는 반경 (웅크리면 0) — 파티고어가 듣는다
     const H = CONFIG.ENTITY.partygoer;
     p.noise = moved < 1 ? 0 : p.crouching ? 0 : p.sprinting ? H.hearSprint : H.hearWalk;
@@ -322,7 +380,7 @@ export class GameRoom {
     if (this.keysCollected[i]) return;
     this.keysCollected[i] = true;
     const count = this.keysCollected.filter(Boolean).length;
-    for (const m of this.monsters) m.speedMul = 1 + CONFIG.ENTITY.SPEED_PER_KEY * count;
+    for (const m of this.monsters) m.speedMul = 1 + MISSION.SPEED_BONUS * count / this.level.keys.length;
     if (count >= this.level.keys.length) this.exitUnlocked = true;
     this.emit('keyCollected', { index: i, by: p.id, count, unlocked: this.exitUnlocked });
   }
@@ -331,6 +389,21 @@ export class GameRoom {
     this.level.keys.forEach((k, i) => {
       if (!this.keysCollected[i] && !k.puzzle && Math.hypot(k.x - p.x, k.y - p.y) < CONFIG.PICKUP_RADIUS) this.collectKey(i, p);
     });
+    // 배달 미션: 부품 줍기 (CARRY 개까지) / 시작 지점 장치에 넣기
+    const o = this.obj;
+    if (o?.type === 'deliver') {
+      let held = o.parts.filter(pt => pt.s === 1 && pt.c === p.id).length;
+      o.parts.forEach(pt => {
+        if (pt.s !== 0 || held >= MISSION.CARRY || Math.hypot(pt.x - p.x, pt.y - p.y) >= CONFIG.PICKUP_RADIUS + 4) return;
+        pt.s = 1; pt.c = p.id; held++;
+        this.missionProgress(o.done / o.total, p.id, 'pick');
+      });
+      const dp = this.level.depot;
+      if (held && dp && Math.hypot(dp.x - p.x, dp.y - p.y) < MISSION.DEPOT_DIST) {
+        for (const pt of o.parts) if (pt.s === 1 && pt.c === p.id) { pt.s = 2; pt.c = null; pt.x = dp.x; pt.y = dp.y; o.done++; }
+        this.missionProgress(o.done / o.total, p.id, 'deliver');
+      }
+    }
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       const d = Math.hypot(it.x - p.x, it.y - p.y);
@@ -367,6 +440,76 @@ export class GameRoom {
     // 오답 → 단말기 경보. 소리에 민감한 엔티티가 듣고 찾아온다
     p.alarmUntil = Date.now() + CONFIG.PUZZLE.ALARM_TIME * 1000;
     this.emit('puzzleAlarm', { index: index | 0, by: id, x: Math.round(k.x), y: Math.round(k.y) });
+  }
+
+  // ---------------------------------------------------------------- 채팅 / 보이스
+  /** 채팅: 120자, 0.6초에 한 번. 죽은 사람(관전)도 쓸 수 있다 */
+  onChat(id, { text } = {}) {
+    const p = this.players.get(id);
+    if (!p || typeof text !== 'string') return;
+    const now = Date.now();
+    if (now - (p.chatAt || 0) < 600) return;
+    const t = text.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 120);
+    if (!t) return;
+    p.chatAt = now;
+    this.emit('chat', { id, name: p.name, color: p.color, text: t, dead: this.phase === 'playing' && p.status === 'dead' });
+  }
+
+  /** 보이스 챗으로 말하는 중 → 목소리는 소리라서 귀 밝은 엔티티가 듣는다 (감정 표현과 같은 반경) */
+  onSpeaking(id, { on } = {}) {
+    const p = this.players.get(id);
+    if (!p || this.phase !== 'playing' || !p.alive) return;
+    if (on) p.voiceUntil = Math.max(p.voiceUntil || 0, Date.now() + 700);
+  }
+
+  /** 보이스 챗 상태 (스냅샷의 vc 로 모두에게 전달된다) */
+  onVoiceState(id, { vc } = {}) {
+    const p = this.players.get(id);
+    if (p && [0, 1, 2].includes(vc)) p.vc = vc;
+  }
+
+  /** 보이스 챗 연결 정보(SDP/ICE) 중계. 같은 방 사람에게만, 크기 제한 */
+  onRtc(socket, { to, d } = {}) {
+    if (!this.players.has(socket.id) || !d || typeof d !== 'object') return;
+    let size = 0;
+    try { size = JSON.stringify(d).length; } catch { return; }
+    if (size > 16000) return;
+    if (to === '*') socket.to(this.name).emit('rtc', { from: socket.id, d });
+    else if (typeof to === 'string' && this.players.has(to)) this.io.to(to).emit('rtc', { from: socket.id, d });
+  }
+
+  // ---------------------------------------------------------------- NPC / 풍선
+  /** 파티 푸퍼에게 말 걸기 → 남은 열쇠(단말기) 중 가장 가까운 것까지 안내 (다른 푸퍼가 안내 중인 열쇠는 빼고) */
+  onInteract(id, { mid } = {}) {
+    const p = this.players.get(id);
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused) return;
+    const m = this.monsters.find(m => m.id === mid && m.type === 'partyPooper');
+    if (!m || m.state !== 'idle' || Math.hypot(m.x - p.x, m.y - p.y) > m.cfg.talk * 1.5) return;
+    const busy = new Set(this.monsters.filter(o => o.type === 'partyPooper' && o.state !== 'idle').map(o => o.guideKey));
+    const left = this.level.keys.map((k, i) => ({ k, i })).filter(o => !this.keysCollected[o.i] && !busy.has(o.i));
+    if (!left.length) { this.onEntityEvent(m, 'voice', { text: '...' }); return; }
+    left.sort((a, b) => Math.hypot(a.k.x - m.x, a.k.y - m.y) - Math.hypot(b.k.x - m.x, b.k.y - m.y));
+    m.state = 'guide'; m.guideKey = left[0].i; m.follower = id; m.path = []; m.repathT = 0;
+    this.onEntityEvent(m, 'voice', { text: '따라와...' });
+  }
+
+  /** Level Fun 풍선 터뜨리기: 큰 소리(파티고어가 온다) + 아주 드물게 랜덤 아이템 */
+  onPopBalloon(id, { index } = {}) {
+    const p = this.players.get(id);
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused) return;
+    const i = index | 0, d = this.level.decor[i], B = CONFIG.BALLOON;
+    if (!d || d.kind !== 'balloon' || this.popped.has(i) || Math.hypot(d.x - p.x, d.y - p.y) > B.USE_DIST * 1.5) return;
+    this.popped.add(i);
+    const now = Date.now();
+    this.noises.push({ x: d.x, y: d.y, r: B.NOISE, until: now + B.NOISE_TIME * 1000 });
+    let item = null;
+    if (Math.random() < B.ITEM_CHANCE) {
+      const types = Object.keys(ITEM_TYPES), type = types[Math.floor(Math.random() * types.length)];
+      item = { id: ++this.itemSeq, type, x: Math.round(d.x), y: Math.round(d.y + 4) };
+      this.items.push(item);
+    }
+    this.emit('balloonPopped', { index: i, by: id, x: Math.round(d.x), y: Math.round(d.y), item: item?.type || null });
+    if (item) this.emit('itemSpawned', item);
   }
 
   // ---------------------------------------------------------------- items / emotes
@@ -446,10 +589,20 @@ export class GameRoom {
     this.emit('emote', { id, i });
   }
 
+  /** 이모트 동작 (뻐큐 / 가리키기 / 춤). 보여 주기만 하고 게임엔 영향 없음. 1초에 한 번 */
+  onGesture(id, { g } = {}) {
+    const p = this.players.get(id);
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || !['finger', 'point', 'dance1', 'dance2'].includes(g)) return;
+    const now = Date.now();
+    if (now - (p.gestureAt || 0) < 1000) return;
+    p.gestureAt = now;
+    this.emit('gesture', { id, g });
+  }
+
   // ---------------------------------------------------------------- test mode
   /**
    * 테스트 명령. 서버가 testMode 로 시작됐을 때만 동작한다 (npm run dev 기본 ON, 배포는 BACKROOMS_TEST=1 일 때만).
-   * cmd: nextLevel | setLevel | giveKey | unlockExit | tpKey | tpPuzzle | tpExit | drainSanity | spawnItem | spawnEntity | clearEntities | god | revive
+   * cmd: nextLevel | setLevel | giveKey | unlockExit | tpKey | tpPuzzle | tpBalloon | tpPooper | tpExit | drainSanity | spawnItem | spawnEntity | clearEntities | god | revive
    */
   onTest(id, { cmd, arg } = {}) {
     if (!this.testMode) return;
@@ -474,21 +627,49 @@ export class GameRoom {
         this.startRound(true);
         return reply(`LEVEL ${n} 시작`);
       }
-      case 'giveKey': {
-        const i = this.keysCollected.findIndex(c => !c);
-        if (i < 0) return reply('열쇠를 이미 다 모았다');
-        this.collectKey(i, p);
-        return reply('열쇠 +1');
+      case 'giveKey': {   // 미션 한 단계 진행 (열쇠 +1 / 부품 배달 +1 / 장치 하나 완료 / 생존 시간 -30초)
+        const o = this.obj;
+        if (this.exitUnlocked) return reply('미션 이미 완료');
+        if (o?.type === 'deliver') {
+          const pt = o.parts.find(pt => pt.s !== 2); pt.s = 2; pt.c = null; pt.x = this.level.depot.x; pt.y = this.level.depot.y; o.done++;
+          this.missionProgress(o.done / o.total, id, 'deliver');
+        } else if (o?.type === 'activate') {
+          const i = o.prog.findIndex(v => v < 1); o.prog[i] = 1; o.done++;
+          this.missionProgress(o.done / o.total, id, 'activate');
+        } else if (o?.type === 'survive') {
+          o.left = Math.max(0, o.left - 30);
+        } else {
+          const i = this.keysCollected.findIndex(c => !c);
+          if (i < 0) return reply('열쇠를 이미 다 모았다');
+          this.collectKey(i, p);
+        }
+        return reply('미션 +1');
       }
-      case 'unlockExit':
-        this.keysCollected.forEach((c, i) => { if (!c) this.collectKey(i, p); });
+      case 'unlockExit': {
+        const o = this.obj;
+        if (o?.type === 'deliver') {
+          for (const pt of o.parts) if (pt.s !== 2) { pt.s = 2; pt.c = null; pt.x = this.level.depot.x; pt.y = this.level.depot.y; o.done++; }
+          this.missionProgress(1, id, 'deliver');
+        } else if (o?.type === 'activate') {
+          o.prog = o.prog.map(() => 1); o.done = o.total;
+          this.missionProgress(1, id, 'activate');
+        } else if (o?.type === 'survive') {
+          o.left = 0; o.done = o.total;
+          this.missionProgress(1, id, 'survive');
+        } else this.keysCollected.forEach((c, i) => { if (!c) this.collectKey(i, p); });
         return reply('출구 개방');
-      case 'tpKey': {
-        const k = this.level.keys.map((k, i) => ({ k, i })).filter(o => !this.keysCollected[o.i])
-          .sort((a, b) => Math.hypot(a.k.x - p.x, a.k.y - p.y) - Math.hypot(b.k.x - p.x, b.k.y - p.y))[0];
-        if (!k) return reply('남은 열쇠 없음');
-        teleport(k.k.x, k.k.y);
-        return reply('가장 가까운 열쇠로 이동');
+      }
+      case 'tpKey': {   // 다음 미션 목표로 이동 (열쇠 / 부품, 다 들었으면 배달 장치 / 안 끝난 장치)
+        const o = this.obj, near = list => list.sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+        let t = null;
+        if (o?.type === 'deliver') {
+          const held = o.parts.filter(pt => pt.s === 1 && pt.c === id).length, ground = o.parts.filter(pt => pt.s === 0);
+          t = held >= MISSION.CARRY || (held && !ground.length) ? this.level.depot : near(ground);
+        } else if (o?.type === 'activate') t = near(this.level.stations.filter((st, i) => o.prog[i] < 1));
+        else t = near(this.level.keys.filter((k, i) => !this.keysCollected[i]));
+        if (!t) return reply('남은 목표 없음');
+        teleport(t.x, t.y);
+        return reply('가장 가까운 목표로 이동');
       }
       case 'tpPuzzle': {   // 가장 가까운(arg 가 있으면 그 종류의) 안 푼 퍼즐 단말기 옆으로
         const k = this.level.keys.map((k, i) => ({ k, i })).filter(o => o.k.puzzle && !this.keysCollected[o.i] && (!arg || o.k.puzzle.type === arg))
@@ -496,6 +677,19 @@ export class GameRoom {
         if (!k) return reply('남은 퍼즐 단말기 없음');
         teleport(k.k.x, k.k.y + 1);
         return reply(`퍼즐 단말기(${k.k.puzzle.type})로 이동`);
+      }
+      case 'tpBalloon': {   // 가장 가까운 안 터진 풍선 옆으로
+        const near = (this.level.decor || []).map((d, i) => ({ d, i })).filter(o => o.d.kind === 'balloon' && !this.popped.has(o.i))
+          .sort((a, b) => Math.hypot(a.d.x - p.x, a.d.y - p.y) - Math.hypot(b.d.x - p.x, b.d.y - p.y))[0];
+        if (!near) return reply('풍선 없음');
+        teleport(near.d.x, near.d.y);
+        return reply('풍선으로 이동', { index: near.i });
+      }
+      case 'tpPooper': {    // 가장 가까운 파티 푸퍼 옆으로
+        const m = this.monsters.filter(m => m.type === 'partyPooper').sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+        if (!m) return reply('파티 푸퍼 없음');
+        teleport(m.x, m.y + 20);
+        return reply('파티 푸퍼로 이동', { mid: m.id });
       }
       case 'tpExit': {
         const e = this.level.exitIdx, w = this.map.w;
@@ -557,8 +751,15 @@ export class GameRoom {
     if (this.phase === 'lobby' || this.paused) return;
     if (this.phase === 'playing') {
       if (this.flares.length) this.flares = this.flares.filter(f => f.until > now);
+      if (this.noises.length) this.noises = this.noises.filter(n => n.until > now);
       if (this.monsterGrace > 0) this.monsterGrace -= dt;
       else for (const m of this.monsters) m.update(dt, this);
+      if (this.monsterGrace <= 0) { this.updateMission(dt, now); this.updateNight(dt); }
+      // 안내를 마친 파티 푸퍼는 사라진다
+      if (this.monsters.some(m => m.gone)) {
+        for (const m of this.monsters) if (m.gone) this.onEntityEvent(m, 'poof');
+        this.monsters = this.monsters.filter(m => !m.gone);
+      }
 
       const reach = CONFIG.PLAYER.RADIUS + CONFIG.ENTITY.RADIUS - 2;
       let someoneDied = false;
@@ -596,6 +797,19 @@ export class GameRoom {
           } else if (p.god) p.sanity = Math.max(p.sanity, 1);
         }
       }
+      // 하이드로리티스 플레그: 탁한 초록 물에 오래 서 있으면 죽는다
+      if (this.level.info.toxic && this.monsterGrace <= 0) {
+        const Z = CONFIG.HAZARD;
+        for (const p of this.players.values()) {
+          if (!p.alive) continue;
+          if (this.level.isToxic(Math.floor(p.x / TS), Math.floor(p.y / TS))) p.toxic = (p.toxic || 0) + dt;
+          else p.toxic = Math.max(0, (p.toxic || 0) - dt * Z.TOXIC_RECOVER);
+          if (p.toxic >= Z.TOXIC_KILL && !p.god) {
+            p.status = 'dead'; someoneDied = true;
+            this.emit('playerDied', { id: p.id, entityType: 'hydrolitis', x: Math.round(p.x), y: Math.round(p.y) });
+          } else if (p.god) p.toxic = Math.min(p.toxic, Z.TOXIC_KILL - 1);
+        }
+      }
       for (const p of this.players.values()) {
         if (!p.alive || p.god || this.monsterGrace > 0) continue;
         const killer = this.monsters.find(m => m.canKill() && (!p.hidden || m.canFindHidden(p)) &&
@@ -615,11 +829,61 @@ export class GameRoom {
           players: [...this.players.values()].map(p => p.serializeSnapshot()),
           monsters: this.monsters.map(m => m.serialize()),
           ...(this.horde ? { horde: { x: Math.round(this.horde.x), speed: Math.round(this.horde.speed) } } : {}),
+          ...(this.obj && this.obj.type !== 'deliver' ? { obj: this.objPayload() } : {}),
         });
       }
-      if (someoneDied) this.checkRoundEnd();
+      if (someoneDied) {
+        for (const p of this.players.values()) if (p.status === 'dead') this.dropParts(p);
+        this.checkRoundEnd();
+      }
     } else if (this.phase === 'ended' && now >= this.restartAt) {
       this.startRound();
+    }
+  }
+
+  /**
+   * 밸브/크랭크 돌리기 (클라이언트 패널에서 시계 방향으로 돌린 각도, 라디안).
+   * 서버가 거리·속도를 검사하고 진행도를 올린다. 돌리는 동안 소리가 난다.
+   */
+  onTurnValve(id, { index, delta } = {}) {
+    const p = this.players.get(id), o = this.obj;
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused || o?.type !== 'activate' || this.exitUnlocked) return;
+    const i = index | 0, st = this.level.stations[i];
+    if (!st || o.prog[i] >= 1 || !finite(delta) || delta <= 0) return;
+    if (Math.hypot(st.x - p.x, st.y - p.y) > MISSION.STATION_DIST * 1.6) return;
+    const now = Date.now();
+    const allowed = Math.min(0.25, (now - (p.turnAt || 0)) / 1000) * MISSION.TURN_RATE * Math.PI * 2 + 0.3;   // 한 번에 최대 0.25초 분량
+    p.turnAt = now;
+    const d = Math.min(delta, allowed);
+    p.workUntil = now + 500;
+    o.prog[i] = Math.min(1, o.prog[i] + d / (o.turns * Math.PI * 2));
+    if (o.prog[i] >= 1) { o.done++; this.missionProgress(o.done / o.total, id, 'activate'); }
+  }
+
+  /** Level 94 밤 주기: 예고(warn) → 밤(night, 애니메이션이 깨어난다) → 낮 */
+  updateNight(dt) {
+    const N = this.night;
+    if (!N) return;
+    N.t -= dt;
+    if (N.t > 0) return;
+    const C = CONFIG.NIGHT;
+    if (N.phase === 'day') { N.phase = 'warn'; N.t = C.warn; }
+    else if (N.phase === 'warn') { N.phase = 'night'; N.t = C.dur; }
+    else { N.phase = 'day'; N.t = C.every; }
+    this.emit('night', { phase: N.phase, t: N.t });
+  }
+
+  /** 생존: 시간이 줄어든다 */
+  updateMission(dt, now) {
+    const o = this.obj;
+    if (!o || this.exitUnlocked) return;
+    if (o.type === 'survive') {
+      // 모두 숨어만 있으면 시간이 멈춘다 (사물함에서 버티기 방지)
+      const out = [...this.players.values()].some(p => p.alive && !p.hidden);
+      if (out) o.left = Math.max(0, o.left - dt);
+      const frac = 1 - o.left / o.total;
+      for (const m of this.monsters) m.speedMul = 1 + MISSION.SPEED_BONUS * frac;
+      if (o.left <= 0) { o.done = o.total; this.missionProgress(1, null, 'survive'); }
     }
   }
 

@@ -9,10 +9,12 @@ import { mulberry32 } from './utils.js';
  *  sequence  : 숫자 퀴즈   — 규칙을 찾아 ? 에 들어갈 수를 맞힌다                answer = 숫자
  *  memory    : 기억력      — 깜빡인 순서대로 패드를 누른다                     answer = [패드 번호...]
  *  slide     : 슬라이드    — 숫자 타일을 1~8 순서로 맞춘다                     answer = [움직인 타일 칸...]
+ *  arcade    : 파티 팝     — (Level Fun 게임기) 좌우로 오가는 풍선이 다트 구역에 왔을 때 눌러 3번 터뜨린다
+ *                            answer = [단계별로 누른 시각(초, 그 단계 시작부터)...]
  */
-export const PUZZLE_TYPES = ['oneStroke', 'lightsOut', 'sequence', 'memory', 'slide'];
+export const PUZZLE_TYPES = ['oneStroke', 'lightsOut', 'sequence', 'memory', 'slide', 'arcade'];
 export const PUZZLE_NAMES = {
-  oneStroke: '한붓 그리기', lightsOut: '전등 끄기', sequence: '숫자 퀴즈', memory: '기억력', slide: '슬라이드 퍼즐',
+  oneStroke: '한붓 그리기', lightsOut: '전등 끄기', sequence: '숫자 퀴즈', memory: '기억력', slide: '슬라이드 퍼즐', arcade: '파티 팝',
 };
 export const PUZZLE_HINTS = {
   oneStroke: '모든 선을 딱 한 번씩만 지나가도록 한 번에 이어라. 점을 누르고 이웃 점으로 끌거나 차례로 눌러라.',
@@ -20,6 +22,7 @@ export const PUZZLE_HINTS = {
   sequence: '규칙을 찾아 ? 에 들어갈 수를 입력하라. 틀리면 경보가 울린다.',
   memory: '불이 켜지는 순서를 기억했다가 그대로 눌러라. 틀려도 다시 보여 준다 (대신 경보가 울린다).',
   slide: '빈칸 옆 타일을 눌러 밀어서 1~8 순서로 맞춰라.',
+  arcade: '풍선이 다트 구역(초록)에 들어왔을 때 클릭(또는 Space)! 3번 터뜨리면 클리어. 빗나가면 경보가 울린다.',
 };
 
 const edgeKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
@@ -168,9 +171,32 @@ function checkSlide(p, ans) {
   return t.every((v, i) => v === SOLVED[i]);
 }
 
+// ------------------------------------------------------------------ 파티 팝 (아케이드)
+/** 풍선 위치 (0~1 왕복). 단계 st 를 시작하고 t 초 뒤 */
+export function arcadePos(st, t) {
+  const u = (((st.phase + t * st.speed) % 2) + 2) % 2;
+  return 1 - Math.abs(u - 1);
+}
+function genArcade(rng, diff) {
+  const stages = [];
+  for (let k = 0; k < 3; k++) {
+    stages.push({
+      c: 0.2 + rng() * 0.6,                               // 다트 구역 가운데
+      hw: Math.max(0.05, 0.11 - diff * 0.012 - k * 0.012), // 구역 반폭 (단계마다 좁아짐)
+      speed: (0.55 + diff * 0.1) * (1 + k * 0.35),         // 초당 왕복 거리 (단계마다 빨라짐)
+      phase: rng() * 2,
+    });
+  }
+  return { type: 'arcade', stages };
+}
+function checkArcade(p, ans) {
+  if (!Array.isArray(ans) || ans.length !== p.stages.length) return false;
+  return ans.every((t, k) => Number.isFinite(t) && t >= 0 && t < 60 && Math.abs(arcadePos(p.stages[k], t) - p.stages[k].c) <= p.stages[k].hw + 0.02);
+}
+
 // ------------------------------------------------------------------
-const GEN = { oneStroke: genOneStroke, lightsOut: genLightsOut, sequence: genSequence, memory: genMemory, slide: genSlide };
-const CHECK = { oneStroke: checkOneStroke, lightsOut: checkLightsOut, sequence: checkSequence, memory: checkMemory, slide: checkSlide };
+const GEN = { oneStroke: genOneStroke, lightsOut: genLightsOut, sequence: genSequence, memory: genMemory, slide: genSlide, arcade: genArcade };
+const CHECK = { oneStroke: checkOneStroke, lightsOut: checkLightsOut, sequence: checkSequence, memory: checkMemory, slide: checkSlide, arcade: checkArcade };
 
 /** 같은 (type, seed, diff) → 같은 퍼즐. diff 0~3 */
 export function generatePuzzle(type, seed, diff = 0) {

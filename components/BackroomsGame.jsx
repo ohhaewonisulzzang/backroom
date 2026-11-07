@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import PuzzlePanel from './PuzzlePanel.jsx';
+import ValvePanel from './ValvePanel.jsx';
+import ChatBox from './ChatBox.jsx';
+import { VoiceSettings, KeySettings } from './SettingsPanels.jsx';
+import { keyLabel } from '../game/client/input.js';
 
 const store = {
   get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
@@ -29,13 +33,21 @@ export default function BackroomsGame() {
   const [pauseOpen, setPauseOpen] = useState(false);
   const [settings, setSettings] = useState(loadSettings);
   const [puzzle, setPuzzle] = useState(null);       // 열린 퍼즐 단말기 { index, puzzle, wrongAt }
+  const [valve, setValve] = useState(null);         // 열린 밸브/크랭크 { index, kind, turns }
   const [toast, setToast] = useState(null);         // 퍼즐 결과 한 줄 알림
+  const [chat, setChat] = useState([]);             // 채팅 기록
+  const [chatOpen, setChatOpen] = useState(false);  // 채팅 입력창
   const isTouch = useIsTouch();                     // 휴대폰/태블릿이면 화면 조작 버튼을 띄운다
 
   useEffect(() => {
     let disposed = false;
     const ui = {
-      showMenu: ({ error = '', screen = 'main' } = {}) => { setTestOpen(false); setPauseOpen(false); setPuzzle(null); setOverlay({ kind: 'menu', screen, error }); },
+      showMenu: ({ error = '', screen = 'main' } = {}) => { setTestOpen(false); setPauseOpen(false); setPuzzle(null); setValve(null); setChatOpen(false); setChat([]); setOverlay({ kind: 'menu', screen, error }); },
+      showValve: v => setValve(v),
+      chatMessage: m => setChat(c => [...c.slice(-60), { ...m, key: `${performance.now()}-${Math.random()}`, at: performance.now() }]),
+      openChat: () => setChatOpen(true),
+      closeChat: () => setChatOpen(false),
+      closeValve: () => setValve(null),
       showLobby: state => setOverlay({ kind: 'lobby', ...state }),
       showInfo: info => setOverlay({ kind: 'info', ...info }),
       showRoundEnd: d => setOverlay({ kind: 'roundEnd', ...d, endAt: performance.now() + (d.restartIn || 0) * 1000 }),
@@ -98,7 +110,7 @@ export default function BackroomsGame() {
         </div>
       )}
       {pauseOpen && (
-        <PauseMenu solo={!!engine()?.isSolo} settings={settings} onSettings={changeSettings}
+        <PauseMenu solo={!!engine()?.isSolo} settings={settings} onSettings={changeSettings} engine={engine}
           onResume={() => setPauseOpen(false)}
           onLeave={() => { setPauseOpen(false); engine()?.leaveRoom(); }} />
       )}
@@ -108,7 +120,17 @@ export default function BackroomsGame() {
           onClose={() => engine()?.closePuzzle()}
           sfx={(k, a) => engine()?.sfx(k, a)} />
       )}
+      {valve && (
+        <ValvePanel key={valve.index} {...valve}
+          onTurn={d => engine()?.turnValve(valve.index, d)}
+          progress={() => engine()?.valveProgress(valve.index) ?? 0}
+          onClose={() => engine()?.closeValve()} />
+      )}
       {toast && <div className="pz-toast">{toast}</div>}
+      {['hidden', 'lobby', 'roundEnd'].includes(overlay.kind) && !pauseOpen && (
+        <ChatBox messages={chat} open={chatOpen} colorHex={colorHex}
+          onSend={t => engine()?.sendChat(t)} onClose={() => engine()?.closeChat()} />
+      )}
       {isTouch && overlay.kind === 'hidden' && !pauseOpen && <TouchControls engine={engine} />}
       {testOpen && <TestPanel onCmd={(c, a) => engine()?.test(c, a)} onClose={() => setTestOpen(false)} />}
     </div>
@@ -180,9 +202,9 @@ function TouchControls({ engine }) {
     return () => { engine()?.resetTouch(); const t2 = T(); if (t2) t2.crouch = false; };
   }, []);
   const stop = e => e.stopPropagation();
-  const Btn = ({ code, label, className = '', onTap }) => (
+  const Btn = ({ code, action, label, className = '', onTap }) => (
     <button className={`touch-btn ${className}`}
-      onPointerDown={e => { stop(e); const t = T(); if (t) t.active = true; if (onTap) onTap(); else engine()?.press(code); }}>
+      onPointerDown={e => { stop(e); const t = T(); if (t) t.active = true; if (onTap) onTap(); else if (action) engine()?.pressAction(action); else engine()?.press(code); }}>
       {label}
     </button>
   );
@@ -207,12 +229,14 @@ function TouchControls({ engine }) {
         onChange={(x, y, len) => { const t = T(); if (!t) return; t.active = true; if (len > 0.2) t.aim = Math.atan2(y, x); }}
         onEnd={() => { const t = T(); if (t) t.aim = null; }} />
       <div className="touch-top">
-        <Btn code="Space" label="관전" />
+        <Btn action="chat" label="채팅" />
+        {engine()?.voice?.enabled && <Btn action="mic" label="마이크" />}
+        <Btn action="skip" label="관전" />
         <Btn code="Escape" label="Ⅱ" />
       </div>
       <div className="touch-actions">
-        <Btn code="KeyE" label="E" className="big" />
-        <Btn code="KeyF" label="손전등" />
+        <Btn action="interact" label="E" className="big" />
+        <Btn action="flashlight" label="손전등" />
         <Btn label={crouch ? '웅크림' : '웅크리기'} className={crouch ? 'on' : ''}
           onTap={() => { const v = !crouch; setCrouch(v); const t = T(); if (t) t.crouch = v; }} />
         <Btn label="말하기" className={talk ? 'on' : ''} onTap={() => setTalk(v => !v)} />
@@ -221,6 +245,9 @@ function TouchControls({ engine }) {
         <div className="touch-talk" onPointerDown={stop}>
           {(engine()?.emoteLines || []).map((l, i) => (
             <button key={i} className="touch-btn" onClick={() => { engine()?.emote(i); setTalk(false); }}>{l}</button>
+          ))}
+          {(engine()?.gestures || []).map(([g, n]) => (
+            <button key={g} className="touch-btn on" onClick={() => { engine()?.gesture(g); setTalk(false); }}>{n}</button>
           ))}
         </div>
       )}
@@ -297,9 +324,9 @@ function MainMenu({ screen, error, nav, engine, settings, onSettings }) {
         </form>
       )}
 
-      {screen === 'settings' && <SettingsForm settings={settings} onSettings={onSettings} onBack={() => nav('main')} />}
+      {screen === 'settings' && <SettingsForm settings={settings} onSettings={onSettings} onBack={() => nav('main')} engine={engine} />}
 
-      {screen === 'controls' && <ControlsText onBack={() => nav('main')} />}
+      {screen === 'controls' && <ControlsText onBack={() => nav('main')} engine={engine} />}
 
       {screen === 'bestiary' && <Bestiary onBack={() => nav('main')} />}
 
@@ -319,26 +346,41 @@ function MainMenu({ screen, error, nav, engine, settings, onSettings }) {
   );
 }
 
-function SettingsForm({ settings, onSettings, onBack }) {
+function SettingsForm({ settings, onSettings, onBack, engine }) {
+  const [tab, setTab] = useState('general');
   return (
-    <div className="menu-form">
-      <label>볼륨 {Math.round(settings.volume * 100)}%
-        <input type="range" min="0" max="1" step="0.05" value={settings.volume} onChange={e => onSettings({ volume: Number(e.target.value) })} />
-      </label>
-      <label className="check"><input type="checkbox" checked={settings.shake !== false} onChange={e => onSettings({ shake: e.target.checked })} /> 화면 흔들림</label>
-      <label className="check"><input type="checkbox" checked={settings.menuScares !== false} onChange={e => onSettings({ menuScares: e.target.checked })} /> 메인 화면 점프스케어</label>
-      <label className="check"><input type="checkbox" checked={settings.deathScares !== false} onChange={e => onSettings({ deathScares: e.target.checked })} /> 사망 점프스케어 (괴물이 덮쳐 오는 화면)</label>
-      <label className="check"><input type="checkbox" checked={settings.gore !== false} onChange={e => onSettings({ gore: e.target.checked })} /> 잔인한 연출 (피 · 살점 · 핏자국)</label>
+    <div className="menu-form settings-form">
+      <div className="tabs">
+        {[['general', '일반'], ['voice', '보이스 챗'], ['keys', '키 설정']].map(([k, n]) => (
+          <button key={k} type="button" className={`tab${tab === k ? ' on' : ''}`} onClick={() => setTab(k)}>{n}</button>
+        ))}
+      </div>
+      {tab === 'general' && (
+        <>
+          <label>볼륨 {Math.round(settings.volume * 100)}%
+            <input type="range" min="0" max="1" step="0.05" value={settings.volume} onChange={e => onSettings({ volume: Number(e.target.value) })} />
+          </label>
+          <label className="check"><input type="checkbox" checked={settings.shake !== false} onChange={e => onSettings({ shake: e.target.checked })} /> 화면 흔들림</label>
+          <label className="check"><input type="checkbox" checked={settings.menuScares !== false} onChange={e => onSettings({ menuScares: e.target.checked })} /> 메인 화면 점프스케어</label>
+          <label className="check"><input type="checkbox" checked={settings.deathScares !== false} onChange={e => onSettings({ deathScares: e.target.checked })} /> 사망 점프스케어 (괴물이 덮쳐 오는 화면)</label>
+          <label className="check"><input type="checkbox" checked={settings.gore !== false} onChange={e => onSettings({ gore: e.target.checked })} /> 잔인한 연출 (피 · 살점 · 핏자국)</label>
+        </>
+      )}
+      {tab === 'voice' && <VoiceSettings engine={engine} />}
+      {tab === 'keys' && <KeySettings engine={engine} />}
       <button className="menu-btn" onClick={onBack}>← 뒤로</button>
     </div>
   );
 }
 
-function ControlsText({ onBack }) {
+function ControlsText({ onBack, engine }) {
+  const K = a => keyLabel(engine?.()?.input?.binds?.[a]);
   return (
     <div className="menu-text">
-      <p><b>WASD</b> / <b>방향키</b> 이동 · <b>마우스</b> 조준<br /><b>SHIFT</b> 달리기 · <b>C</b> 웅크리기(조용히 걷기)<br />
-        <b>F</b> 손전등 · <b>E</b> 사물함/탁자에 숨기, 퍼즐 단말기 열기 · <b>1~4</b> 아이템 사용 · <b>G</b> 누른 채 <b>1~4</b> 아이템 버리기<br /><b>,</b> 감정 표현(말하기) · <b>SPACE</b> 관전 전환 · <b>ESC</b> 메뉴</p>
+      <p><b>{K('up')}{K('left')}{K('down')}{K('right')}</b> / <b>방향키</b> 이동 · <b>마우스</b> 조준<br /><b>{K('sprint')}</b> 달리기 · <b>{K('crouch')}</b> 웅크리기(조용히 걷기)<br />
+        <b>{K('flashlight')}</b> 손전등 · <b>{K('interact')}</b> 숨기 / 퍼즐 / 밸브 / 말 걸기 / 풍선 · <b>{K('slot1')}~{K('slot4')}</b> 아이템 사용 · <b>{K('drop')}</b> 누른 채 아이템 키 = 버리기<br />
+        <b>{K('emote')}</b> 감정 표현 (1~6 대사, 7 뻐큐 · 8 가리키기 · 9·0 춤) · <b>{K('chat')}</b> 채팅 · <b>{K('mic')}</b> 마이크 켜기/끄기 · <b>{K('skip')}</b> 관전 전환 (길게: 영상 건너뛰기) · <b>ESC</b> 메뉴</p>
+      <p className="dim">키는 설정 → 키 설정에서 바꿀 수 있다. 보이스 챗은 설정 → 보이스 챗에서 켠다.</p>
       <p className="dim">휴대폰/태블릿: 왼손 스틱 이동(끝까지 밀면 달리기) · 오른손 스틱 손전등 방향(놓으면 걷는 쪽을 비춤)<br />아이템 칸 누르기 = 사용, 길게 누르기 = 버리기</p>
       <p className="dim">카메라: 플래시로 엔티티 기절 · 살충제: 나방 퇴치<br />조명탄: 빛 + 소리 미끼 · 나침반: 열쇠/출구 방향<br />스테미너 드링크: 지치지 않음 · 아몬드 워터: 정신력 회복</p>
       <p className="dim">LEVEL ! — 괴물 떼가 밀려온다. 장애물과 웅덩이를 피해 오른쪽 끝 출구까지 달려라.</p>
@@ -408,7 +450,7 @@ function Bestiary({ onBack }) {
 }
 
 // ================================================================ ESC 메뉴 (게임 중)
-function PauseMenu({ solo, settings, onSettings, onResume, onLeave }) {
+function PauseMenu({ solo, settings, onSettings, onResume, onLeave, engine }) {
   const [screen, setScreen] = useState('main');
   return (
     <div className="menu-col pause">
@@ -425,8 +467,8 @@ function PauseMenu({ solo, settings, onSettings, onResume, onLeave }) {
           <p className="dim">ESC 로 닫기</p>
         </nav>
       )}
-      {screen === 'settings' && <SettingsForm settings={settings} onSettings={onSettings} onBack={() => setScreen('main')} />}
-      {screen === 'controls' && <ControlsText onBack={() => setScreen('main')} />}
+      {screen === 'settings' && <SettingsForm settings={settings} onSettings={onSettings} onBack={() => setScreen('main')} engine={engine} />}
+      {screen === 'controls' && <ControlsText onBack={() => setScreen('main')} engine={engine} />}
       {screen === 'confirm' && (
         <nav className="menu-list">
           <p>정말 나갈까? {solo ? '지금까지의 진행이 사라진다.' : '동료들은 남아서 계속 플레이한다.'}</p>
@@ -543,8 +585,11 @@ function RoundEndPanel({ escaped = [], dead = [], endAt, nextLevelName = null, o
 
 /** 테스트 모드 패널 (` 키). 버튼은 포커스를 가져가지 않게 해서 Space/E 등 게임 키와 충돌하지 않도록 한다 */
 const ENTITY_BUTTONS = [['wanderer', '방랑자'], ['howler', '하울러'], ['smiler', '스마일러'], ['skinStealer', '스킨 스틸러'], ['hound', '하운드'],
-  ['partygoer', '파티고어'], ['deathmoth', '데스모스'], ['wretch', '광인'], ['scratcher', '스크래처']];
-const LEVEL_NAMES = ['0 Lobby', '1 Habitable', '2 Pipes', '3 Electrical', 'Fun =)', '5 Hotel', '6 Lights Out', '! Run', 'END'];
+  ['partygoer', '파티고어'], ['deathmoth', '데스모스'], ['wretch', '광인'], ['scratcher', '스크래처'],
+  ['windows', '창문들'], ['watch', '동네 감시자'], ['faceling', '페이슬링'], ['clump', '클럼프'], ['animation', '애니메이션'],
+  ['animatedKing', '애니메이션 킹'], ['aranea', '아라네아 멤브리'], ['kitty', '키티'], ['partyPooper', '파티 푸퍼']];
+const LEVEL_NAMES = ['0 Lobby', '1 Habitable', '2 Pipes', '3 Electrical', '4 Office', 'Fun =)', '5 Hotel', '6 Lights Out', '9 Suburbs', '10 Wheat',
+  '37 Pool', '52 School', '94 Motion', '188 Courtyard', '974 Kitty', '! Run', 'END'];
 const ITEM_BUTTONS = [['almondWater', '아몬드 워터'], ['staminaDrink', '스테미너 드링크'], ['camera', '카메라'], ['bugSpray', '살충제'], ['flare', '조명탄'], ['compass', '나침반']];
 
 function TestPanel({ onCmd, onClose }) {
@@ -564,9 +609,9 @@ function TestPanel({ onCmd, onClose }) {
       </div>
       <h3>진행</h3>
       <div className="tp-row">
-        <B cmd="giveKey">열쇠 +1</B>
+        <B cmd="giveKey">미션 +1</B>
         <B cmd="unlockExit">출구 열기</B>
-        <B cmd="tpKey">열쇠로 이동</B>
+        <B cmd="tpKey">목표로 이동</B>
         <B cmd="tpPuzzle">퍼즐로 이동</B>
         <B cmd="tpExit">출구로 이동</B>
       </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { PUZZLE_NAMES, PUZZLE_HINTS, lightsToggle, slideMove } from '../shared/puzzles.js';
+import { PUZZLE_NAMES, PUZZLE_HINTS, lightsToggle, slideMove, arcadePos } from '../shared/puzzles.js';
 
 /**
  * 퍼즐 단말기 화면. 게임은 멈추지 않는다 — 푸는 동안 엔티티가 다가올 수 있다.
@@ -16,11 +16,11 @@ export default function PuzzlePanel({ puzzle, wrongAt, onSubmit, onClose, sfx })
     const id = setTimeout(() => setShake(false), 600);
     return () => clearTimeout(id);
   }, [wrongAt]);
-  const Body = { oneStroke: OneStroke, lightsOut: LightsOut, sequence: Sequence, memory: Memory, slide: Slide }[puzzle.type];
+  const Body = { oneStroke: OneStroke, lightsOut: LightsOut, sequence: Sequence, memory: Memory, slide: Slide, arcade: Arcade }[puzzle.type];
   return (
     <div className={`puzzle-panel${shake ? ' wrong' : ''}`} onPointerDown={e => e.stopPropagation()}>
       <div className="pz-head">
-        <span>TERMINAL · {PUZZLE_NAMES[puzzle.type]}</span>
+        <span>{puzzle.type === 'arcade' ? 'ARCADE' : 'TERMINAL'} · {PUZZLE_NAMES[puzzle.type]}</span>
         <button onMouseDown={e => e.preventDefault()} onClick={onClose}>닫기 [E]</button>
       </div>
       <p className="pz-hint">{PUZZLE_HINTS[puzzle.type]}</p>
@@ -212,6 +212,74 @@ function Slide({ puzzle, onSubmit, sfx }) {
         ))}
       </div>
       <div className="pz-row"><span className="pz-dim">이동 {moves.length}</span><Btn onClick={reset}>처음부터</Btn></div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ 파티 팝 (Level Fun 게임기)
+// 풍선이 좌우로 왔다 갔다 한다. 초록 다트 구역에 들어왔을 때 클릭(또는 Space) → 펑! 3번이면 클리어.
+// 단계마다 풍선이 빨라지고 구역이 좁아진다. 빗나가면 서버에 오답 제출 → 경보 (그 단계는 다시)
+function Arcade({ puzzle, onSubmit, sfx }) {
+  const { stages } = puzzle;
+  const W = 340, H = 120, X0 = 20, X1 = W - 20;
+  const [stage, setStage] = useState(0);
+  const [x, setX] = useState(0);
+  const [flash, setFlash] = useState(null);      // 'hit' | 'miss'
+  const hits = useRef([]), start = useRef(performance.now()), done = useRef(false), stageRef = useRef(0);
+  useEffect(() => {
+    let raf = 0;
+    const loop = now => {
+      if (!done.current) setX(arcadePos(stages[stageRef.current], (now - start.current) / 1000));
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [stages]);
+  const fire = () => {
+    if (done.current) return;
+    const k = stageRef.current, st = stages[k], t = (performance.now() - start.current) / 1000;
+    if (Math.abs(arcadePos(st, t) - st.c) <= st.hw) {
+      sfx('beep', 900 + k * 200);
+      hits.current = [...hits.current, t];
+      setFlash('hit'); setTimeout(() => setFlash(null), 250);
+      if (hits.current.length === stages.length) { done.current = true; onSubmit(hits.current); return; }
+      stageRef.current = k + 1; setStage(k + 1); start.current = performance.now();
+    } else {
+      sfx('wrong');
+      setFlash('miss'); setTimeout(() => setFlash(null), 400);
+      onSubmit('miss');                          // 서버가 오답 판정 → 경보
+      start.current = performance.now();         // 같은 단계 다시
+    }
+  };
+  useEffect(() => {
+    const key = e => { if (e.code === 'Space') { e.preventDefault(); e.stopPropagation(); fire(); } };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  });
+  const st = stages[Math.min(stage, stages.length - 1)], px = v => X0 + v * (X1 - X0);
+  return (
+    <>
+      <svg className="pz-svg arcade-svg" viewBox={`0 0 ${W} ${H}`} onPointerDown={e => { e.preventDefault(); fire(); }}>
+        <rect x="0" y="0" width={W} height={H} fill={flash === 'miss' ? '#3a0a10' : '#120a24'} />
+        {[...Array(12)].map((_, i) => <circle key={i} cx={(i * 53) % W} cy={(i * 37) % 50 + 8} r="1.5" fill="#ffd25a" opacity="0.6" />)}
+        <rect x={px(st.c - st.hw)} y="20" width={px(st.c + st.hw) - px(st.c - st.hw)} height="70" fill="#6edc78" opacity="0.28" />
+        <line x1={px(st.c)} y1="16" x2={px(st.c)} y2="94" stroke="#6edc78" strokeWidth="2" strokeDasharray="4 4" />
+        <polygon points={`${px(st.c) - 6},104 ${px(st.c) + 6},104 ${px(st.c)},92`} fill="#e8e8f0" />
+        <line x1={X0} y1="96" x2={X1} y2="96" stroke="#5a2a8a" strokeWidth="3" />
+        {!done.current && (
+          <g transform={`translate(${px(x)} 52)`}>
+            <path d="M0 18 Q4 30 -2 40" stroke="#ddd" fill="none" />
+            <ellipse cx="0" cy="0" rx="15" ry="19" fill={flash === 'hit' ? '#fff' : '#d8312b'} />
+            <ellipse cx="-5" cy="-7" rx="3" ry="5" fill="#ff9a90" />
+          </g>
+        )}
+        {flash === 'hit' && <text x={W / 2} y="62" textAnchor="middle" fill="#ffd25a" fontSize="30" fontFamily="VT323, monospace">POP!</text>}
+        {flash === 'miss' && <text x={W / 2} y="62" textAnchor="middle" fill="#ff5a4a" fontSize="30" fontFamily="VT323, monospace">MISS</text>}
+      </svg>
+      <div className="pz-row">
+        <span className="pz-dim">풍선 {Math.min(hits.current.length, stages.length)} / {stages.length}</span>
+        <Btn onClick={fire}>쏘기 [Space]</Btn>
+      </div>
     </>
   );
 }

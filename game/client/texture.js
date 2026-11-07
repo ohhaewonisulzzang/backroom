@@ -62,6 +62,56 @@ export const THEMES = {
     molding: [56, 50, 48], moldingHi: [120, 110, 104], base: [64, 58, 56], baseDark: [44, 40, 38],
     crate: [128, 92, 52], crateDark: [92, 62, 32], crateHi: [160, 122, 74], crateTop: [146, 108, 64],
     puddle: [40, 44, 50], puddleHi: [120, 70, 66] },
+  // Level 9: 밤의 주택가 — 어두운 잔디 바닥, 벽은 흰 비닐 사이딩 집 외벽
+  suburbs: { ...DOOR, wallStyle: 'siding',
+    carpet: [46, 62, 40], carpetDark: [38, 52, 34], carpetLight: [58, 76, 48], stain: [34, 40, 30], stainDark: [26, 30, 22],
+    cap: [40, 38, 44], capLine: [50, 46, 54], capEdge: [18, 16, 20],
+    paper: [176, 180, 184], stripe: [140, 144, 150], motif: [176, 180, 184], drip: [120, 124, 120], dripDark: [96, 100, 96],
+    molding: [90, 92, 96], moldingHi: [200, 204, 208], base: [70, 66, 60], baseDark: [50, 46, 42] },
+  // Level 10: 밀밭 — 흙바닥, 벽은 사람 키보다 큰 밀
+  wheat: { ...DOOR, wallStyle: 'wheat',
+    carpet: [150, 118, 70], carpetDark: [136, 104, 60], carpetLight: [166, 132, 82], stain: [118, 90, 52], stainDark: [98, 74, 42],
+    cap: [196, 160, 70], capLine: [214, 178, 84], capEdge: [120, 94, 40],
+    paper: [214, 178, 84], stripe: [176, 140, 58], motif: [236, 204, 110], drip: [150, 118, 50], dripDark: [120, 92, 38],
+    molding: [176, 140, 58], moldingHi: [236, 204, 110], base: [120, 92, 40], baseDark: [90, 68, 30] },
+  // Level 37: 풀룸 — 하얀 타일 바닥과 벽, 하늘색 물웅덩이
+  pool: { ...DOOR, floorTiles: 8, wallStyle: 'tiles', clearWater: true,
+    carpet: [214, 222, 222], carpetDark: [176, 190, 192], carpetLight: [232, 238, 238], stain: [186, 200, 200], stainDark: [160, 176, 178],
+    cap: [150, 166, 170], capLine: [160, 176, 180], capEdge: [90, 104, 110],
+    paper: [222, 230, 230], stripe: [178, 192, 194], motif: [222, 230, 230], drip: [170, 190, 196], dripDark: [140, 164, 172],
+    molding: [120, 160, 176], moldingHi: [200, 224, 232], base: [100, 150, 170], baseDark: [70, 116, 136],
+    puddle: [96, 176, 206], puddleHi: [196, 236, 250] },
+  // Level 52: 학교 복도 — 체크무늬 리놀륨, 벽 아래는 초록 페인트
+  school: { ...DOOR, floorTiles: 16, checker: true, wallStyle: 'wood',
+    carpet: [176, 172, 156], carpetDark: [110, 120, 104], carpetLight: [196, 192, 176], stain: [140, 136, 120], stainDark: [118, 114, 100],
+    cap: [52, 56, 50], capLine: [62, 66, 60], capEdge: [24, 26, 22],
+    paper: [206, 200, 170], stripe: [190, 184, 154], motif: [206, 200, 170], drip: [160, 156, 130], dripDark: [130, 126, 104],
+    molding: [70, 86, 66], moldingHi: [130, 150, 120], base: [60, 76, 56], baseDark: [40, 52, 38],
+    wood: [74, 112, 82], woodDark: [56, 88, 62], woodHi: [96, 134, 102] },
+  // Level 4: 버려진 사무실 — 회청색 타일 카펫, 베이지 벽
+  office: { ...DOOR, floorTiles: 16,
+    carpet: [104, 112, 120], carpetDark: [92, 100, 108], carpetLight: [118, 126, 134], stain: [80, 84, 88], stainDark: [64, 68, 72],
+    cap: [58, 56, 52], capLine: [66, 64, 60], capEdge: [28, 26, 24],
+    paper: [196, 186, 160], stripe: [180, 170, 146], motif: [196, 186, 160], drip: [150, 140, 116], dripDark: [124, 116, 96],
+    molding: [110, 104, 92], moldingHi: [170, 162, 144], base: [80, 76, 70], baseDark: [56, 52, 48] },
+  // Level 94: 모션 — 만화 같은 마을. 밝은 잔디, 크림색 벽에 굵은 테두리
+  motion: { ...DOOR, wallStyle: 'siding',
+    carpet: [112, 176, 84], carpetDark: [100, 160, 74], carpetLight: [130, 196, 98], stain: [90, 140, 64], stainDark: [70, 118, 50],
+    cap: [200, 90, 70], capLine: [214, 104, 82], capEdge: [40, 20, 16],
+    paper: [244, 228, 176], stripe: [40, 30, 24], motif: [244, 228, 176], drip: [210, 190, 140], dripDark: [180, 160, 110],
+    molding: [40, 30, 24], moldingHi: [250, 240, 200], base: [60, 44, 34], baseDark: [30, 22, 16] },
+  // Level 188: 창문의 안뜰 — 회색 돌바닥, 연노랑 벽에 창문
+  courtyard: { ...DOOR, floorTiles: 12, checker: true, wallStyle: 'siding',
+    carpet: [138, 134, 126], carpetDark: [118, 114, 108], carpetLight: [152, 148, 140], stain: [100, 98, 92], stainDark: [84, 82, 78],
+    cap: [70, 64, 56], capLine: [80, 74, 66], capEdge: [34, 30, 26],
+    paper: [214, 198, 150], stripe: [190, 174, 128], motif: [214, 198, 150], drip: [170, 156, 112], dripDark: [140, 128, 90],
+    molding: [120, 106, 80], moldingHi: [230, 216, 170], base: [96, 86, 66], baseDark: [66, 58, 44] },
+  // Level 974: 키티의 집 — 나무 바닥, 분홍 하트 벽지
+  kitty: { ...DOOR, parquet: true, wallStyle: 'hearts',
+    carpet: [150, 104, 70], carpetDark: [128, 86, 56], carpetLight: [168, 120, 84], stain: [110, 74, 48], stainDark: [90, 60, 38],
+    cap: [96, 56, 70], capLine: [110, 66, 82], capEdge: [44, 24, 32],
+    paper: [236, 176, 196], stripe: [222, 150, 176], motif: [200, 60, 100], drip: [200, 140, 160], dripDark: [170, 110, 130],
+    molding: [160, 90, 116], moldingHi: [250, 210, 224], base: [130, 70, 94], baseDark: [90, 46, 64] },
   // Level 3: 어두운 전기실
   electrical: { ...DOOR,
     carpet: [70, 74, 78], carpetDark: [60, 64, 68], carpetLight: [84, 88, 92], stain: [48, 50, 54], stainDark: [36, 38, 42],
@@ -145,6 +195,29 @@ export function buildMapTexture(level) {
           }
           put(ox + x, oy + y, col.map(Math.round), n);
         }
+        else if (C.wallStyle === 'siding') {
+          // 비닐 사이딩: 가로 판자 + 가끔 창문 (불 꺼짐 / 노란 불빛)
+          const fy = y - capH;
+          let col = fy % 4 === 0 ? C.stripe : C.paper;
+          if ((tx * 7 + ty * 3) % 5 === 0 && x > 8 && x < 24 && fy > 3 && fy < 13) col = (x === 16 || fy === 8) ? C.molding : ((tx + ty) % 3 ? [26, 30, 40] : [220, 190, 110]);
+          put(ox + x, oy + y, col, n);
+        }
+        else if (C.wallStyle === 'hearts') {
+          const fy = y - capH, lx = (x + (Math.floor(fy / 7) % 2) * 4) % 8, ly = fy % 7;
+          const heart = (ly === 2 && (lx === 2 || lx === 4)) || (ly === 3 && lx >= 2 && lx <= 4) || (ly === 4 && lx === 3);
+          put(ox + x, oy + y, heart ? C.motif : (x % 8 === 0 ? C.stripe : C.paper), n);
+        }
+        else if (C.wallStyle === 'wheat') {
+          // 밀 줄기: 세로 줄 + 위쪽 이삭
+          const fy = y - capH, stalk = (x * 7 + tx * 3) % 5;
+          let col = stalk === 0 ? C.stripe : stalk === 2 ? C.motif : C.paper;
+          if (fy < 5 && (x + fy) % 3 === 0) col = C.motif;
+          put(ox + x, oy + y, col, n);
+        }
+        else if (C.wallStyle === 'tiles') {
+          const fy = y - capH;
+          put(ox + x, oy + y, x % 8 === 0 || fy % 8 === 0 ? C.stripe : C.paper, Math.floor(n / 2));
+        }
         else if (C.wallStyle === 'wood' && y > capH + (P - capH) * 0.5) {
           // 호텔 벽 아래쪽 절반: 나무 판자
           let col = x % 8 === 0 ? C.woodDark : (y % 6 === 0 ? C.woodHi : C.wood);
@@ -170,8 +243,12 @@ export function buildMapTexture(level) {
     if (rng() < 0.05) stains.push({ x: 6 + rng() * 20, y: 6 + rng() * 20, r: 2 + rng() * 3 });
     for (let y = 0; y < P; y++) for (let x = 0; x < P; x++) {
       let col = (x + y) % 2 === 0 ? C.carpet : C.carpetDark;
+      if (C.floorTiles) {
+        const F = C.floorTiles, cell = ((Math.floor((tx * P + x) / F) + Math.floor((ty * P + y) / F)) & 1);
+        col = C.checker ? (cell ? C.carpetDark : C.carpet) : ((x % F === 0 || y % F === 0) ? C.carpetDark : C.carpet);
+      }
       if (C.parquet) col = ((y >> 2) + (tx % 2)) % 2 === 0 ? ((x + (y >> 3) * 5) % 16 === 0 ? C.stainDark : C.carpet) : C.carpetDark;
-      if ((x + y) % 2 === 1 && rng() < 0.55) col = C.carpet;
+      if ((x + y) % 2 === 1 && rng() < 0.55 && !C.floorTiles) col = C.carpet;
       if ((x % 4 === 0 && y % 4 === 2) && rng() < 0.5) col = C.carpetLight;
       for (const st of stains) {
         const dd = Math.hypot(x - st.x, y - st.y);
@@ -187,9 +264,10 @@ export function buildMapTexture(level) {
         const edge = (map.get(tx - 1, ty) !== T.SLOW && x < 3) || (map.get(tx + 1, ty) !== T.SLOW && x > P - 4) ||
           (map.get(tx, ty - 1) !== T.SLOW && y < 3) || (map.get(tx, ty + 1) !== T.SLOW && y > P - 4);
         if (edge && rng() < 0.6) continue;
-        put(ox + x, oy + y, rng() < 0.04 ? C.puddleHi : C.puddle, Math.floor((rng() - 0.5) * 6));
+        const tox = level.toxic?.[ty * map.w + tx];
+        put(ox + x, oy + y, tox ? (rng() < 0.08 ? [140, 200, 70] : [62, 104, 40]) : rng() < 0.04 ? C.puddleHi : C.puddle, Math.floor((rng() - 0.5) * 6));
       }
-      for (let k = 0; k < 3; k++) {        // 떠다니는 잔해
+      for (let k = 0; k < (C.clearWater ? 0 : 3); k++) {        // 떠다니는 잔해
         const jx = Math.floor(rng() * (P - 6)), jy = Math.floor(rng() * (P - 4));
         for (let y = 0; y < 2; y++) for (let x = 0; x < 4 + (k & 1) * 2; x++) put(ox + jx + x, oy + jy + y, [70, 62, 54]);
       }

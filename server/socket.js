@@ -18,6 +18,14 @@ const sanitizeCode = v => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''
  *  leaveRoom                  → 방 나가기
  *  pause      {paused}        → ESC 메뉴 (혼자 하기에서만 실제 일시정지)
  *  dropItem   {slot}          → 인벤토리 아이템을 발밑에 버리기
+ *  gesture    {g}             → 이모트 동작 finger | point | dance1 | dance2
+ *  turnValve  {index, delta}   → 밸브/크랭크를 시계 방향으로 delta(라디안) 만큼 돌림
+ *  interact   {mid}           → NPC(파티 푸퍼)에게 말 걸기
+ *  popBalloon {index}         → Level Fun 풍선 터뜨리기
+ *  chat       {text}          → 채팅 (같은 방 모두에게)
+ *  speaking   {on}            → 보이스 챗으로 말하는 중 (소리 듣는 엔티티가 듣는다)
+ *  voiceState {vc}            → 보이스 챗 상태 0 안 씀 / 1 마이크 켜짐 / 2 음소거 (이름표 옆 아이콘)
+ *  rtc        {to, d}         → 보이스 챗 연결 정보 중계 (to = 상대 id 또는 '*' = 방 전체)
  *  join       {name, room}    → (예전 방식) 이름으로 방에 바로 입장
  */
 export function attachGameServer(io, { testMode = false } = {}) {
@@ -91,7 +99,15 @@ export function attachGameServer(io, { testMode = false } = {}) {
     on('useItem', data => room?.onUseItem(socket.id, data));
     on('dropItem', data => room?.onDropItem(socket.id, data));
     on('emote', data => room?.onEmote(socket.id, data));
+    on('gesture', data => room?.onGesture(socket.id, data));
     on('solvePuzzle', data => room?.onSolvePuzzle(socket.id, data));
+    on('turnValve', data => room?.onTurnValve(socket.id, data));
+    on('interact', data => room?.onInteract(socket.id, data));
+    on('popBalloon', data => room?.onPopBalloon(socket.id, data));
+    on('chat', data => room?.onChat(socket.id, data));
+    on('speaking', data => room?.onSpeaking(socket.id, data));
+    on('voiceState', data => room?.onVoiceState(socket.id, data));
+    on('rtc', data => room?.onRtc(socket, data));
     socket.on('disconnect', () => room?.removePlayer(socket.id));
   });
 

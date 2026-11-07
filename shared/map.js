@@ -1,14 +1,15 @@
-import { CONFIG, TS, T, levelInfo } from './config.js';
+import { CONFIG, TS, T, levelInfo, missionOf } from './config.js';
 import { mulberry32 } from './utils.js';
 import { hasLOS } from './physics.js';
 import { generatePuzzle } from './puzzles.js';
 
 export class GameMap {
-  constructor(w, h, seed, layout = 'maze') {
+  constructor(w, h, seed, layout = 'maze', puddles = 0, roads = 0) {
     this.w = w; this.h = h;
     this.rng = mulberry32(seed);
     this.tiles = new Uint8Array(w * h).fill(T.WALL);
-    if (layout === 'run') this.generateRun(); else this.generate();
+    if (layout === 'run') this.generateRun();
+    else { this.generate(); if (roads > 0) this.addRoads(roads); if (puddles > 0) this.addPuddles(puddles); }
     this.floorCells = [];
     for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i] !== T.WALL) this.floorCells.push(i);
   }
@@ -52,6 +53,25 @@ export class GameMap {
       for (let y = ry; y < ry + rh; y++) for (let x = rx; x < rx + rw; x++) this.set(x, y, T.FLOOR);
       if (rw >= 5 && rh >= 5 && rng() < 0.65) {
         for (let y = ry + 1; y < ry + rh - 1; y += 2) for (let x = rx + 1; x < rx + rw - 1; x += 2) this.set(x, y, T.WALL);
+      }
+    }
+  }
+
+  /** spacing 칸마다 가로/세로 3칸 너비 도로 (넓은 곳만 다니는 엔티티의 길) */
+  addRoads(spacing) {
+    const { w, h } = this;
+    for (let c = spacing; c < h - 2; c += spacing) for (let y = c - 1; y <= c + 1; y++) for (let x = 1; x < w - 1; x++) this.set(x, y, T.FLOOR);
+    for (let c = spacing; c < w - 2; c += spacing) for (let x = c - 1; x <= c + 1; x++) for (let y = 1; y < h - 1; y++) this.set(x, y, T.FLOOR);
+  }
+
+  /** 물웅덩이(느려짐) 덩어리를 흩뿌린다. 시작 지점 주변은 비워 둔다 */
+  addPuddles(ratio) {
+    const { w, h, rng } = this, blobs = Math.round(w * h * ratio / 9);
+    for (let n = 0; n < blobs; n++) {
+      const cx = 2 + Math.floor(rng() * (w - 4)), cy = 2 + Math.floor(rng() * (h - 4)), r = 1 + rng() * 2.2;
+      if (cx + cy < 10) continue;
+      for (let y = Math.floor(cy - r); y <= cy + r; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+        if (Math.hypot(x - cx, y - cy) <= r && this.get(x, y) === T.FLOOR) this.set(x, y, T.SLOW);
       }
     }
   }
@@ -166,7 +186,8 @@ export function generateLevel(seed, levelIndex = 0) {
   seed >>>= 0;
   const info = levelInfo(levelIndex);
   const run = info.layout === 'run';     // Level ! : 긴 복도
-  const map = run ? new GameMap(CONFIG.RUN.LENGTH, CONFIG.RUN.HEIGHT, seed, 'run') : new GameMap(CONFIG.MAP_W, CONFIG.MAP_H, seed);
+  const mission = missionOf(levelIndex);
+  const map = run ? new GameMap(CONFIG.RUN.LENGTH, CONFIG.RUN.HEIGHT, seed, 'run') : new GameMap(CONFIG.MAP_W, CONFIG.MAP_H, seed, 'maze', info.puddles || 0, info.roads || 0);
   const rng = mulberry32(seed ^ 0x9e3779b9);
   const sy = run ? map.h >> 1 : 1;      // 시작 타일 (1, sy)
   const dist = map.bfs(1, sy);
@@ -179,20 +200,35 @@ export function generateLevel(seed, levelIndex = 0) {
   map.tiles[exitIdx] = T.EXIT;
   const ex = exitIdx % map.w, ey = (exitIdx / map.w) | 0;
 
-  // 열쇠: 서로, 그리고 출구와 거리 유지
-  const cand = map.floorCells.filter(i => dist[i] >= 12 && i !== exitIdx);
+  // 미션 물건(열쇠 / 배달 부품 / 작동 장치): 서로, 그리고 출구와 거리 유지
+  const cand = map.floorCells.filter(i => dist[i] >= 12 && i !== exitIdx && map.tiles[i] === T.FLOOR);
   for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [cand[i], cand[j]] = [cand[j], cand[i]]; }
-  const keys = [];
-  const keySpacing = Math.round(10 * Math.sqrt((map.w * map.h) / (41 * 41)));
-  const keyCount = run ? 0 : CONFIG.KEY_COUNT;   // 질주 레벨은 열쇠 없음
-  for (let spacing = keySpacing; spacing >= 0 && keys.length < keyCount; spacing -= 2) {
-    for (const i of cand) {
-      if (keys.length >= keyCount) break;
-      const x = i % map.w, y = (i / map.w) | 0;
-      const ok = Math.abs(x - ex) + Math.abs(y - ey) >= spacing &&
-        keys.every(k => Math.abs(k.tx - x) + Math.abs(k.ty - y) >= spacing);
-      if (ok) keys.push({ tx: x, ty: y, ...center(i), phase: rng() * 6 });
+  const spread = (count, filter) => {
+    const out = [];
+    const pool = filter ? cand.filter(filter) : cand;
+    const keySpacing = Math.round(10 * Math.sqrt((map.w * map.h) / (41 * 41)));
+    for (let spacing = keySpacing; spacing >= 0 && out.length < count; spacing -= 2) {
+      for (const i of pool) {
+        if (out.length >= count) break;
+        const x = i % map.w, y = (i / map.w) | 0;
+        const ok = Math.abs(x - ex) + Math.abs(y - ey) >= spacing &&
+          out.every(k => Math.abs(k.tx - x) + Math.abs(k.ty - y) >= spacing);
+        if (ok) out.push({ tx: x, ty: y, ...center(i), phase: rng() * 6 });
+      }
     }
+    return out;
+  };
+  const keys = mission.type === 'keys' && !run ? spread(mission.count) : [];
+  const parts = mission.type === 'deliver' ? spread(mission.count) : [];
+  // 밸브는 벽에 붙어 있다 (북쪽이 벽인 바닥 타일). 발전기는 바닥 아무 데나
+  const onWall = i => map.isSolid(i % map.w, ((i / map.w) | 0) - 1);
+  const stations = mission.type === 'activate' ? spread(mission.count, mission.kind === 'generator' ? null : onWall) : [];
+  // 배달 장치(배전반/무전기): 시작 지점 근처, 북쪽이 벽인 바닥 (벽에 붙어 있게)
+  let depot = null;
+  if (mission.type === 'deliver') {
+    const near = map.floorCells.filter(i => dist[i] >= 3 && dist[i] <= 9 && map.tiles[i] === T.FLOOR);
+    const i = near.find(i => map.isSolid(i % map.w, ((i / map.w) | 0) - 1)) ?? near[0] ?? map.floorCells[0];
+    depot = { tx: i % map.w, ty: (i / map.w) | 0, ...center(i) };
   }
 
   // 퍼즐 단말기: 시작점에서 먼 열쇠부터 퍼즐 안에 잠근다 (가까운 열쇠는 그냥 주울 수 있게)
@@ -209,7 +245,7 @@ export function generateLevel(seed, levelIndex = 0) {
   const mi = mc.length ? mc[Math.floor(rng() * mc.length)] : map.floorCells[map.floorCells.length - 1];
 
   const lighting = buildLighting(map, rng, dist, { ...CONFIG.LIGHTS, ...info.lights });
-  const lockers = run ? [] : placeLockers(map, rng, dist, exitIdx, keys);
+  const lockers = run ? [] : placeLockers(map, rng, dist, exitIdx, [...keys, ...parts, ...stations, ...(depot ? [depot] : [])]);
   // 장식 (Level Fun 의 풍선 등). 화면용이라 충돌 없음
   const decor = [];
   if (info.decor === 'moths') {   // 데스모스 수컷 떼: 형광등 주변을 맴도는 작은 나방 (무해)
@@ -227,7 +263,9 @@ export function generateLevel(seed, levelIndex = 0) {
   }
 
   return {
-    seed, level: info.id, info, map, keys, exitIdx, dist, lockers, decor,
+    waterCells: map.floorCells.filter(i => map.tiles[i] === T.SLOW),
+    ...areaMasks(map, info, mulberry32(seed ^ 0x2545f491)),
+    seed, level: info.id, info, mission, map, keys, parts, stations, depot, exitIdx, dist, lockers, decor,
     spawn: { x: TS * 1.5, y: sy * TS + TS / 2 },
     monsterSpawn: center(mi),
     ...lighting,
@@ -318,4 +356,32 @@ function buildLighting(map, rng, dist, L) {
   const isDark = (x, y) => map.inBounds(x, y) && tileLight[y * w + x] < L.DARK_THRESHOLD;
   const darkCells = map.floorCells.filter(i => tileLight[i] < L.DARK_THRESHOLD);
   return { lights, tileLight, darkZones, darkCells, isDark };
+}
+
+/**
+ * wide  : 2x2 로 트인 곳 (도로·방). 큰 엔티티(동네 감시자, 아라네아)는 여기만 다닌다
+ * toxic : 탁한 초록 물 (하이드로리티스 플레그). 물웅덩이 덩어리 중 info.toxic 비율
+ */
+function areaMasks(map, info, rng) {
+  const { w, h } = map, wide = new Uint8Array(w * h), toxic = new Uint8Array(w * h);
+  const open = (x, y) => !map.isSolid(x, y);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    if (!open(x, y)) continue;
+    for (const [dx, dy] of [[0, 0], [-1, 0], [0, -1], [-1, -1]]) {
+      if (open(x + dx, y + dy) && open(x + dx + 1, y + dy) && open(x + dx, y + dy + 1) && open(x + dx + 1, y + dy + 1)) { wide[y * w + x] = 1; break; }
+    }
+  }
+  if (info.toxic) {
+    const seen = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      if (seen[i] || map.tiles[i] !== T.SLOW) continue;
+      const blob = [i], bad = rng() < info.toxic; seen[i] = 1;
+      for (let k = 0; k < blob.length; k++) {
+        const c = blob[k];
+        for (const n of [c + 1, c - 1, c + w, c - w]) if (!seen[n] && map.tiles[n] === T.SLOW) { seen[n] = 1; blob.push(n); }
+      }
+      if (bad) for (const c of blob) toxic[c] = 1;
+    }
+  }
+  return { wide, toxic, isWide: (x, y) => map.inBounds(x, y) && wide[y * w + x] === 1, isToxic: (x, y) => map.inBounds(x, y) && toxic[y * w + x] === 1 };
 }

@@ -17,6 +17,7 @@ export class PlayerState {
     this.status = status;
     this.hidden = false;       // 사물함 안에 숨어 있음
     this.lockerId = -1;
+    this.vc = 0;               // 보이스 챗: 0 = 안 씀, 1 = 마이크 켜짐, 2 = 마이크 꺼짐 (이름표 옆 아이콘)
   }
 
   get alive() { return this.status === 'alive'; }
@@ -40,6 +41,7 @@ export class PlayerState {
       hidden: this.hidden,
       lockerId: this.lockerId,
       sanity: Math.round(this.sanity),
+      vc: this.vc,
     };
   }
 

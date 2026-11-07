@@ -147,7 +147,7 @@ function suitPalette(color, variant) {
   return { ...GEAR, ...base };
 }
 
-function drawHumanArt(g, view, f, P, variant) {
+function drawHumanArt(g, view, f, P, variant, pose = null) {
   const s = cyc(f), lift = v => Math.round(Math.max(0, v) * 2);
   const hy = variant === 'wanderer' ? 1 : 0;   // 방랑자는 고개를 떨군 자세
 
@@ -166,11 +166,14 @@ function drawHumanArt(g, view, f, P, variant) {
     rect(g, fx, 21, 3, 9 - lift(s), P.suit); rect(g, fx + 2, 21, 1, 9 - lift(s), P.sh);
     rect(g, fx, 28 - lift(s), 3, 1, P.tape);
     rect(g, fx, 30 - lift(s), 4, 2, P.boot); rect(g, fx, 32 - lift(s), 4, 1, P.sole);
-    // 팔 + 손전등
-    const hx = 10 + Math.round(-s * 2);
-    limb(g, [9, 12], [hx, 19], 2, 2, P.suit, P.sh);
-    rect(g, hx - 1, 19, 2, 1, P.tape); rect(g, hx - 1, 20, 2, 2, P.glove);
-    rect(g, hx + 1, 19, 3, 2, '#1d1c1a'); px(g, hx + 4, 19, P.light);
+    // 팔 + 손전등 (이모트 동작이면 그 자세)
+    if (pose) { sidePoseArm(g, P, pose); }
+    else {
+      const hx = 10 + Math.round(-s * 2);
+      limb(g, [9, 12], [hx, 19], 2, 2, P.suit, P.sh);
+      rect(g, hx - 1, 19, 2, 1, P.tape); rect(g, hx - 1, 20, 2, 2, P.glove);
+      rect(g, hx + 1, 19, 3, 2, '#1d1c1a'); px(g, hx + 4, 19, P.light);
+    }
     // 머리 (후드 + 방독면)
     ellipse(g, 8, 5.5 + hy, 4, 5, P.suit); ellipse(g, 7, 3.5 + hy, 2, 2, P.hi); ellipse(g, 6, 8 + hy, 2, 2, P.sh);
     rect(g, 5, 10 + hy, 6, 1, P.dk);
@@ -204,10 +207,14 @@ function drawHumanArt(g, view, f, P, variant) {
   // ----- 팔
   const aL = Math.round(-s), aR = Math.round(s);
   rect(g, 2, 11, 2, 9, P.suit); rect(g, 2, 11, 1, 9, P.hi);
-  rect(g, 14, 11, 2, 9, P.sh);
   rect(g, 2, 19 + aL, 2, 1, P.tape); rect(g, 2, 20 + aL, 2, 2, P.glove);
-  rect(g, 14, 19 + aR, 2, 1, P.tape); rect(g, 14, 20 + aR, 2, 2, P.glove);
-  if (view === 'down') { rect(g, 14, 22 + aR, 2, 3, '#1d1c1a'); px(g, 14, 25 + aR, P.light); }
+  if (pose && view === 'down') frontPoseArm(g, P, pose);
+  else if (pose && view === 'up') backPoseArm(g, P, pose);
+  else {
+    rect(g, 14, 11, 2, 9, P.sh);
+    rect(g, 14, 19 + aR, 2, 1, P.tape); rect(g, 14, 20 + aR, 2, 2, P.glove);
+    if (view === 'down') { rect(g, 14, 22 + aR, 2, 3, '#1d1c1a'); px(g, 14, 25 + aR, P.light); }
+  }
   // ----- 머리 (후드 + 방독면)
   ellipse(g, 9, 5.5 + hy, 4.5, 5, P.sh);
   ellipse(g, 8.6, 5.2 + hy, 4.1, 4.7, P.suit);
@@ -222,7 +229,66 @@ function drawHumanArt(g, view, f, P, variant) {
   ellipse(g, 9, 9.3 + hy, 1.7, 1.2, P.filter); px(g, 8, 9 + hy, P.filterHi);
 }
 
+// ---------------------------------------------------------------- 이모트 자세 (오른팔)
+/** 앞모습: finger = 팔을 머리 옆으로 번쩍 들고 손등을 보이며 가운뎃손가락 / point = 팔을 아래 앞으로 뻗어 검지로 가리킴 */
+function frontPoseArm(g, P, pose) {
+  if (pose === 'finger') {
+    rect(g, 14, 10, 2, 3, P.sh);                                  // 어깨
+    limb(g, [15, 11], [17, 4], 2, 2, P.suit, P.sh);               // 위로 든 팔
+    rect(g, 16, 4, 3, 1, P.tape);                                 // 소매 테이프
+    rect(g, 15, 0, 5, 4, P.glove); rect(g, 15, 0, 5, 1, '#57524a'); // 주먹 (손등)
+    px(g, 16, 1, '#57524a'); px(g, 18, 1, '#57524a');            // 접은 손가락 마디
+    rect(g, 17, -5, 1, 5, P.glove); px(g, 17, -5, '#6a655c');      // 가운뎃손가락
+    return;
+  }
+  rect(g, 14, 11, 2, 3, P.sh);                                    // point: 아래 앞으로 곧게 뻗은 팔
+  limb(g, [15, 12], [20, 18], 2, 2, P.suit, P.sh);
+  rect(g, 19, 18, 2, 1, P.tape);
+  rect(g, 19, 19, 3, 3, P.glove); px(g, 21, 19, '#57524a');       // 주먹
+  px(g, 18, 20, P.glove);                                         // 엄지
+  for (let k = 0; k < 4; k++) px(g, 22 + k, 22 + k, P.glove);     // 대각선으로 길게 뻗은 검지
+  px(g, 25, 25, '#6a655c');
+}
+/** 뒷모습: finger = 팔을 들어 올린 뒷모습 (손바닥 쪽, 가운뎃손가락) / point = 팔을 위(앞)로 쭉 뻗어 가리킴 */
+function backPoseArm(g, P, pose) {
+  rect(g, 14, 10, 2, 3, P.sh);
+  if (pose === 'finger') {
+    limb(g, [15, 11], [17, 3], 2, 2, P.suit, P.sh);
+    rect(g, 16, 3, 3, 1, P.tape);
+    rect(g, 15, -1, 5, 4, P.glove);
+    rect(g, 17, -6, 1, 5, P.glove); px(g, 17, -6, '#6a655c');
+  } else {                                                         // 대각선 위(앞)로 쭉 뻗은 팔 + 엄지 + 검지
+    limb(g, [15, 11], [20, 4], 2, 2, P.suit, P.sh);
+    rect(g, 19, 4, 2, 1, P.tape);
+    rect(g, 19, 1, 3, 3, P.glove); px(g, 18, 2, P.glove);           // 주먹 + 엄지
+    for (let k = 0; k < 4; k++) px(g, 22 + k, 0 - k, P.glove);      // 대각선 위를 가리키는 검지
+    px(g, 25, -3, '#6a655c');
+  }
+}
+/** 옆모습 (오른쪽을 봄): finger = 팔을 앞으로 들어 손등 + 가운뎃손가락 / point = 팔을 앞으로 쭉 뻗어 검지 */
+function sidePoseArm(g, P, pose) {
+  if (pose === 'finger') {                                       // 팔을 앞으로 내밀어 들고 가운뎃손가락
+    limb(g, [9, 12], [16, 7], 2, 2, P.suit, P.sh);
+    rect(g, 15, 7, 2, 1, P.tape);
+    rect(g, 15, 3, 4, 4, P.glove); px(g, 18, 4, '#57524a'); px(g, 18, 6, '#57524a');
+    rect(g, 17, -2, 1, 5, P.glove); px(g, 17, -2, '#6a655c');
+    return;
+  }
+  limb(g, [9, 12], [17, 12], 2, 2, P.suit, P.sh);                 // 수평으로 쭉 뻗은 팔
+  rect(g, 16, 11, 1, 3, P.tape);
+  rect(g, 17, 11, 3, 3, P.glove); px(g, 18, 10, P.glove);         // 주먹 + 엄지
+  rect(g, 20, 11, 4, 1, P.glove); px(g, 23, 11, '#6a655c');       // 쭉 뻗은 검지
+}
+
 const HUMAN_W = 18, HUMAN_H = 34;
+const POSE_X = 8, POSE_Y = 6, POSE_W = HUMAN_W + POSE_X * 2, POSE_H = HUMAN_H + POSE_Y;   // 자세 스프라이트는 팔이 나갈 여백이 있다
+function posedSprite(dir, variant, color, pose) {
+  const view = dir === 'left' || dir === 'right' ? 'side' : dir;
+  return build(`hp:${variant}:${color}:${view}:${pose}`, POSE_W, POSE_H, g => {
+    g.translate(POSE_X, POSE_Y);
+    drawHumanArt(g, view, -1, suitPalette(color, variant), variant, pose);
+  });
+}
 function humanSprite(dir, f, variant, color) {
   const view = dir === 'left' || dir === 'right' ? 'side' : dir;
   return build(`h:${variant}:${color}:${view}:${f}`, HUMAN_W, HUMAN_H, g => {
@@ -704,6 +770,178 @@ export function drawLocker(g, lk, time, shakeT = 0, alpha = 1, prop = 'locker') 
   blit(g, spr, lk.x + jx, lk.y + 8, false, alpha);
 }
 
+
+// ================================================================ 창문들 (Level 4 / 188): 창틀 속 붉은 눈의 사람 그림자
+const WN = { frame: '#9a9a90', frameSh: '#5a5a54', glass: '#1a2028', glassHi: '#4a5a6a', body: '#0a0a0c', eye: '#ff2a1a', shard: '#c8dce8' };
+function drawWindowArt(g, broken) {
+  rect(g, 0, 0, 30, 30, WN.frame); rect(g, 0, 28, 30, 2, WN.frameSh); rect(g, 2, 2, 26, 25, WN.glass);
+  // 사람 그림자 (어깨 + 머리)
+  ellipse(g, 15, 11, 5, 6, WN.body); poly(g, [[5, 27], [8, 18], [22, 18], [25, 27]], WN.body);
+  px(g, 13, 10, WN.eye); px(g, 17, 10, WN.eye);
+  if (broken) {
+    for (const [x, y] of [[3, 4], [24, 6], [6, 22], [22, 20], [12, 3], [26, 16]]) poly(g, [[x, y], [x + 3, y + 1], [x + 1, y + 4]], WN.shard);
+  } else {
+    line(g, 4, 4, 9, 4, WN.glassHi); line(g, 4, 5, 6, 5, WN.glassHi);
+    rect(g, 14, 2, 2, 25, WN.frame); rect(g, 2, 14, 26, 2, WN.frame);                 // 창살
+  }
+}
+/** 창밖으로 뻗은 검은 팔 (창문 → 손) */
+function drawWindowArms(g, m, alpha) {
+  g.strokeStyle = `rgba(10,10,12,${alpha})`; g.lineWidth = 5; g.lineCap = 'round';
+  for (const off of [-7, 7]) {
+    g.beginPath(); g.moveTo(m.px + off, m.py - 18); g.quadraticCurveTo((m.px + m.x) / 2 + off, m.py - 4, m.x + off * 0.6, m.y - 6); g.stroke();
+  }
+}
+
+// ================================================================ 동네 감시자 (Level 9): 가늘고 긴 다리 넷 위의 거대한 눈알
+const NW = { eye: '#ece6d8', eyeSh: '#b8ae98', vein: '#b83a2a', iris: '#5a7a3a', pupil: '#050505', leg: '#3a3430', legHi: '#5a524a', knee: '#2a2420' };
+function drawWatchArt(g, f, chase) {
+  const s = cyc(f), lift = v => Math.round(Math.max(0, v) * 4);
+  const legs = [[30, 40, 6 + s * 4, 104 - lift(s)], [30, 40, 54 - s * 4, 104 - lift(-s)], [30, 40, 18 - s * 3, 106 - lift(-s)], [30, 40, 42 + s * 3, 106 - lift(s)]];
+  for (const [x0, y0, x1, y1] of legs) {
+    const kx = (x0 + x1) / 2 + (x1 < x0 ? -10 : 10), ky = y0 + 18;
+    limb(g, [x0, y0], [kx, ky], 3, 2, NW.leg, NW.legHi); limb(g, [kx, ky], [x1, y1], 2, 2, NW.leg, NW.legHi);
+    rect(g, kx - 1, ky - 1, 3, 3, NW.knee);
+  }
+  ellipse(g, 30, 24, 18, 18, NW.eye); ellipse(g, 34, 28, 12, 12, NW.eyeSh); ellipse(g, 30, 24, 14, 14, NW.eye);
+  for (const [a, b, c, d] of [[13, 20, 20, 22], [46, 18, 40, 22], [16, 32, 22, 28], [44, 34, 38, 30], [30, 7, 30, 12]]) line(g, a, b, c, d, NW.vein);
+  const ix = chase ? 30 : 30 + s * 3;
+  ellipse(g, ix, 26, 7, 7, NW.iris); ellipse(g, ix, 26, chase ? 2.5 : 3.5, chase ? 2.5 : 3.5, NW.pupil); px(g, ix - 2, 23, '#ffffff');
+}
+
+// ================================================================ 페이슬링 (Level 10): 얼굴이 없는 사람 + 전기톱
+const FC = { skin: '#c8b8a4', skinSh: '#9a8a74', shirt: '#6a6a5a', shirtSh: '#4a4a3e', pants: '#3a3a40', saw: '#d8a020', sawSh: '#8a6010', blade: '#a8acb0', teeth: '#e8ecf0' };
+function drawFacelingArt(g, f) {
+  const s = cyc(f);
+  limb(g, [12, 46], [11 + s * 3, 62], 4, 3, FC.pants); limb(g, [11 + s * 3, 62], [11 + s * 4, 78], 3, 3, FC.pants);
+  limb(g, [19, 46], [20 - s * 3, 62], 4, 3, FC.pants); limb(g, [20 - s * 3, 62], [20 - s * 4, 78], 3, 3, FC.pants);
+  poly(g, [[8, 20], [23, 20], [24, 47], [7, 47]], FC.shirt); poly(g, [[18, 20], [23, 20], [24, 47], [19, 47]], FC.shirtSh);
+  limb(g, [8, 22], [6, 38], 3, 3, FC.shirt, FC.shirtSh);
+  // 전기톱을 앞으로 든 팔
+  limb(g, [23, 22], [28, 34], 3, 3, FC.shirtSh); rect(g, 26, 32, 8, 8, FC.saw); rect(g, 26, 38, 8, 2, FC.sawSh);
+  rect(g, 33, 33, 14, 5, FC.blade); for (let x = 33; x < 47; x += 2) { px(g, x, 32, FC.teeth); px(g, x + 1, 38, FC.teeth); }
+  // 이목구비가 없는 매끈한 얼굴
+  ellipse(g, 15.5, 10, 6, 8, FC.skin); ellipse(g, 18.5, 12, 3, 5, FC.skinSh); rect(g, 14, 17, 4, 4, FC.skinSh);
+  rect(g, 9, 2, 13, 3, '#2a2420');
+}
+
+// ================================================================ 클럼프 (Level 37): 손발이 잔뜩 붙은 살덩어리, 큰 입
+const CL = { flesh: '#b89080', fleshSh: '#8a6050', fleshDk: '#5a3a30', mouth: '#1a0606', tooth: '#e8e0c8', nail: '#d8c8b0' };
+function drawClumpArt(g, f) {
+  const s = cyc(f);
+  for (let k = 0; k < 6; k++) {                                       // 아래의 발들
+    const x = 6 + k * 9, sw = (k % 2 ? s : -s) * 3;
+    limb(g, [x, 38], [x + sw, 52], 4, 3, k % 2 ? CL.fleshSh : CL.flesh, CL.fleshDk);
+  }
+  ellipse(g, 30, 26, 26, 17, CL.flesh); ellipse(g, 38, 30, 14, 10, CL.fleshSh);
+  ellipse(g, 16, 18, 8, 6, CL.flesh); ellipse(g, 44, 16, 9, 7, CL.flesh);                                      // 혹
+  for (const [a, b, c, d] of [[8, 14, 0, 4 + s * 2], [20, 10, 16, 0], [40, 9, 46, 0], [52, 18, 60, 10 - s * 2], [54, 28, 60, 34]]) {   // 위로 뻗은 손
+    limb(g, [a, b], [c, d], 3, 2, CL.flesh, CL.fleshSh);
+    for (let k = -1; k <= 1; k++) px(g, c + k, d - 1, CL.nail);
+  }
+  // 큰 입
+  ellipse(g, 30, 29, 13, 7, CL.mouth);
+  for (let x = 19; x < 42; x += 3) { poly(g, [[x, 23], [x + 2, 23], [x + 1, 27]], CL.tooth); poly(g, [[x + 1, 35], [x + 3, 35], [x + 2, 31]], CL.tooth); }
+}
+
+// ================================================================ 애니메이션 (Level 94): 나무 인형. 밤엔 눈이 붉게 빛난다
+const AN = { wood: '#b88a52', woodSh: '#8a6236', woodDk: '#5a3e20', joint: '#4a3018', eye: '#ff3a1a' };
+function drawAnimationArt(g, f, hunt) {
+  const s = hunt ? cyc(f) * 1.4 : 0;
+  limb(g, [9, 40], [8 + s * 3, 52], 3, 3, AN.woodSh); limb(g, [8 + s * 3, 52], [8 + s * 4, 64], 3, 2, AN.woodSh);
+  limb(g, [14, 40], [15 - s * 3, 52], 3, 3, AN.wood, AN.woodSh); limb(g, [15 - s * 3, 52], [15 - s * 4, 64], 3, 2, AN.wood, AN.woodSh);
+  rect(g, 7 + s * 3, 51, 3, 3, AN.joint); rect(g, 13 - s * 3, 51, 3, 3, AN.joint);
+  poly(g, [[6, 18], [17, 18], [16, 41], [7, 41]], AN.wood); poly(g, [[13, 18], [17, 18], [16, 41], [13, 41]], AN.woodSh);
+  rect(g, 7, 28, 9, 2, AN.woodDk);
+  limb(g, [6, 20], [3, 31 - s * 2], 2, 2, AN.wood, AN.woodSh); limb(g, [3, 31 - s * 2], [2, 42 - s * 2], 2, 2, AN.wood, AN.woodSh);
+  limb(g, [17, 20], [20, 31 + s * 2], 2, 2, AN.woodSh); limb(g, [20, 31 + s * 2], [21, 42 + s * 2], 2, 2, AN.woodSh);
+  rect(g, 10, 14, 3, 4, AN.joint);
+  ellipse(g, 11.5, 8, 5.5, 6.5, AN.wood); ellipse(g, 13.5, 10, 2.5, 4, AN.woodSh);
+  if (hunt) { px(g, 9, 7, AN.eye); px(g, 14, 7, AN.eye); rect(g, 9, 11, 6, 1, AN.woodDk); }
+  else { px(g, 9, 7, AN.woodDk); px(g, 14, 7, AN.woodDk); }
+}
+
+// ================================================================ 애니메이션 킹 (Level 94): 왕관을 쓴 광대, 큰 망치
+const AK = { face: '#f0ece0', faceSh: '#c8c0b0', nose: '#d8241a', suitA: '#c83a8a', suitB: '#3a8ac8', suitSh: '#2a2a50', crown: '#e8c53a', crownSh: '#a88a20', hammer: '#6a4a2a', head: '#8a8a90', eye: '#0a0a0a', grin: '#5a0a0a' };
+function drawKingArt(g, f) {
+  const s = cyc(f);
+  limb(g, [13, 52], [12 + s * 3, 68], 4, 3, AK.suitA); limb(g, [12 + s * 3, 68], [12 + s * 4, 82], 3, 3, AK.suitA);
+  limb(g, [21, 52], [22 - s * 3, 68], 4, 3, AK.suitB); limb(g, [22 - s * 3, 68], [22 - s * 4, 82], 3, 3, AK.suitB);
+  rect(g, 8 + s * 4, 82, 8, 4, AK.nose); rect(g, 19 - s * 4, 82, 8, 4, AK.nose);
+  poly(g, [[8, 24], [17, 24], [17, 54], [6, 54]], AK.suitA); poly(g, [[17, 24], [27, 24], [29, 54], [17, 54]], AK.suitB);
+  for (let y = 30; y < 52; y += 8) { ellipse(g, 17, y, 1.5, 1.5, AK.crown); }
+  poly(g, [[6, 22], [29, 22], [26, 27], [9, 27]], AK.face);                                 // 주름 칼라
+  limb(g, [7, 26], [4, 42], 3, 3, AK.suitA);
+  // 망치를 든 팔
+  limb(g, [28, 26], [32, 38], 3, 3, AK.suitB); line(g, 32, 14, 32, 46, AK.hammer, 2); rect(g, 27, 8, 11, 7, AK.head); rect(g, 27, 8, 11, 1, '#b8b8c0');
+  ellipse(g, 17.5, 13, 7, 8, AK.face); ellipse(g, 21, 15, 3, 5, AK.faceSh);
+  ellipse(g, 14.5, 11, 1.6, 2.2, AK.eye); ellipse(g, 20.5, 11, 1.6, 2.2, AK.eye);
+  ellipse(g, 17.5, 15, 2, 2, AK.nose);
+  for (let x = 12; x < 24; x++) px(g, x, 19 - (x > 13 && x < 22 ? 1 : 0), AK.grin);
+  poly(g, [[10, 6], [12, 0], [15, 4], [17.5, 0], [20, 4], [23, 0], [25, 6]], AK.crown); rect(g, 10, 5, 15, 2, AK.crownSh);
+}
+
+// ================================================================ 아라네아 멤브리 (Level 188): 사람 해골 머리의 거대한 거미
+const AR = { body: '#2a2224', bodyHi: '#4a3e40', leg: '#1a1416', legHi: '#3a2e30', skull: '#e0d8c4', skullSh: '#a8a08c', socket: '#0a0606', eye: '#ff3a1a' };
+function drawAraneaArt(g, f) {
+  const s = cyc(f);
+  for (let k = 0; k < 4; k++) {                                   // 다리 8개 (양쪽 4개씩, 번갈아 움직임)
+    const ph = (k % 2 ? s : -s) * 4, y0 = 22 + k * 3;
+    for (const side of [-1, 1]) {
+      const x0 = 35 + side * 8, kx = 35 + side * (18 + k * 3), ky = 6 + k * 2 + ph * side, ex = 35 + side * (26 + k * 3), ey = 42 - ph * side;
+      limb(g, [x0, y0], [kx, ky], 3, 2, AR.leg, AR.legHi); limb(g, [kx, ky], [ex, ey], 2, 1, AR.leg, AR.legHi);
+    }
+  }
+  ellipse(g, 30, 26, 14, 10, AR.body); ellipse(g, 26, 22, 6, 4, AR.bodyHi);                  // 배
+  ellipse(g, 44, 26, 9, 8, AR.body);                                                         // 머리가슴
+  // 해골 머리
+  ellipse(g, 54, 24, 8, 8, AR.skull); ellipse(g, 56, 27, 5, 5, AR.skullSh);
+  ellipse(g, 51.5, 23, 2, 2.2, AR.socket); ellipse(g, 57, 23, 2, 2.2, AR.socket); px(g, 51, 23, AR.eye); px(g, 57, 23, AR.eye);
+  rect(g, 50, 29, 9, 3, AR.skullSh); for (let x = 50; x < 59; x += 2) px(g, x, 30, AR.socket);
+}
+
+// ================================================================ 키티 (Level 974): 하얀 막대 인간, 고양이 귀, 크게 웃는 입
+const KT = { line: '#f4f0ec', dark: '#0a0a0a', mouth: '#c8243a', ear: '#f4b0c0' };
+function drawKittyArt(g, f, frozen) {
+  const s = frozen ? 0 : cyc(f);
+  line(g, 11, 26, 11, 44, KT.line, 2);                                                 // 몸
+  line(g, 11, 44, 7 + s * 3, 60, KT.line, 2); line(g, 11, 44, 15 - s * 3, 60, KT.line, 2);
+  line(g, 11, 30, 3, 40 + s * 2, KT.line, 2); line(g, 11, 30, 19, 40 - s * 2, KT.line, 2);
+  ellipse(g, 11, 14, 9, 9, KT.line); ellipse(g, 11, 14, 7.5, 7.5, '#ffffff');
+  poly(g, [[3, 9], [4, 0], [9, 6]], KT.line); poly(g, [[13, 6], [18, 0], [19, 9]], KT.line);
+  px(g, 5, 4, KT.ear); px(g, 17, 4, KT.ear);
+  ellipse(g, 7.5, 12, 1.5, 2.2, KT.dark); ellipse(g, 14.5, 12, 1.5, 2.2, KT.dark);
+  for (let x = 5; x <= 17; x++) px(g, x, 17 + Math.round(Math.sin(((x - 5) / 12) * Math.PI) * 2), KT.mouth);
+}
+
+// ================================================================ 파티 푸퍼 (Level 52): 후드 망토, 슬픈 파란 가면 — 유일하게 도와주는 엔티티
+const PP = { robe: '#2a2e48', robeHi: '#3e4466', robeDk: '#181a2c', mask: '#8ab8e8', maskSh: '#5a88c0', line: '#1a2a4a', tear: '#d8f0ff', boot: '#141414' };
+function drawPooperArt(g, f) {
+  const s = cyc(f);
+  rect(g, 6 + s * 2, 48, 4, 4, PP.boot); rect(g, 13 - s * 2, 48, 4, 4, PP.boot);
+  poly(g, [[6, 14], [17, 14], [21, 49], [2, 49]], PP.robe);                          // 긴 망토
+  poly(g, [[13, 14], [17, 14], [21, 49], [14, 49]], PP.robeDk);
+  line(g, 11, 22, 11, 47, PP.robeDk); line(g, 5, 30, 9, 46, PP.robeHi);
+  limb(g, [6, 18], [4, 32 + s], 3, 3, PP.robe, PP.robeDk); limb(g, [17, 18], [19, 32 - s], 3, 3, PP.robeDk);
+  poly(g, [[3, 10], [6, 1], [11, 0], [17, 1], [20, 10], [18, 17], [5, 17]], PP.robe);   // 후드
+  poly(g, [[14, 1], [17, 1], [20, 10], [18, 17], [15, 17]], PP.robeDk);
+  ellipse(g, 11.5, 10, 5, 5.5, PP.mask); ellipse(g, 13.5, 12, 2, 3, PP.maskSh);     // 슬픈 가면
+  line(g, 8, 8, 10, 9, PP.line); line(g, 13, 9, 15, 8, PP.line);                    // 처진 눈썹 (눈)
+  for (let x = 9; x <= 14; x++) px(g, x, 14 - (x > 9 && x < 14 ? 1 : 0), PP.line);  // 처진 입
+  px(g, 9, 11, PP.tear); px(g, 9, 12, PP.tear);
+}
+
+// ================================================================ 하이드로리티스 플레그 (도감용): 초록 물속 세균
+function drawPlagueArt(g, t) {
+  ellipse(g, 24, 24, 22, 22, '#2a4a1a'); ellipse(g, 24, 24, 19, 19, '#3a6a24');
+  const rng = mulberry32(7);
+  for (let k = 0; k < 14; k++) {
+    const x = 8 + rng() * 32, y = 8 + rng() * 32, r = 1.5 + rng() * 2.5;
+    ellipse(g, x, y, r, r, k % 3 ? '#8ad050' : '#c8f080');
+    for (let j = 0; j < 3; j++) px(g, x + Math.cos(j * 2 + k) * (r + 1), y + Math.sin(j * 2 + k) * (r + 1), '#5a9a30');
+  }
+}
+
 export function drawMonster(g, m, time = 0, alpha = 1) {
   if (alpha <= 0.01) return;
   const f = frameOf((m.anim || 0) * 1.4, m.moving !== false);
@@ -766,6 +1004,60 @@ export function drawMonster(g, m, time = 0, alpha = 1) {
       blit(g, build(`sc:${ff}`, 60, 36, gg => drawScratcherArt(gg, ff)), m.x, m.y + 12, left, alpha);
       break;
     }
+    case 'windows': {
+      const wx = m.px ?? m.x, wy = (m.py ?? m.y);
+      const broken = m.state === 'grab';
+      blit(g, build(`wn:${broken}`, 30, 30, gg => drawWindowArt(gg, broken)), wx, wy - 12, false, alpha);
+      if (broken) drawWindowArms(g, { ...m, px: wx, py: wy }, alpha);
+      break;
+    }
+    case 'watch': {
+      const chase = m.state === 'chase';
+      shadow(g, m.x, m.y + 10, 30, 8, alpha);
+      blit(g, build(`nw:${ff}:${chase}`, 60, 108, gg => drawWatchArt(gg, ff, chase)), m.x, m.y + 14, false, alpha);
+      break;
+    }
+    case 'faceling': {
+      shadow(g, m.x, m.y + 10, 14, 5, alpha);
+      const jx = m.state === 'chase' ? (Math.random() - 0.5) * ART * 1.5 : 0;
+      blit(g, build(`fc:${ff}`, 48, 80, gg => drawFacelingArt(gg, ff)), m.x + jx + (left ? -12 : 12), m.y + 14, left, alpha);
+      break;
+    }
+    case 'clump': {
+      shadow(g, m.x, m.y + 10, 28, 7, alpha);
+      blit(g, build(`cl:${ff}`, 62, 54, gg => drawClumpArt(gg, ff)), m.x, m.y + 13, left, alpha);
+      break;
+    }
+    case 'animation': {
+      const hunt = m.state === 'hunt';
+      shadow(g, m.x, m.y + 9, 11, 4, alpha);
+      blit(g, build(`an:${hunt ? ff : 0}:${hunt}`, 24, 66, gg => drawAnimationArt(gg, ff, hunt)), m.x, m.y + 12, left, alpha);
+      break;
+    }
+    case 'animatedKing': {
+      if (m.state === 'vanished') break;
+      shadow(g, m.x, m.y + 10, 15, 5, alpha);
+      const kf = m.state === 'frozen' ? 0 : ff;
+      blit(g, build(`ak:${kf}`, 40, 88, gg => drawKingArt(gg, kf)), m.x, m.y + 14, left, alpha);
+      break;
+    }
+    case 'aranea': {
+      shadow(g, m.x, m.y + 8, 32, 7, alpha);
+      blit(g, build(`ar:${ff}`, 72, 46, gg => drawAraneaArt(gg, ff)), m.x, m.y + 12, left, alpha);
+      break;
+    }
+    case 'partyPooper': {
+      shadow(g, m.x, m.y + 9, 12, 4, alpha);
+      const pf = m.moving ? ff : 0;
+      blit(g, build(`pp:${pf}`, 23, 53, gg => drawPooperArt(gg, pf)), m.x, m.y + 12, left, alpha);
+      break;
+    }
+    case 'kitty': {
+      const frozen = m.state === 'frozen';
+      shadow(g, m.x, m.y + 8, 10, 4, alpha);
+      blit(g, build(`kt:${frozen ? 0 : ff}:${frozen}`, 23, 62, gg => drawKittyArt(gg, ff, frozen)), m.x, m.y + 12, left, alpha);
+      break;
+    }
     case 'smiler': {
       if (m.state === 'vanished') break;
       const fr = Math.floor(time * 4) % FRAMES, fl = Math.sin(time * 3 + m.x) * ART;
@@ -786,6 +1078,12 @@ export function drawMonsterGlow(g, m, time, alpha = 1) {
     g.fillStyle = `rgba(255,90,60,${alpha})`; g.fillRect(snap(ex - ART * 2), snap(ey), ART, ART); g.fillRect(snap(ex + ART), snap(ey - ART), ART, ART);
     return;
   }
+  if (m.type === 'windows' && m.state !== 'idle') {          // 어둠 속에서도 보이는 붉은 눈
+    const wx = m.px ?? m.x, wy = (m.py ?? m.y) - 12 - 30 * ART;
+    g.fillStyle = `rgba(255,50,30,${alpha * (0.7 + Math.random() * 0.3)})`;
+    g.fillRect(snap(wx - 2 * ART), snap(wy + 10 * ART), ART, ART); g.fillRect(snap(wx + 2 * ART), snap(wy + 10 * ART), ART, ART);
+    return;
+  }
   if (m.type !== 'smiler' || m.state === 'vanished') return;
   const chase = m.state === 'chase', fl = Math.sin(time * 3 + m.x) * ART;
   const gr = g.createRadialGradient(m.x, m.y - 24, 0, m.x, m.y - 24, 48);
@@ -803,6 +1101,7 @@ export function drawMonsterEyes(g, m, alpha = 1) {
   else if (m.type === 'hound') { pts = [[47, 8], [52, 8]]; w = 60; h = 38; foot = 12; }
   else if (m.type === 'skinStealer' && m.revealed) { pts = [[15, 7], [21, 7]]; w = 36; h = 78; foot = 14; }
   else if (m.type === 'partygoer') { pts = [[12, 16], [18, 15]]; w = 34; h = 76; foot = 13; }
+  else if (m.type === 'animation' && m.state === 'hunt') { pts = [[9, 7], [14, 7]]; w = 24; h = 66; foot = 12; }
   else return;
   g.fillStyle = `rgba(240,234,210,${(0.5 + Math.random() * 0.3) * alpha})`;
   for (const [x, y] of pts) {
@@ -822,6 +1121,16 @@ export function drawJumpscareSprite(g, type, time, cx, cy, size) {
   else if (type === 'deathmoth') spr = build(`dm:${f}:false`, 56, 40, gg => drawMothArt(gg, f, false));
   else if (type === 'wretch') spr = build(`wr:${f}`, 28, 62, gg => drawWretchArt(gg, f));
   else if (type === 'scratcher') spr = build(`sc:${f}`, 60, 36, gg => drawScratcherArt(gg, f));
+  else if (type === 'windows') spr = build('wn:true', 30, 30, gg => drawWindowArt(gg, true));
+  else if (type === 'watch') spr = build(`nw:${f}:true`, 60, 108, gg => drawWatchArt(gg, f, true));
+  else if (type === 'faceling') spr = build(`fc:${f}`, 48, 80, gg => drawFacelingArt(gg, f));
+  else if (type === 'clump') spr = build(`cl:${f}`, 62, 54, gg => drawClumpArt(gg, f));
+  else if (type === 'animation') spr = build(`an:${f}:true`, 24, 66, gg => drawAnimationArt(gg, f, true));
+  else if (type === 'animatedKing') spr = build(`ak:${f}`, 40, 88, gg => drawKingArt(gg, f));
+  else if (type === 'aranea') spr = build(`ar:${f}`, 72, 46, gg => drawAraneaArt(gg, f));
+  else if (type === 'kitty') spr = build(`kt:${f}:false`, 23, 62, gg => drawKittyArt(gg, f, false));
+  else if (type === 'partyPooper') spr = build('pp:0', 23, 53, gg => drawPooperArt(gg, 0));
+  else if (type === 'hydrolitis') spr = build('hy', 48, 48, gg => drawPlagueArt(gg, 0));
   else {
     const body = build(`sm:b:${f}`, 48, 48, gg => drawSmilerBody(gg, f), null);
     const face = build('sm:f:true', 48, 48, gg => drawSmilerFace(gg, true), null);
@@ -933,5 +1242,196 @@ export function drawBestiaryPreview(g, type, time, w, h) {
     drawJumpscareSprite(g, 'howler', time, w / 2, h / 2, size);
   } else {
     drawJumpscareSprite(g, type, time, w / 2, h / 2, size);
+  }
+}
+
+// ================================================================ 미션 물건
+/** 배달 부품 (퓨즈 / 무전기 부품) — 10x12 */
+const PART_ART = {
+  fuse: g => {
+    rect(g, 2, 0, 6, 2, '#8a8478'); rect(g, 2, 10, 6, 2, '#8a8478'); rect(g, 3, 2, 4, 8, '#d8d0b8'); rect(g, 3, 2, 1, 8, '#f4eedc');
+    rect(g, 4, 4, 2, 4, '#e8a030'); px(g, 4, 5, '#ffd070');
+  },
+  radio: g => {
+    rect(g, 0, 3, 10, 8, '#4a5a44'); rect(g, 0, 3, 10, 1, '#6a7a60'); rect(g, 1, 5, 4, 4, '#1e241c');
+    px(g, 7, 5, '#c8322a'); px(g, 7, 7, '#e8c53a'); rect(g, 6, 9, 3, 1, '#9a9a90'); rect(g, 8, 0, 1, 3, '#9a9a90');
+  },
+};
+PART_ART.files = g => {
+  rect(g, 0, 2, 10, 10, '#d8b060'); rect(g, 0, 2, 4, 1, '#b8904a');                       // 서류철
+  rect(g, 1, 4, 8, 7, '#f4f0e4'); for (let y = 5; y < 10; y += 2) rect(g, 2, y, 6, 1, '#8a8478');
+};
+PART_ART.toys = g => {
+  ellipse(g, 5, 7, 4.5, 4.5, '#e85a8a'); ellipse(g, 3.5, 5.5, 1.5, 1.5, '#ffb0c8');            // 공
+  rect(g, 0, 7, 10, 1, '#f4e060'); rect(g, 4, 2, 2, 10, '#f4e060');
+};
+const PART_GLOW = { fuse: '255,180,70', radio: '140,230,140', files: '240,230,180', toys: '255,140,200' };
+export function partIcon(kind) { return build(`part:${kind}`, 10, 12, g => (PART_ART[kind] || PART_ART.fuse)(g), [20, 18, 12]); }
+export function drawPart(g, pt, kind, t, alpha = 1) {
+  if (alpha <= 0.01) return;
+  const bob = Math.round(Math.sin(t * 3 + pt.x * 0.01) * 2) * ART, glow = PART_GLOW[kind] || PART_GLOW.fuse;
+  const gr = g.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, 26);
+  gr.addColorStop(0, `rgba(${glow},${0.4 * alpha})`); gr.addColorStop(1, `rgba(${glow},0)`);
+  g.fillStyle = gr; g.fillRect(pt.x - 26, pt.y - 26, 52, 52);
+  blit(g, partIcon(kind), pt.x, pt.y + 10 + bob, false, alpha);
+}
+
+/** 배달 장치: 배전반(fuse) / 무전기(radio). 꽂힌 개수만큼 칸에 불이 켜진다 */
+export function drawDepot(g, dp, kind, done, total, t, unlocked) {
+  shadow(g, dp.x, dp.y + 10, 18, 5);
+  const spr = kind === 'files'
+    ? build('depot:fax', 24, 22, gg => {
+      rect(gg, 1, 12, 22, 3, '#5a5a5e'); rect(gg, 3, 15, 2, 7, '#3a3a3e'); rect(gg, 19, 15, 2, 7, '#3a3a3e');     // 책상
+      rect(gg, 4, 4, 16, 8, '#c8c4b8'); rect(gg, 4, 4, 16, 1, '#e8e4d8'); rect(gg, 6, 6, 5, 3, '#2a3a2a');     // 팩스
+      rect(gg, 7, 1, 10, 3, '#f4f0e4'); for (let x = 13; x < 19; x += 2) rect(gg, x, 7, 1, 1, '#4a4a48');
+    })
+    : kind === 'toys'
+    ? build('depot:toys', 24, 20, gg => {
+      rect(gg, 2, 6, 20, 13, '#c8602a'); rect(gg, 2, 6, 20, 2, '#e88a4a'); rect(gg, 2, 12, 20, 1, '#8a3a1a');   // 장난감 상자
+      rect(gg, 1, 2, 22, 4, '#d8702a'); rect(gg, 10, 9, 4, 3, '#f4e060');
+    })
+    : kind === 'radio'
+    ? build('depot:radio', 24, 22, gg => {
+      rect(gg, 1, 12, 22, 3, '#6a4a2a'); rect(gg, 3, 15, 2, 7, '#4a321c'); rect(gg, 19, 15, 2, 7, '#4a321c');     // 탁자
+      rect(gg, 3, 2, 18, 10, '#4a5a44'); rect(gg, 3, 2, 18, 1, '#6a7a60'); rect(gg, 5, 4, 7, 6, '#1e241c');     // 무전기
+      rect(gg, 18, 0, 1, 2, '#9a9a90'); rect(gg, 18, 0, 1, 2, '#9a9a90');
+    })
+    : build('depot:fuse', 22, 26, gg => {
+      rect(gg, 1, 0, 20, 24, '#6a7078'); rect(gg, 1, 0, 20, 1, '#9aa0a8'); rect(gg, 2, 2, 18, 20, '#3a3e44');
+      rect(gg, 2, 1, 18, 1, '#e8c53a'); for (let x = 2; x < 20; x += 4) rect(gg, x, 1, 2, 1, '#2a2a28');            // 경고 띠
+      rect(gg, 9, 24, 4, 2, '#2a2a28');
+    });
+  blit(g, spr, dp.x, dp.y + 12);
+  // 칸 표시등 (꽂은 수만큼 켜짐)
+  const w = total * 7, x0 = dp.x - w / 2 + 1, y0 = kind === 'radio' ? dp.y - 12 : dp.y - 22;
+  for (let i = 0; i < total; i++) {
+    const on = i < done;
+    g.fillStyle = on ? (unlocked ? '#6edc78' : '#ffd25a') : (Math.floor(t * 2) % 2 ? '#5a1e18' : '#3a1410');
+    g.fillRect(snap(x0 + i * 7), snap(y0), 5, kind === 'radio' ? 3 : 8);
+  }
+}
+
+/** 작동 장치: 벽에 붙은 증기 밸브(valve) / 배수 밸브(drain), 바닥에 놓인 발전기(generator). prog 0~1 */
+export function drawStation(g, st, kind, prog, t) {
+  const done = prog >= 1;
+  const glow = done ? '110,220,120' : kind === 'drain' ? '120,200,255' : kind === 'generator' ? '255,200,80' : '255,140,90';
+  const pulse = done ? 0.3 : 0.22 + Math.sin(t * 3 + st.phase) * 0.1 + (prog > 0 ? 0.12 : 0);
+  if (kind === 'generator') {
+    shadow(g, st.x, st.y + 10, 18, 5);
+    const gr = g.createRadialGradient(st.x, st.y - 8, 0, st.x, st.y - 8, 40);
+    gr.addColorStop(0, `rgba(${glow},${pulse})`); gr.addColorStop(1, `rgba(${glow},0)`);
+    g.fillStyle = gr; g.fillRect(st.x - 40, st.y - 48, 80, 80);
+    const spr = build('st:gen', 26, 22, gg => {
+      rect(gg, 1, 6, 24, 14, '#8a7a3a'); rect(gg, 1, 6, 24, 2, '#b8a552'); rect(gg, 3, 10, 12, 8, '#3a3420');
+      for (let y = 11; y < 18; y += 2) rect(gg, 4, y, 10, 1, '#5a5030');                                          // 환기구
+      ellipse(gg, 20, 13, 3, 3, '#2a2a28'); rect(gg, 20, 2, 1, 11, '#6a6a60'); rect(gg, 18, 1, 5, 2, '#c8322a');    // 크랭크
+      rect(gg, 2, 20, 4, 2, '#2a2a28'); rect(gg, 20, 20, 4, 2, '#2a2a28'); rect(gg, 6, 0, 2, 6, '#4a4a48');
+    });
+    blit(g, spr, st.x + (done ? Math.sin(t * 50) * 0.6 : 0), st.y + 12);
+    g.fillStyle = done ? '#6edc78' : '#c8402c'; g.fillRect(snap(st.x - 12), snap(st.y - 18), 4, 4);
+    if (done && Math.random() < 0.3) { g.fillStyle = 'rgba(80,80,80,0.4)'; g.beginPath(); g.arc(st.x - 9, st.y - 30 - Math.random() * 10, 4, 0, Math.PI * 2); g.fill(); }
+    return;
+  }
+  // 벽 앞면(타일 위쪽 가장자리 바로 위)에 붙은 배관 + 핸들
+  const wy = Math.floor(st.y / TS) * TS, cx = st.x, cy = wy - 16;
+  const gr = g.createRadialGradient(cx, cy, 0, cx, cy, 34);
+  gr.addColorStop(0, `rgba(${glow},${pulse})`); gr.addColorStop(1, `rgba(${glow},0)`);
+  g.fillStyle = gr; g.fillRect(cx - 34, cy - 34, 68, 68);
+  const blue = kind === 'drain';
+  const spr = build(`st:wall:${kind}`, 32, 22, gg => {
+    const pipe = blue ? '#8aa8b8' : '#6a5a4a', pipeHi = blue ? '#c8dce4' : '#9a8a6a';
+    rect(gg, 0, 9, 32, 5, pipe); rect(gg, 0, 9, 32, 1, pipeHi);                       // 벽을 따라가는 관
+    rect(gg, 14, 13, 4, 9, pipe); rect(gg, 14, 13, 1, 9, pipeHi);                     // 아래로 내려가는 관
+    rect(gg, 13, 6, 6, 10, '#4a4a48');                                                 // 밸브 몸통
+    const W = blue ? '#2f7fb0' : '#b8322a', D = blue ? '#164a6a' : '#6a1410';
+    ellipse(gg, 16, 9, 8, 7.5, W); ellipse(gg, 16, 9, 5.5, 5, D);
+    rect(gg, 15, 2, 2, 15, W); rect(gg, 9, 8, 15, 2, W); ellipse(gg, 16, 9, 2, 2, '#2a2a28');
+  });
+  blit(g, spr, cx, cy + 13);
+  // 상태등 + 진행 막대 (벽 위)
+  g.fillStyle = done ? '#6edc78' : prog > 0 && Math.floor(t * 6) % 2 ? '#ffd25a' : '#c8402c';
+  g.fillRect(snap(cx + 18), snap(cy - 8), 4, 4);
+  if (!done && prog > 0) {
+    g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(snap(cx - 20), snap(cy - 26), 40, 6);
+    g.fillStyle = '#ffd25a'; g.fillRect(snap(cx - 19), snap(cy - 25), Math.round(38 * prog), 4);
+  }
+  // 새는 증기 / 물방울 (안 잠긴 동안)
+  if (!done) {
+    for (let k = 0; k < 4; k++) {
+      const u = (t * (blue ? 1.2 : 0.8) + k / 4 + st.phase) % 1;
+      if (blue) { g.fillStyle = `rgba(150,210,240,${0.6 * (1 - u)})`; g.fillRect(snap(cx + 2), snap(cy + 8 + u * 20), 2, 3); }
+      else { g.fillStyle = `rgba(230,230,220,${0.25 * (1 - u)})`; g.beginPath(); g.arc(cx + 10 + u * 10, cy - 4 - u * 22, 3 + u * 7, 0, Math.PI * 2); g.fill(); }
+    }
+  }
+}
+
+/** Level Fun 파티 게임기: 스탠딩 아케이드 기계. 화면이 번쩍이고 위에 열쇠가 떠 있다 */
+export function drawArcade(g, k, t, active = false) {
+  const pulse = 0.6 + Math.sin(t * 5 + k.phase) * 0.25 + (active ? 0.3 : 0);
+  const gr = g.createRadialGradient(k.x, k.y - 30, 0, k.x, k.y - 30, 52);
+  gr.addColorStop(0, `rgba(255,120,200,${0.3 * pulse})`); gr.addColorStop(1, 'rgba(255,120,200,0)');
+  g.fillStyle = gr; g.fillRect(k.x - 52, k.y - 82, 104, 104);
+  shadow(g, k.x, k.y + 10, 18, 5);
+  const spr = build('arcade', 24, 44, gg => {
+    poly(gg, [[3, 4], [21, 4], [21, 40], [3, 40]], '#3a1a6a');                       // 몸통
+    rect(gg, 3, 4, 2, 36, '#6a3aaa'); rect(gg, 19, 4, 2, 36, '#24104a');
+    rect(gg, 2, 0, 20, 6, '#e8c53a'); rect(gg, 4, 1, 16, 4, '#ff5aa0');               // 간판
+    rect(gg, 5, 8, 14, 11, '#0a0a12');                                                  // 화면
+    poly(gg, [[3, 21], [21, 21], [23, 26], [1, 26]], '#5a2a8a');                       // 조작판
+    rect(gg, 6, 22, 2, 3, '#2a2a28'); ellipse(gg, 7, 21, 1.6, 1.6, '#e83a3a');          // 조이스틱
+    ellipse(gg, 14, 23.5, 1.4, 1.2, '#3ad0ff'); ellipse(gg, 18, 23.5, 1.4, 1.2, '#7ae83a');
+    rect(gg, 9, 30, 6, 4, '#24104a'); rect(gg, 11, 31, 2, 2, '#e8c53a');              // 동전 투입구
+    rect(gg, 3, 40, 18, 4, '#1a0a30');
+  }, [16, 8, 24]);
+  blit(g, spr, k.x, k.y + 12);
+  // 화면: 번쩍이는 픽셀 게임
+  const sx = snap(k.x - 12 * ART + 5 * ART), sy = snap(k.y + 12 - 44 * ART + 8 * ART), sw = 14 * ART, sh = 11 * ART;
+  const hue = Math.floor(t * 2 + k.phase) % 3;
+  g.fillStyle = ['rgba(255,90,160,0.55)', 'rgba(90,200,255,0.55)', 'rgba(255,220,90,0.55)'][hue]; g.fillRect(sx, sy, sw, sh);
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  g.fillRect(snap(sx + ((t * 20) % (sw - 3))), snap(sy + sh / 2), 3, 3);
+  g.font = '10px VT323, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  if (Math.floor(t * 2) % 2) { g.fillStyle = '#fff'; g.fillText('PLAY', sx + sw / 2, sy + 4); }
+  g.fillStyle = 'rgba(0,0,0,0.25)'; for (let y = 0; y < sh; y += 3) g.fillRect(sx, sy + y, sw, 1);
+  drawKey(g, { ...k, y: k.y - 76 }, t, 0.85);
+}
+
+// ================================================================ 이모트 (동작): 뻐큐 / 가리키기 / 춤 2종
+/** 동작별 길이(초). 움직이면 바로 풀린다 */
+export const GESTURES = {
+  finger: { name: '뻐큐', dur: 2.2 },
+  point:  { name: '가리키기', dur: 2.4 },
+  dance1: { name: '춤 1 (들썩)', dur: 5 },
+  dance2: { name: '춤 2 (빙글)', dur: 5 },
+};
+/**
+ * 동작 중인 플레이어 그리기 (p.gesture = { g, t }). 몸은 기존 스프라이트를 움직이고, 팔·손은 위에 덧그린다.
+ */
+export function drawPlayerGesture(g, p, t, alpha = 1) {
+  const G = p.gesture, u = G.t;
+  if (G.g === 'dance1') {        // 좌우로 들썩이며 깡충깡충, 두 박자마다 방향을 바꾼다
+    const beat = u * 4, hop = Math.abs(Math.sin(beat * Math.PI)) * 7, sway = Math.sin(beat * Math.PI / 2) * 6;
+    drawHuman(g, { ...p, x: p.x + sway, y: p.y - hop, angle: Math.floor(beat / 2) % 2 ? Math.PI : 0, moving: true, walkPhase: beat * 3 }, 'player', alpha);
+    drawNotes(g, p, u, alpha);
+    return;
+  }
+  if (G.g === 'dance2') {        // 빙글빙글 돌면서 위아래로
+    const bob = Math.abs(Math.sin(u * 9)) * 5;
+    drawHuman(g, { ...p, y: p.y - bob, angle: u * 7, moving: true, walkPhase: u * 10 }, 'player', alpha);
+    drawNotes(g, p, u, alpha);
+    return;
+  }
+  // 뻐큐 / 가리키기: 그 자세로 그린 캐릭터 스프라이트 (바라보는 방향별로 앞/뒤/옆 모습)
+  const color = SUIT_BASE[p.color] ? p.color : 'default', dir = dirOf(p.angle);
+  shadow(g, p.x, p.y + 8, 10, 4, alpha);
+  blit(g, posedSprite(dir, 'player', color, G.g), p.x, p.y + 10, dir === 'left', alpha);
+}
+/** 춤출 때 머리 위로 떠오르는 음표 */
+function drawNotes(g, p, u, alpha) {
+  g.font = '16px VT323, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (let k = 0; k < 3; k++) {
+    const v = (u * 0.8 + k / 3) % 1;
+    g.fillStyle = `rgba(${k % 2 ? '255,214,90' : '120,220,255'},${alpha * (1 - v)})`;
+    g.fillText(k % 2 ? '♪' : '♫', p.x + Math.sin((v + k) * 5) * 12, p.y - 50 - v * 28);
   }
 }

@@ -6,7 +6,7 @@ import { drawJumpscareSprite, ART } from './sprites.js';
  *  화면 위 오버레이: drawDeathOverlay(r, game)      (game.deathT 동안, k = 0 → 1)
  *  월드 위 흔적:     drawGore(ctx, game)             (핏자국, 터진 살점 — 모두에게 보인다)
  */
-export const DEATH_DURATION = { horde: 2.8, howler: 2.4, hound: 2.4, smiler: 2.6, skinStealer: 2.6, partygoer: 2.6, deathmoth: 2.6, wretch: 2.6, scratcher: 2.4, sanity: 3.0 };
+export const DEATH_DURATION = { horde: 2.8, howler: 2.4, hound: 2.4, smiler: 2.6, skinStealer: 2.6, partygoer: 2.6, deathmoth: 2.6, wretch: 2.6, scratcher: 2.4, windows: 2.6, watch: 2.4, faceling: 2.6, clump: 2.6, animation: 2.4, animatedKing: 2.6, aranea: 2.4, kitty: 2.6, hydrolitis: 3.0, sanity: 3.0 };
 
 const ease = u => u * u * (3 - 2 * u);
 /** 설정 (매 프레임 drawDeathOverlay 에서 갱신): 잔인한 연출 / 사망 점프스케어 */
@@ -251,6 +251,53 @@ function drawDeathScene(r, game) {
       }
       if (k > 0.5) drips(ctx, W, H, seg(k, 0.5, 1), seed, 14);
       fadeBlack(seg(k, 0.82, 1));
+      break;
+    }
+    case 'windows': {       // 유리가 산산조각 나고, 검은 손이 창밖으로 끌고 간다
+      fadeBlack(0.35 + k * 0.3);
+      if (k < 0.4) lunge(0.7, 1.2, 0, 0.35);
+      const rng = mulberry32(seed), u = ease(seg(k, 0.1, 0.5));
+      ctx.strokeStyle = 'rgba(220,235,245,0.85)'; ctx.lineWidth = 3;
+      for (let i = 0; i < 16; i++) {                       // 금 간 유리
+        const a = rng() * Math.PI * 2, L = M * (0.2 + rng() * 0.6) * u;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * L, cy + Math.sin(a) * L); ctx.stroke();
+      }
+      ctx.fillStyle = '#050506';
+      for (let i = 0; i < 2; i++) { const s0 = i ? 1 : -1, v = ease(seg(k, 0.35, 0.8)); ctx.fillRect(cx + s0 * W * (0.6 - v * 0.45) - 40, cy - 30, 80, 60); }
+      if (k > 0.55) drips(ctx, W, H, seg(k, 0.55, 1), seed, 10);
+      fadeBlack(seg(k, 0.8, 1));
+      break;
+    }
+    case 'faceling': {      // 전기톱 — 화면이 덜덜 떨리며 위에서부터 갈린다
+      redWash(0.3 + k * 0.35);
+      if (k < 0.35) lunge(0.6, 1.1, 0, 0.3);
+      const u = seg(k, 0.25, 0.8);
+      for (let y = 0; y < H * u; y += 14) gash(ctx, (Math.random() - 0.5) * 20, y, W + (Math.random() - 0.5) * 20, y + (Math.random() - 0.5) * 10, 6, 1);
+      if (k > 0.45) drips(ctx, W, H, seg(k, 0.45, 1), seed, 18);
+      fadeBlack(seg(k, 0.85, 1));
+      break;
+    }
+    case 'animatedKing': {  // 망치가 내려친다 — 화면이 쩍 갈라진다
+      redWash(0.25);
+      if (k < 0.45) lunge(0.8, 1.4, 0, 0.4);
+      if (k > 0.45) {
+        ctx.fillStyle = 'rgba(255,255,255,' + Math.max(0, 0.8 - (k - 0.45) * 4) + ')'; ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = '#1a0000'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(cx, 0);
+        const rng = mulberry32(seed); for (let y = 0; y <= H; y += H / 10) ctx.lineTo(cx + (rng() - 0.5) * 120, y); ctx.stroke();
+        drips(ctx, W, H, seg(k, 0.5, 1), seed, 14);
+      }
+      fadeBlack(seg(k, 0.85, 1));
+      break;
+    }
+    case 'hydrolitis': {    // 시야가 초록으로 흐려지고 심장 소리가 멈춘다
+      const u = ease(seg(k, 0, 0.8));
+      ctx.fillStyle = `rgba(40,90,20,${0.3 + u * 0.5})`; ctx.fillRect(0, 0, W, H);
+      const v = ctx.createRadialGradient(cx, cy, M * (0.5 - u * 0.45), cx, cy, Math.max(W, H) * 0.7);
+      v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,1)');
+      ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+      const rng = mulberry32(seed); ctx.fillStyle = 'rgba(160,230,90,0.5)';
+      for (let i = 0; i < 40; i++) { ctx.beginPath(); ctx.arc(rng() * W, (rng() * H - t * 30 * (1 + rng())) % H + H * (rng() < 0.5 ? 0 : 1) * 0, 2 + rng() * 6, 0, Math.PI * 2); ctx.fill(); }
+      fadeBlack(seg(k, 0.85, 1));
       break;
     }
     case 'horde': {         // 괴물 떼: 왼쪽에서 수십 마리가 덮쳐 와 찢어발긴다

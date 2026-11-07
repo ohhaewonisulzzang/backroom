@@ -21,6 +21,7 @@ export class ClientPlayer extends PlayerState {
     this.target = { x: s.x, y: s.y, angle: s.angle };
     this.flashlight = s.flashlight; this.sprinting = s.sprinting; this.crouching = !!s.crouching; this.status = s.status;
     this.hidden = !!s.hidden; this.lockerId = s.lockerId ?? -1;
+    if (s.vc !== undefined) this.vc = s.vc;
   }
 
   interpolate(dt) {
@@ -47,13 +48,16 @@ export class ClientMonster {
     this.active = s ? s.active !== false : true;
     this.revealed = !!s?.revealed;
     this.color = s?.color || 'default';
+    this.px = s?.px; this.py = s?.py;            // 창문들: 창문 위치
     this.target = null; this.anim = 0; this.moving = false; this.bubble = null;
   }
 
   /** 플레이어에게 위협이 되는 상태인가 (연출용) */
   get dangerous() {
-    if (!this.active || this.type === 'wanderer') return false;
+    if (!this.active || this.type === 'wanderer' || this.type === 'partyPooper') return false;
     if (this.type === 'skinStealer' && !this.revealed) return false;
+    if (this.type === 'windows' && this.state === 'idle') return false;          // 창문 속에 가만히 있으면 연출 없음
+    if (this.type === 'animation' && this.state === 'doll') return false;        // 낮의 나무 인형
     return this.state !== 'vanished' && this.state !== 'stunned';
   }
 
@@ -62,6 +66,7 @@ export class ClientMonster {
     if (!this.target || Math.hypot(s.x - this.x, s.y - this.y) > TS * 4) { this.x = s.x; this.y = s.y; }
     this.target = s;
     this.state = s.state; this.active = s.active !== false; this.revealed = !!s.revealed;
+    if (s.px !== undefined) { this.px = s.px; this.py = s.py; }
   }
 
   interpolate(dt) {

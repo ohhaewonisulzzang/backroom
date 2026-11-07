@@ -5,7 +5,16 @@ export const Sound = {
   volume: 0.7,
   setVolume(v) {
     this.volume = Math.max(0, Math.min(1, v));
-    if (this.master) this.master.gain.setTargetAtTime(0.8 * this.volume, this.ctx.currentTime, 0.05);
+    this.applyMaster();
+  },
+  /** 보이스 챗으로 누가 말하는 동안 게임 소리를 최대 45% 줄인다 (k: 0~1) */
+  vduck: 0,
+  voiceDuck(k) {
+    if (Math.abs(k - this.vduck) < 0.02) return;
+    this.vduck = k; this.applyMaster();
+  },
+  applyMaster() {
+    if (this.master) this.master.gain.setTargetAtTime(0.8 * this.volume * (1 - 0.45 * this.vduck), this.ctx.currentTime, 0.05);
   },
   menuScare() { this.noise(1600, 0.6, 0.5); this.tone(420, 60, 0.6, 0.3, 'sawtooth'); this.tone(90, 40, 0.8, 0.35, 'square'); },
 
@@ -14,6 +23,11 @@ export const Sound = {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     const c = this.ctx = new AC();
+    // 보이스 챗 설정의 출력 장치 (블루투스 이어폰 마이크를 쓰면 출력 장치가 바뀐다 — voice.js 참고)
+    try {
+      const sink = JSON.parse(localStorage.getItem('backrooms.voice') || '{}').outputId;
+      if (sink && c.setSinkId) c.setSinkId(sink).catch(() => {});
+    } catch { /* 저장된 값 없음 */ }
     this.master = c.createGain(); this.master.gain.value = 0.8 * this.volume; this.master.connect(c.destination);
 
     const len = c.sampleRate;
@@ -140,6 +154,12 @@ export const Sound = {
     this.tone(60, 60, 0.6, 0.12, 'sawtooth', 10.5);   // ...형광등 소리? (노란 벽지가 비칠 때)
   },
   // ---- 퍼즐 단말기 ----
+  /** 미션 장치 작동음: 밸브 끼익 / 발전기 털털 / 펌프 웅웅 */
+  machine(kind) {
+    if (kind === 'generator') { this.noise(140, 0.2, 0.18); this.tone(55, 50, 0.2, 0.08, 'sawtooth'); }
+    else if (kind === 'pump') { this.tone(110, 112, 0.4, 0.06, 'sine'); this.noise(900, 0.3, 0.04); }
+    else { this.tone(320 + Math.random() * 80, 260, 0.3, 0.04, 'sawtooth'); this.noise(5000, 0.35, 0.05); }
+  },
   beep(f = 880, v = 1) { this.tone(f, f, 0.08, 0.07 * v, 'square'); },
   puzzleWrong() { this.tone(220, 200, 0.35, 0.12, 'square'); this.tone(180, 170, 0.35, 0.12, 'square', 0.4); },
   puzzleOk() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, f, 0.14, 0.07, 'square', i * 0.09)); },
@@ -153,6 +173,7 @@ export const Sound = {
   /** 엔티티별 사망 효과음 */
   death(type) {
     if (type === 'sanity') { this.giggle(1); this.tone(200, 2400, 1.2, 0.08, 'sine'); this.burst(1.2); return; }
+    if (type === 'hydrolitis') { this.heartbeat(0.6); this.tone(60, 30, 2.5, 0.2, 'sine', 0.5); return; }
     this.scream();
     if (type === 'howler' || type === 'scratcher') { for (let i = 0; i < (type === 'scratcher' ? 7 : 3); i++) this.slash(1, 0.6 + i * (type === 'scratcher' ? 0.12 : 0.24)); }
     else if (type === 'hound' || type === 'smiler' || type === 'skinStealer') { this.crunch(1, 0.8); this.crunch(0.8, 1.05); this.crunch(0.6, 1.3); }
@@ -160,6 +181,12 @@ export const Sound = {
     else if (type === 'deathmoth') { this.noise(220, 1.6, 0.25, 0.6); this.noise(4800, 1.4, 0.08, 0.6); }
     else if (type === 'horde') { for (let i = 0; i < 4; i++) { this.slash(1, 0.4 + i * 0.18); this.crunch(0.9, 0.5 + i * 0.2); } this.howl(0.8); }
     else if (type === 'wretch') { this.tone(80, 40, 1.4, 0.3, 'sawtooth', 0.5); this.crunch(0.8, 1.3); }
+    else if (type === 'windows') { this.shatter(1); this.crunch(0.8, 1.0); }
+    else if (type === 'faceling') { this.chainsaw(1.2); this.chainsaw(1.2, 0.4); this.crunch(0.8, 1.0); }
+    else if (type === 'animatedKing') { this.thud(1.4); this.crunch(1, 0.15); }
+    else if (type === 'hydrolitis') { this.heartbeat(0.5); this.heartbeat(0.3); this.noise(300, 2.5, 0.12); }
+    else if (type === 'watch' || type === 'aranea' || type === 'clump') { this.thud(1); this.crunch(1, 0.8); this.crunch(0.8, 1.1); }
+    else if (type === 'kitty' || type === 'animation') { this.staticBurst(0.8, 1); this.crunch(1, 0.9); }
   },
   // ---- Level ! 괴물 떼 ----
   hordeRoar(v) { this.tone(140 + Math.random() * 80, 60, 0.9, 0.12 * v, 'sawtooth'); this.noise(500, 0.8, 0.12 * v); if (Math.random() < 0.4) this.howl(v * 0.4); },
@@ -186,8 +213,39 @@ export const Sound = {
     else if (type === 'hound') { this.tone(140, 70, 0.5, 0.22, 'sawtooth'); this.noise(300, 0.5, 0.2); }
     else if (type === 'smiler') this.giggle(1);
     else if (type === 'partygoer') { this.tone(300, 620, 0.35, 0.2, 'square'); this.tone(620, 280, 0.5, 0.12, 'sawtooth', 0.3); this.giggle(0.8); }
+    else if (type === 'windows') this.shatter(1);
+    else if (type === 'watch') { this.tone(90, 60, 1.2, 0.25, 'sawtooth'); this.thud(1); }
+    else if (type === 'faceling') this.chainsaw(1);
+    else if (type === 'aranea') { for (let i = 0; i < 8; i++) this.noise(3000, 0.03, 0.15, i * 0.05); this.tone(800, 300, 0.4, 0.1, 'sawtooth'); }
+    else if (type === 'animation') { this.tone(200, 120, 0.4, 0.15, 'square'); this.noise(800, 0.3, 0.15); }
+    else if (type === 'animatedKing' || type === 'kitty' || type === 'clump') this.staticBurst(0.4, 0.5);
     else this.growl();
   },
+  /** 춤출 때 나오는 짧은 칩튠 (약 5초). spin = 춤 2 */
+  danceTune(v = 1, spin = false) {
+    const A = spin ? [392, 494, 587, 494, 392, 494, 659, 587] : [523, 659, 784, 659, 587, 698, 880, 698];
+    const bass = spin ? [98, 98, 123, 123] : [131, 131, 147, 147];
+    for (let bar = 0; bar < 2; bar++) for (let i = 0; i < 8; i++) {
+      const at = bar * 2.4 + i * 0.3;
+      this.tone(A[i], A[i], 0.16, 0.05 * v, 'square', at);
+      if (i % 2 === 0) { this.tone(bass[(i / 2) | 0], bass[(i / 2) | 0], 0.25, 0.07 * v, 'triangle', at); this.noise(4000, 0.03, 0.05 * v, at); }
+    }
+  },
+  /** 풍선 터지는 소리 (크다) */
+  pop(v = 1) { this.noise(2400, 0.08, 0.6 * v); this.noise(600, 0.15, 0.35 * v); this.tone(900, 200, 0.12, 0.12 * v, 'square'); },
+  thud(v = 1) { this.noise(120, 0.3, 0.4 * v); this.tone(70, 40, 0.3, 0.2 * v, 'square'); },
+  /** 창문들: 노크 / 유리 깨짐 */
+  knock(v = 1) { for (let i = 0; i < 3; i++) { this.noise(900, 0.05, 0.3 * v, i * 0.22); this.tone(180, 140, 0.06, 0.12 * v, 'square', i * 0.22); } },
+  shatter(v = 1) { this.noise(6000, 0.6, 0.35 * v); for (let i = 0; i < 8; i++) this.tone(3000 + Math.random() * 3000, 2000, 0.05, 0.05 * v, 'triangle', Math.random() * 0.5); },
+  /** 페이슬링 전기톱 */
+  chainsaw(v = 1, when = 0) { this.tone(95, 110, 0.5, 0.08 * v, 'sawtooth', when); this.noise(1200, 0.5, 0.06 * v, when); },
+  /** 동네 감시자 / 클럼프 발소리 (쿵), 아라네아 (다다닥) */
+  stomp(v = 1) { this.noise(90, 0.25, 0.35 * v); this.tone(50, 35, 0.25, 0.15 * v, 'sine'); },
+  skitter(v = 1) { for (let i = 0; i < 4; i++) this.noise(2600 + Math.random() * 1500, 0.025, 0.12 * v, i * 0.04); },
+  /** 키티 순간이동: 이상한 소리 */
+  warp(v = 1) { this.tone(1200, 200, 0.6, 0.1 * v, 'sine'); this.tone(240, 1800, 0.6, 0.06 * v, 'triangle', 0.1); },
+  /** Level 94: 밤 예고 종소리 */
+  bell(v = 1) { for (let i = 0; i < 3; i++) this.tone(392, 388, 1.4, 0.12 * v, 'sine', i * 0.7); },
   howl(v) {
     this.tone(680, 220, 1.4, 0.18 * v, 'sawtooth');
     this.tone(910, 300, 1.2, 0.1 * v, 'square', 0.05);

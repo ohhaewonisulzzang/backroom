@@ -14,7 +14,7 @@ const EVENTS = [
   'lobby', 'init', 'round', 'snapshot', 'playerJoined', 'playerLeft', 'keyCollected',
   'playerDied', 'playerEscaped', 'monsterAlert', 'entityEvent', 'hideState', 'itemSpawned', 'itemPicked',
   'testResult', 'roundEnd', 'correct', 'joinError', 'paused',
-  'inventory', 'itemUsed', 'emote', 'gameComplete', 'puzzleAlarm',
+  'inventory', 'itemUsed', 'emote', 'gameComplete', 'puzzleAlarm', 'objective', 'night', 'balloonPopped', 'chat', 'rtc', 'gesture',
 ];
 
 export class NetClient {
@@ -51,8 +51,19 @@ export class NetClient {
   useItem(slot) { this.socket?.emit('useItem', { slot }); }
   dropItem(slot) { this.socket?.emit('dropItem', { slot }); }
   emote(i) { this.socket?.emit('emote', { i }); }
+  gesture(g) { this.socket?.emit('gesture', { g }); }
   /** 퍼즐 단말기 정답 제출 — 판정은 서버가 한다 (맞으면 keyCollected, 틀리면 puzzleAlarm) */
   solvePuzzle(index, answer) { this.socket?.emit('solvePuzzle', { index, answer }); }
+  /** 밸브/크랭크를 시계 방향으로 delta 라디안 돌림 — 진행도는 서버가 계산해 스냅샷으로 온다 */
+  turnValve(index, delta) { this.socket?.emit('turnValve', { index, delta }); }
+  /** 파티 푸퍼에게 말 걸기 / 풍선 터뜨리기 */
+  interact(mid) { this.socket?.emit('interact', { mid }); }
+  popBalloon(index) { this.socket?.emit('popBalloon', { index }); }
+  /** 채팅 / 보이스 챗 (말하는 중 알림, 연결 정보 중계) */
+  chat(text) { this.socket?.emit('chat', { text }); }
+  speaking(on) { this.socket?.emit('speaking', { on }); }
+  voiceState(vc) { this.socket?.emit('voiceState', { vc }); }
+  rtc(to, d) { this.socket?.emit('rtc', { to, d }); }
 
   /** 사물함 들어가기(index) / 나오기(null) 요청 — 판정은 서버가 한다 */
   hide(index) { this.socket?.emit('hide', { index }); }

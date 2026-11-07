@@ -1,8 +1,8 @@
 // 퍼즐 생성기가 항상 "풀 수 있는" 퍼즐을 만드는지, 판정기가 정답/오답을 제대로 가르는지 검사한다.
 //   node test/puzzles.mjs
-import { generatePuzzle, checkPuzzle, lightsToggle, slideMove, PUZZLE_TYPES } from '../shared/puzzles.js';
+import { generatePuzzle, checkPuzzle, lightsToggle, slideMove, arcadePos, PUZZLE_TYPES } from '../shared/puzzles.js';
 import { generateLevel } from '../shared/map.js';
-import { LEVELS } from '../shared/config.js';
+import { LEVELS, missionOf } from '../shared/config.js';
 
 let failed = 0;
 const check = (cond, label) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`); if (!cond) failed++; };
@@ -42,6 +42,8 @@ export function solve(p) {
       for (let n = -1000; n < 100000; n++) if (checkPuzzle(p, n)) return n;
       return null;
     case 'memory': return p.seq;
+    case 'arcade':   // 단계마다 풍선이 구역 한가운데 근처에 오는 첫 순간
+      return p.stages.map(st => { for (let t = 0; t < 30; t += 0.001) if (Math.abs(arcadePos(st, t) - st.c) < st.hw * 0.5) return t; return -1; });
     case 'slide': {
       // BFS (타일 배열 → 빈칸 옆 타일 위치를 누르는 이동)
       const start = p.tiles.join(''), goal = '123456780', prev = new Map([[start, null]]), q = [start];
@@ -94,6 +96,9 @@ for (let lv = 0; lv < LEVELS.length; lv++) {
   const a = generateLevel(424242, lv), b = generateLevel(424242, lv);
   const n = a.keys.filter(k => k.puzzle).length;
   const same = JSON.stringify(a.keys.map(k => k.puzzle)) === JSON.stringify(b.keys.map(k => k.puzzle));
+  const M = missionOf(lv), got = { keys: a.keys.length, deliver: a.parts.length, activate: a.stations.length }[M.type];
+  const reach = [...a.keys, ...a.parts, ...a.stations, ...(a.depot ? [a.depot] : [])].every(o => a.dist[o.ty * a.map.w + o.tx] >= 0);
+  if (got !== undefined) check(got === M.count && reach && (M.type !== 'deliver' || !!a.depot), `LEVEL ${LEVELS[lv].label ?? lv}: 미션 ${M.kind || M.type} ${got}/${M.count} 배치, 모두 걸어서 갈 수 있음`);
   check(n === (LEVELS[lv].puzzles?.length ?? 0) && same, `LEVEL ${LEVELS[lv].label ?? lv}: 퍼즐 단말기 ${n}개 (${a.keys.filter(k => k.puzzle).map(k => k.puzzle.type).join(', ') || '없음'})`);
 }
 

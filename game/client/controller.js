@@ -9,17 +9,17 @@ import { angleDiff } from '../../shared/utils.js';
 export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   const C = CONFIG.PLAYER;
   let ix = 0, iy = 0;
-  if (Input.down('KeyW', 'ArrowUp')) iy -= 1;
-  if (Input.down('KeyS', 'ArrowDown')) iy += 1;
-  if (Input.down('KeyA', 'ArrowLeft')) ix -= 1;
-  if (Input.down('KeyD', 'ArrowRight')) ix += 1;
+  if (Input.held('up')) iy -= 1;
+  if (Input.held('down')) iy += 1;
+  if (Input.held('left')) ix -= 1;
+  if (Input.held('right')) ix += 1;
   const T = Input.touch;
   if (T.active && ix === 0 && iy === 0) { ix = T.move.x; iy = T.move.y; }   // 휴대폰/태블릿: 왼쪽 스틱
   const moving = Math.hypot(ix, iy) > 0.15;
   if (moving) { const l = Math.hypot(ix, iy); ix /= l; iy /= l; } else { ix = iy = 0; } // 방향만 쓰고 속도는 걷기/달리기로
 
-  p.crouching = Input.down('KeyC') || (T.active && T.crouch);   // 웅크리기: 느리지만 발소리가 나지 않음
-  const wantSprint = moving && !p.crouching && (Input.down('ShiftLeft', 'ShiftRight') || (T.active && T.sprint));
+  p.crouching = Input.held('crouch') || (T.active && T.crouch);   // 웅크리기: 느리지만 발소리가 나지 않음
+  const wantSprint = moving && !p.crouching && (Input.held('sprint') || (T.active && T.sprint));
   if (p.boostT > 0) p.boostT -= dt;
   if (wantSprint && !p.exhausted && p.stamina > 0) {
     p.sprinting = true;

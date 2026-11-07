@@ -81,11 +81,6 @@ export function drawStory(r, game) {
     ctx.fillText('NO SIGNAL', W / 2, H / 2);
   }
 
-  if (t > 2) {
-    ctx.font = `${Math.round(fs * 0.6)}px VT323, monospace`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-    ctx.fillStyle = 'rgba(200,190,150,0.45)';
-    ctx.fillText('ENTER 건너뛰기', W - 16, H - 12);
-  }
 }
 
 function drawScene(r, game, t, d) {

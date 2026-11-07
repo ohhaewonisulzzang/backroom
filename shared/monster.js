@@ -1,4 +1,4 @@
-import { CONFIG, TS } from './config.js';
+import { MISSION, CONFIG, TS, T } from './config.js';
 import { angleDiff, lerpAngle } from './utils.js';
 import { hasLOS, moveEntity } from './physics.js';
 
@@ -12,6 +12,7 @@ import { hasLOS, moveEntity } from './physics.js';
  *  smiler      스마일러   어둠 속에서만 움직이고 어둠 속 플레이어만 노린다. 손전등 빛을 받으면 사라진다.
  *  skinStealer 스킨스틸러 방랑자로 위장 → 다가와 "hello?" → 정체를 드러내고 추격. 정체를 드러내야만 공격.
  *  hound       하운드     사람 머리의 개. 시야로 추격. 손전등을 비추면 겁먹고 물러난다 (너무 가까우면 소용없음).
+ *  (그 밖의 엔티티는 아래 각 update 함수 설명 참고)
  *
  * game 인터페이스: { map, level, allPlayers(), onMonsterAlert(target, m), onEntityEvent(m, kind, data) }
  */
@@ -24,7 +25,7 @@ export class Monster {
     this.cfg = CONFIG.ENTITY[type];
     this.x = x; this.y = y; this.angle = Math.PI / 2;
     this.state = { howler: 'dormant', skinStealer: 'disguised', wanderer: 'wander', smiler: 'lurk', hound: 'patrol', partygoer: 'guard',
-      deathmoth: 'cling', wretch: 'wander', scratcher: 'wander' }[type] ?? 'patrol';
+      deathmoth: 'cling', wretch: 'wander', scratcher: 'wander', windows: 'idle', animation: 'doll', animatedKing: 'frozen', kitty: 'frozen', partyPooper: 'idle' }[type] ?? 'patrol';
     this.stunT = 0;              // 카메라 플래시 등으로 기절한 남은 시간
     this.immuneT = 0;            // 데스모스: 살충제 맞은 뒤 무시 시간
     this.post = null;            // 파티고어: 지키는 자리
@@ -47,6 +48,7 @@ export class Monster {
       y: Math.round(this.y * 10) / 10,
       angle: Math.round(this.angle * 1000) / 1000,
       state: this.state, active: this.active, revealed: this.revealed, color: this.color, stunned: this.stunT > 0,
+      ...(this.type === 'windows' && this.post ? { px: Math.round(this.post.x), py: Math.round(this.post.y) } : {}),   // 창문 위치
     };
   }
 
@@ -62,9 +64,12 @@ export class Monster {
   /** 지금 닿으면 플레이어가 죽는가 */
   canKill() {
     if (this.stunT > 0) return false;
-    if (!this.active || this.type === 'wanderer') return false;
+    if (!this.active || this.type === 'wanderer' || this.type === 'partyPooper') return false;
     if (this.type === 'skinStealer' && !this.revealed) return false;
     if (this.state === 'stunned' || this.state === 'vanished') return false;
+    if (this.type === 'windows' && this.state !== 'grab') return false;            // 창문에서 손을 뻗을 때만
+    if (this.type === 'animation' && this.state !== 'hunt') return false;          // 낮엔 그냥 인형
+    if ((this.type === 'animatedKing' || this.type === 'kitty') && this.state === 'frozen') return false;   // 쳐다보는 동안은 손대지 못한다
     return true;
   }
 
@@ -104,6 +109,9 @@ export class Monster {
     if (this.immuneT > 0) this.immuneT -= dt;
     if (this.type === 'deathmoth') return this.updateDeathmoth(dt, game);
     if (this.type === 'wretch' || this.type === 'scratcher') return this.updateListener(dt, game);
+    if (this.type === 'windows') return this.updateWindows(dt, game);
+    if (this.type === 'animation') return this.updateAnimation(dt, game);
+    if (this.type === 'partyPooper') return this.updatePooper(dt, game);
     if (!this.active) {
       this.timer += dt;
       if (this.type === 'howler' && this.timer >= this.cfg.delay) this.awaken(game);
@@ -121,6 +129,12 @@ export class Monster {
       case 'smiler': return this.updateSmiler(dt, game, target, best, sees);
       case 'skinStealer': return this.updateSkinStealer(dt, game, target, best, sees);
       case 'hound': return this.updateHound(dt, game, target, best, sees);
+      case 'watch': return this.updateRestricted(dt, game, target, best, sees, (x, y) => game.level.isWide(x, y));
+      case 'aranea': return this.updateRestricted(dt, game, target, best, sees, (x, y) => game.level.isWide(x, y));
+      case 'clump': return this.updateRestricted(dt, game, target, best, sees, (x, y) => game.map.get(x, y) !== T.SLOW);
+      case 'faceling': return this.updateFaceling(dt, game, target, best, sees);
+      case 'animatedKing': return this.updateWatched(dt, game, target, best);
+      case 'kitty': return this.updateWatched(dt, game, target, best);
     }
   }
 
@@ -244,6 +258,152 @@ export class Monster {
     this.patrol(dt, game.map, C.patrol);
   }
 
+  // ------------------------------------------------------------ 위키 엔티티들 (Level 4 / 9 / 10 / 37 / 94 / 188 / 974)
+  /**
+   * 정해진 곳(pass)만 다니며 시야로 추격: 동네 감시자·아라네아(넓은 곳만), 클럼프(물 밖만).
+   * 플레이어가 못 들어오는 곳으로 피하면 경로가 없어서 그 앞에서 멈췄다가 놓친다.
+   */
+  updateRestricted(dt, game, target, best, sees, pass) {
+    const C = this.cfg, map = game.map;
+    if (sees && this.state !== 'chase') { game.onMonsterAlert(target, this); this.state = 'chase'; this.lostT = 0; }
+    if (this.state === 'chase') {
+      const tx = sees ? target.x : this.lastSeen.x, ty = sees ? target.y : this.lastSeen.y;
+      const reachable = pass(Math.floor(tx / TS), Math.floor(ty / TS));
+      if (sees && reachable) this.lostT = 0; else this.lostT += dt;
+      if (this.lostT > CONFIG.ENTITY.LOSE_TIME) { this.state = 'patrol'; this.path = []; return; }
+      if (sees && best < TS * 1.4 && reachable) { this.moveToward(tx, ty, C.chase * this.speedMul, dt, map); return; }
+      if (this.repathT <= 0) { this.path = reachable ? map.findPath(this.tileX, this.tileY, Math.floor(tx / TS), Math.floor(ty / TS), pass) : []; this.repathT = 0.3; }
+      if (this.path.length) this.followPath(C.chase * this.speedMul, dt, map);
+      else this.angle = lerpAngle(this.angle, Math.atan2(ty - this.y, tx - this.x), Math.min(1, dt * 4));   // 들어갈 수 없는 곳 앞에서 노려본다
+      return;
+    }
+    if (!this.path.length) this.path = this.randomGoal(map, this.tileX, this.tileY, 5, 24, 14, pass);
+    this.followPath(C.patrol, dt, map);
+  }
+
+  /** 페이슬링 (Level 10): 시야로 추격, 느리다. 전기톱 소리는 클라이언트가 거리로 낸다 */
+  updateFaceling(dt, game, target, best, sees) {
+    if (sees && this.state !== 'chase') { game.onMonsterAlert(target, this); this.state = 'chase'; }
+    if (this.state === 'chase' || this.state === 'search') return this.chaseOrSearch(dt, game, target, best, sees, this.cfg.chase * this.speedMul);
+    this.patrol(dt, game.map, this.cfg.patrol);
+  }
+
+  /** 누군가 이 엔티티를 쳐다보고 있나 (시야 부채꼴 + 벽 없음). 어두운 곳이면 손전등으로 비춰야 보인다 */
+  watchedBy(game) {
+    const C = this.cfg;
+    if (game.level.isDark(this.tileX, this.tileY)) return this.litBy(game);
+    for (const p of game.allPlayers()) {
+      if (!p.alive || p.hidden) continue;
+      const d = Math.hypot(this.x - p.x, this.y - p.y);
+      if (d > C.watchRange) continue;
+      if (Math.abs(angleDiff(Math.atan2(this.y - p.y, this.x - p.x), p.angle)) > C.watchFov / 2) continue;
+      if (hasLOS(game.map, p.x, p.y, this.x, this.y)) return { p, d };
+    }
+    return null;
+  }
+
+  /**
+   * 애니메이션 킹 (Level 94) / 키티 (Level 974): 보고 있으면 멈추고(frozen), 눈을 떼면 다가온다(stalk).
+   *  킹: 손전등을 정면으로 비추면 사라졌다가(vanished) 근처 안 보이는 곳에 다시 나타난다.
+   *  키티: 가끔 이상한 소리와 함께 플레이어 근처로 순간이동한다.
+   */
+  updateWatched(dt, game, target, best) {
+    const C = this.cfg, king = this.type === 'animatedKing';
+    if (this.state === 'vanished') {
+      this.timer -= dt;
+      if (this.timer <= 0) { if (target) this.teleportNear(game, target); this.state = 'frozen'; }
+      return;
+    }
+    if (king) {
+      const lit = this.litBy(game);
+      if (lit) { this.state = 'vanished'; this.timer = C.vanish; this.path = []; game.onEntityEvent(this, 'vanish'); return; }
+    }
+    this.timer += dt;
+    if (!king && this.timer > C.teleportEvery && target && best > TS * 6) {
+      this.timer = 0; this.teleportNear(game, target, 6, 10); game.onEntityEvent(this, 'teleport');
+    }
+    if (this.watchedBy(game)) { if (this.state !== 'frozen') this.path = []; this.state = 'frozen'; return; }
+    if (!target) return;
+    if (this.state !== 'stalk' && best < TS * 6) game.onMonsterAlert(target, this);
+    this.state = 'stalk';
+    this.pursue(dt, game, target, C.chase * this.speedMul, best < TS * 1.5 && hasLOS(game.map, this.x, this.y, target.x, target.y));
+  }
+
+  /** 창문들 (Level 4 / 188): 창문(post) 속에서 노크. 가까이 오면 유리를 깨고 손을 뻗어 끌고 간다 */
+  updateWindows(dt, game) {
+    const C = this.cfg, map = game.map;
+    if (!this.post) this.post = { x: this.x, y: this.y };
+    const { target, best } = this.nearestPlayer(game);
+    const d = target ? Math.hypot(target.x - this.post.x, target.y - this.post.y) : Infinity;
+    const los = target && hasLOS(map, this.post.x, this.post.y, target.x, target.y);
+    this.timer -= dt;
+    if (target && los && d < C.grab) {
+      if (this.state !== 'grab') { game.onEntityEvent(this, 'shatter'); game.onMonsterAlert(target, this); }
+      this.state = 'grab';
+      this.moveToward(target.x, target.y, C.lunge, dt, map);
+      const ox = this.x - this.post.x, oy = this.y - this.post.y, od = Math.hypot(ox, oy);
+      if (od > C.grab) { this.x = this.post.x + (ox / od) * C.grab; this.y = this.post.y + (oy / od) * C.grab; }   // 창문에서 멀리 못 나온다
+      return;
+    }
+    if (this.state === 'grab') this.state = 'watch';
+    if (Math.hypot(this.x - this.post.x, this.y - this.post.y) > 2) this.moveToward(this.post.x, this.post.y, C.lunge * 0.5, dt, map);
+    this.state = target && los && d < C.knock ? 'watch' : 'idle';
+    if (this.state === 'watch') {
+      this.angle = Math.atan2(target.y - this.y, target.x - this.x);
+      if (this.timer <= 0) { game.onEntityEvent(this, 'knock'); this.timer = 2.2 + Math.random() * 1.5; }
+    }
+  }
+
+  /**
+   * 애니메이션 (Level 94): 낮(doll)엔 제자리에 서 있는 나무 인형. 밤(game.nightPhase === 'night')이 되면 hunt —
+   * 숨지 않은 가장 가까운 사람에게 달려든다. 숨은 사람은 찾지 못한다. 밤이 끝나면 그 자리에서 다시 인형이 된다.
+   */
+  updateAnimation(dt, game) {
+    const night = game.nightPhase === 'night';
+    if (!night) { if (this.state === 'hunt') { this.state = 'doll'; this.path = []; } return; }
+    const { target, best } = this.nearestPlayer(game);
+    if (this.state !== 'hunt') { this.state = 'hunt'; if (target) game.onMonsterAlert(target, this); }
+    if (!target) { if (!this.path.length) this.path = this.randomGoal(game.map, this.tileX, this.tileY, 3, 12, 8); this.followPath(this.cfg.chase * 0.5, dt, game.map); return; }
+    this.pursue(dt, game, target, this.cfg.chase * this.speedMul, best < TS * 1.5 && hasLOS(game.map, this.x, this.y, target.x, target.y));
+  }
+
+  /**
+   * 파티 푸퍼 (Level 52): 유일하게 도와주는 엔티티.
+   *  idle   제자리에 서서 가장 가까운 사람을 바라본다 (E 로 말을 걸 수 있다 → GameRoom.onInteract)
+   *  guide  안내받는 사람(follower)을 남은 열쇠(guideKey)까지 데려간다. 너무 멀어지면 기다린다
+   *  arrive 도착해서 열쇠 옆에 서 있는다
+   *  그 열쇠를 누가 먹으면 gone = true (GameRoom 이 지운다)
+   */
+  updatePooper(dt, game) {
+    const C = this.cfg, map = game.map;
+    if (this.state === 'idle') {
+      const { target, best } = this.nearestPlayer(game);
+      if (target && best < TS * 5) this.angle = lerpAngle(this.angle, Math.atan2(target.y - this.y, target.x - this.x), Math.min(1, dt * 4));
+      return;
+    }
+    const k = game.level.keys[this.guideKey];
+    if (!k || game.keysCollected?.[this.guideKey]) { this.gone = true; return; }
+    if (this.state === 'arrive') return;
+    const f = game.players?.get?.(this.follower);
+    if (f && f.alive && Math.hypot(f.x - this.x, f.y - this.y) > C.wait) {      // 따라오는 사람을 기다린다
+      this.angle = lerpAngle(this.angle, Math.atan2(f.y - this.y, f.x - this.x), Math.min(1, dt * 5));
+      this.waiting = true;
+      return;
+    }
+    this.waiting = false;
+    // 열쇠 바로 옆 칸까지 (단말기를 가리지 않게)
+    if (!this.path.length || this.repathT <= 0) {
+      this.path = map.findPath(this.tileX, this.tileY, k.tx, k.ty);
+      if (this.path.length) this.path.pop();
+      this.repathT = 2;
+    }
+    if (this.followPath(C.speed, dt, map) || Math.hypot(k.x - this.x, k.y - this.y) < TS * 1.2) {
+      this.state = 'arrive'; this.path = [];
+      this.angle = Math.atan2(k.y - this.y, k.x - this.x);
+      game.onEntityEvent(this, 'voice', { text: '여기...' });
+    }
+  }
+
   // ------------------------------------------------------------ 소리로 찾는 엔티티들
   /**
    * 들리는 소리 중 가장 가까운 것: 플레이어 발소리(p.noise), 목소리(감정 표현), 퍼즐 경보, 조명탄.
@@ -257,8 +417,13 @@ export class Monster {
       let r = (p.noise || 0) * mult;
       if (voice && p.voiceUntil > now) r = Math.max(r, CONFIG.EMOTE.NOISE * mult);
       if (p.alarmUntil > now) r = Math.max(r, CONFIG.PUZZLE.ALARM * mult);   // 퍼즐 오답 경보 (기계음이라 모두 듣는다)
+      if (p.workUntil > now) r = Math.max(r, MISSION.WORK_NOISE * mult);     // 밸브/발전기/펌프 작동 소리
       const d = Math.hypot(p.x - this.x, p.y - this.y);
       if (d < r && d < bd) { bd = d; best = { x: p.x, y: p.y, p }; }
+    }
+    for (const n of game.noises || []) {          // 터진 풍선 등 바닥에서 난 소리
+      const d = Math.hypot(n.x - this.x, n.y - this.y);
+      if (d < n.r * mult && d < bd) { bd = d; best = { x: n.x, y: n.y, noise: true }; }
     }
     for (const f of game.flares || []) {
       const d = Math.hypot(f.x - this.x, f.y - this.y);
@@ -462,10 +627,10 @@ export class Monster {
     game.onEntityEvent(this, 'awake');
   }
 
-  /** 플레이어 근처(경로 10~16칸)의 보이지 않는 곳으로 이동 */
-  teleportNear(game, p) {
+  /** 플레이어 근처(경로 lo~hi 칸)의 보이지 않는 곳으로 이동 */
+  teleportNear(game, p, lo = 10, hi = 16) {
     const map = game.map, dist = map.bfs(Math.floor(p.x / TS), Math.floor(p.y / TS));
-    const cand = map.floorCells.filter(i => dist[i] >= 10 && dist[i] <= 16);
+    const cand = map.floorCells.filter(i => dist[i] >= lo && dist[i] <= hi);
     for (let k = 0; k < 20 && cand.length; k++) {
       const i = cand[Math.floor(Math.random() * cand.length)];
       const x = (i % map.w) * TS + TS / 2, y = ((i / map.w) | 0) * TS + TS / 2;
