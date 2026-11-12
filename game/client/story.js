@@ -83,7 +83,7 @@ export function drawStory(r, game) {
 
 }
 
-function drawScene(r, game, t, d) {
+export function drawScene(r, game, t, d) {
   const { ctx, W, H } = r;
   const fs = Math.round(Math.min(W, H) * 0.036);
   const glitch = clamp01((t - 14.4) / 1.6);                    // 14.4~16s: 화면이 일그러진다

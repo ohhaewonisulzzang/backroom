@@ -10,6 +10,7 @@ import { Sound } from './sound.js';
 import { NetClient } from './net.js';
 import { Renderer } from './renderer.js';
 import { makeStoryCast, storyScript, playStoryEvents } from './story.js';
+import { ENDING, makeEndingData, playEndingEvents } from './ending.js';
 import { DEATH_DURATION, addGore } from './deaths.js';
 import { discoverLevel } from './bestiary.js';
 import { GESTURES } from './sprites.js';
@@ -243,6 +244,7 @@ const Game = {
       const prevT = this.cine.t;
       this.cine.t += dt;
       if (this.cine.type === 'story') playStoryEvents(this.cine, prevT);
+      else if (this.cine.type === 'ending') playEndingEvents(this.cine, prevT);
       if (this.cine.t >= this.cine.dur) this.endCine();
     }
     if (this.phase === 'ending') return;
@@ -561,7 +563,8 @@ const Game = {
 
   /** 엔딩 건너뛰기 (3초 이후) / 오프닝 건너뛰기 (1초 이후) */
   skipCine() {
-    if (this.cine?.type === 'ending' && this.cine.t > 3) this.cine.t = this.cine.dur;
+    // 엔딩: 앞 장면이면 생존 보고서로, 보고서부터는 끝으로
+    if (this.cine?.type === 'ending' && this.cine.t > 3) { Sound.hushVoice(); this.cine.t = this.cine.t < ENDING.B ? ENDING.B : this.cine.dur; }
     if (this.cine?.type === 'story' && this.cine.t > 1) this.endCine();
   },
 };
@@ -888,12 +891,12 @@ const handlers = {
   onGameComplete(d) {
     Game.deathT = 0; Game.pendingRoundEnd = null;
     Game.phase = 'ending';
-    Game.startCine('ending', 19, { escaped: d.escaped || [], dead: d.dead || [], time: Game.totalTime, color: Game.local?.color || 'default' });
+    const players = [...Game.allPlayers()].map(p => ({ id: p.id, name: p.name, color: p.color }));
+    Game.startCine('ending', ENDING.DUR, makeEndingData(d.stats, Game.myId, Game.local?.color || 'default', players));
     UI.hide();
     UI.closePanels?.();
     Sound.setDrone(0);
-    Sound.setHiss(0); Sound.duck(1);
-    Sound.ending();
+    Sound.setHiss(0); Sound.duck(1);                // 음악·효과음은 playEndingEvents 가 장면에 맞춰 낸다
   },
   onPaused({ paused }) { Game.serverPaused = paused; },
   onTestResult({ text, god }) {

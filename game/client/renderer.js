@@ -10,6 +10,7 @@ import {
 } from './sprites.js';
 import { Hud } from './hud.js';
 import { drawStory } from './story.js';
+import { drawEnding } from './ending.js';
 import { drawDeathOverlay, drawGore } from './deaths.js';
 
 /**
@@ -530,49 +531,10 @@ export class Renderer {
   }
 
   /** 엔딩: 노클립 섬광 → 현실로 돌아온 듯한 밤거리 (노란 벽지가 잠깐 비침) → 게임 이름만 떠오르고 끝 (내레이션 없음) */
+  /** 엔딩 시네마틱 (game/client/ending.js): 3999 출구 → 폐건물 → 생존 보고서 → 제목 */
   renderEnding(game, dt) {
-    const { ctx, W, H } = this, c = game.cine;
-    if (!c) return;
-    const t = c.t, d = c.data;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-    if (t < 11) {
-      // 밤거리: 하늘, 별, 가로등, 길, 플레이어 뒷모습
-      const k = Math.min(1, t / 0.8) * Math.min(1, (11 - t) / 0.4);
-      const sky = ctx.createLinearGradient(0, 0, 0, H);
-      sky.addColorStop(0, '#05070f'); sky.addColorStop(0.7, '#14182a'); sky.addColorStop(1, '#1d1f24');
-      ctx.globalAlpha = k;
-      ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
-      for (let i = 0; i < 70; i++) { ctx.fillStyle = `rgba(230,230,255,${0.3 + ((i * 7) % 10) / 14})`; ctx.fillRect((i * 137) % W, (i * 89) % Math.round(H * 0.55), 2, 2); }
-      ctx.fillStyle = '#101114'; ctx.fillRect(0, H * 0.72, W, H * 0.28);
-      ctx.fillStyle = '#c9c49a'; for (let x = 0; x < W; x += 80) ctx.fillRect(x + ((t * 6) % 80) * 0, H * 0.84, 40, 4);
-      const lx = W * 0.68;
-      ctx.fillStyle = '#2a2b30'; ctx.fillRect(lx, H * 0.3, 8, H * 0.44); ctx.fillRect(lx - 40, H * 0.3, 48, 6);
-      const lg = ctx.createRadialGradient(lx - 36, H * 0.33, 0, lx - 36, H * 0.33, H * 0.5);
-      lg.addColorStop(0, 'rgba(255,220,150,0.35)'); lg.addColorStop(1, 'rgba(255,220,150,0)');
-      ctx.fillStyle = lg; ctx.fillRect(0, 0, W, H);
-      const spr = humanPreview(d.color || 'default', 'up');
-      const s = Math.round(H / 160);
-      ctx.drawImage(spr, Math.round(W * 0.45), Math.round(H * 0.76 - spr.height * s), spr.width * s, spr.height * s);
-      // 반전: 아주 잠깐 노란 벽지가 비친다
-      if (t > 10.45 && t < 10.75) { ctx.fillStyle = 'rgba(214,194,106,0.85)'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = 'rgba(186,164,84,0.9)'; for (let x = 0; x < W; x += 24) ctx.fillRect(x, 0, 6, H); }
-      ctx.globalAlpha = 1;
-      if (t < 1.5) { ctx.fillStyle = `rgba(255,255,245,${1 - t / 1.5})`; ctx.fillRect(0, 0, W, H); }   // 노클립 섬광
-    } else {
-      // 게임 이름만 아래에서 천천히 올라와 멈추고, 그대로 끝난다
-      const u = Math.min(1, (t - 11.5) / 4), e = 1 - (1 - u) ** 3;
-      if (t > 11.5) {
-        const a = Math.min(1, (t - 11.5) / 1.5) * Math.min(1, (c.dur - t) / 1.2);
-        const y = H * 1.1 - (H * 1.1 - H * 0.5) * e;
-        const size = Math.round(Math.min(W, H) * 0.16);
-        ctx.font = `${size}px VT323, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(216,196,106,0.6)'; ctx.shadowBlur = 24;
-        ctx.fillStyle = `rgba(216,196,106,${a})`;
-        ctx.fillText('BACKROOMS', W / 2 + (Math.random() < 0.04 ? 4 : 0), y);
-        ctx.shadowBlur = 0;
-      }
-    }
+    if (!game.cine) return;
+    drawEnding(this, game);
     this.drawPostFx({ danger: 0, deathT: 0, level: null });
     this.drawSkipHint(game);
   }

@@ -39,6 +39,10 @@ export default function BackroomsGame() {
   const [chat, setChat] = useState([]);             // 채팅 기록
   const [chatOpen, setChatOpen] = useState(false);  // 채팅 입력창
   const isTouch = useIsTouch();                     // 휴대폰/태블릿이면 화면 조작 버튼을 띄운다
+  // 게임을 시작할 때(혼자 플레이 / 멀티 플레이를 누를 때) 한 번 나오는 주의 화면. 닫으면 원래 하려던 걸 이어서 한다
+  const [warning, setWarning] = useState(null);     // null | () => void (닫은 뒤 할 일)
+  const warnedRef = useRef(false);
+  const withWarning = fn => { if (warnedRef.current) fn(); else setWarning(() => fn); };
 
   useEffect(() => {
     let disposed = false;
@@ -100,7 +104,7 @@ export default function BackroomsGame() {
     <div onPointerDown={unlock} onKeyDown={unlock}>
       <canvas id="game" ref={canvasRef} />
       {overlay.kind === 'menu' && (
-        <MainMenu screen={overlay.screen} error={overlay.error} nav={nav} engine={engine}
+        <MainMenu screen={overlay.screen} error={overlay.error} nav={nav} engine={engine} withWarning={withWarning}
           settings={settings} onSettings={changeSettings} />
       )}
       {overlay.kind === 'lobby' && <LobbyPanel state={overlay} engine={engine} />}
@@ -134,6 +138,40 @@ export default function BackroomsGame() {
       )}
       {isTouch && overlay.kind === 'hidden' && !pauseOpen && <TouchControls engine={engine} />}
       {testOpen && <TestPanel onCmd={(c, a) => engine()?.test(c, a)} onClose={() => setTestOpen(false)} />}
+      {warning && <WarningScreen onClose={() => { const next = warning; warnedRef.current = true; setWarning(null); unlock(); next(); }} />}
+    </div>
+  );
+}
+
+// ================================================================ 시작 주의 화면
+/**
+ * 게임을 시작할 때(혼자 플레이 / 멀티 플레이, 이 탭에서 처음 한 번) 나오는 경고: 점프스케어, 섬광·깜빡임, 잔인한 표현, 큰 소리.
+ * 1.5초 뒤부터 아무 키나 / 클릭으로 넘어간다. 그 키는 게임으로 전달되지 않는다.
+ */
+function WarningScreen({ onClose }) {
+  const [ready, setReady] = useState(false);
+  const readyRef = useRef(false), closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const id = setTimeout(() => { readyRef.current = true; setReady(true); }, 1500);
+    const key = e => { e.preventDefault(); e.stopImmediatePropagation(); if (readyRef.current) closeRef.current(); };
+    window.addEventListener('keydown', key, true);
+    return () => { clearTimeout(id); window.removeEventListener('keydown', key, true); };
+  }, []);
+  return (
+    <div className="warning-screen" onPointerDown={e => { e.stopPropagation(); if (ready) onClose(); }}>
+      <div className="warning-box">
+        <h1>⚠ 주의</h1>
+        <p>이 게임에는 다음 요소가 포함되어 있습니다.</p>
+        <ul>
+          <li><b>갑자기 튀어나오는 점프스케어</b>와 큰 소리</li>
+          <li><b>강한 섬광</b>, 빠르게 <b>깜빡이는 빛</b>, 화면 흔들림</li>
+          <li>피와 잔인한 표현</li>
+        </ul>
+        <p className="warn-dim">빛에 민감하거나 광과민성 발작을 겪은 적이 있다면 플레이를 삼가세요.<br />
+          설정에서 사망 점프스케어 · 잔인한 연출 · 화면 흔들림 · 메뉴 깜짝 등장을 끌 수 있습니다.</p>
+        <p className={`warn-go${ready ? ' on' : ''}`}>{ready ? '아무 키나 누르거나 클릭해서 계속' : '...'}</p>
+      </div>
     </div>
   );
 }
@@ -271,7 +309,7 @@ function useName() {
   return [name, setName, save];
 }
 
-function MainMenu({ screen, error, nav, engine, settings, onSettings }) {
+function MainMenu({ screen, error, nav, engine, settings, onSettings, withWarning = fn => fn() }) {
   const [name, setName, saveName] = useName();
   const [code, setCode] = useState('');
   useEffect(() => {
@@ -301,8 +339,8 @@ function MainMenu({ screen, error, nav, engine, settings, onSettings }) {
 
       {screen === 'play' && (
         <nav className="menu-list">
-          <Btn big onClick={() => engine()?.solo(saveName(), 'default')}>혼자 플레이</Btn>
-          <Btn big onClick={() => nav('multi')}>멀티 플레이</Btn>
+          <Btn big onClick={() => withWarning(() => engine()?.solo(saveName(), 'default'))}>혼자 플레이</Btn>
+          <Btn big onClick={() => withWarning(() => nav('multi'))}>멀티 플레이</Btn>
           <Btn onClick={() => nav('main')}>← 뒤로</Btn>
         </nav>
       )}
@@ -641,6 +679,7 @@ function TestPanel({ onCmd, onClose }) {
           <B cmd="tpKey">목표로 이동</B>
           <B cmd="tpPuzzle">퍼즐로 이동</B>
           <B cmd="tpExit">출구로 이동</B>
+          <B cmd="ending">엔딩 보기</B>
         </div>}
       </div>
     </div>

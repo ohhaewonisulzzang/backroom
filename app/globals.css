@@ -374,3 +374,15 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 .g-keys td { padding: 5px 4px; border-bottom: 1px solid rgba(74,66,34,.5); }
 .g-keys kbd { font-family: inherit; color: #fff3c4; border: 1px solid var(--yellow-dim); padding: 0 6px; background: rgba(216,196,106,.08); white-space: nowrap; }
 .g-foot { text-align: center; padding: 40px 16px 60px; color: var(--yellow-dim); font-size: 22px; }
+
+/* ---------- 시작 주의 화면 ---------- */
+.warning-screen { position: fixed; inset: 0; z-index: 100; background: #000; display: flex; align-items: center; justify-content: center; padding: 20px; cursor: pointer; }
+.warning-box { max-width: 620px; color: var(--text); font-size: 22px; line-height: 1.45; word-break: keep-all; }
+.warning-box h1 { margin: 0 0 14px; font-size: 56px; font-weight: normal; color: #e0503a; letter-spacing: 4px; text-shadow: 0 0 14px rgba(224,80,58,.4); }
+.warning-box p { margin: 0 0 10px; }
+.warning-box ul { margin: 0 0 16px; padding-left: 22px; }
+.warning-box li { margin: 4px 0; }
+.warning-box b { color: var(--yellow); font-weight: normal; }
+.warn-dim { color: var(--muted); font-size: 19px; }
+.warn-go { margin-top: 22px !important; text-align: center; color: var(--yellow-dim); }
+.warn-go.on { color: var(--yellow); animation: flick 2s infinite steps(1); }

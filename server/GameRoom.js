@@ -40,12 +40,32 @@ export class GameRoom {
     this.monsterGrace = 0;
     this.lastTick = Date.now();
     this.snapAcc = 0;
+    this.resetStats();
     this.timer = setInterval(() => this.tick(), 1000 / CONFIG.NET.SIM_RATE);
   }
 
   get isFull() { return this.players.size >= CONFIG.NET.MAX_PLAYERS; }
 
-  emit(event, data) { this.io.to(this.name).emit(event, data); }
+  emit(event, data) {
+    // 엔딩 성적표용 기록: 죽음·탈출은 모든 원인이 이 이벤트 하나로 모인다
+    if (event === 'playerDied') this.statOf(data.id).deaths++;
+    else if (event === 'playerEscaped') this.statOf(data.id).escapes++;
+    this.io.to(this.name).emit(event, data);
+  }
+
+  // ---------------------------------------------------------------- 엔딩 성적표 (처음 Level 0 부터 끝까지의 기록)
+  resetStats() { this.stats = new Map(); this.playTime = 0; }
+  statOf(id) {
+    let s = this.stats.get(id);
+    if (!s) { const p = this.players.get(id); s = { id, name: p?.name || '?', color: p?.color || 'default', deaths: 0, escapes: 0, keys: 0, puzzles: 0, delivered: 0, activated: 0 }; this.stats.set(id, s); }
+    const p = this.players.get(id);
+    if (p) { s.name = p.name; s.color = p.color; }
+    return s;
+  }
+  statsPayload() {
+    for (const p of this.players.values()) this.statOf(p.id);     // 한 번도 기록이 없던 사람도 넣는다
+    return { playTime: Math.round(this.playTime), players: [...this.stats.values()].filter(s => this.players.has(s.id)) };
+  }
 
   /** Monster AI 가 사용하는 인터페이스 */
   allPlayers() { return this.players.values(); }
@@ -96,6 +116,7 @@ export class GameRoom {
   /** 방장이 시작 → 모두에게 init 을 보내고 라운드 시작 */
   startMatch(id) {
     if (this.phase !== 'lobby' || id !== this.hostId) return;
+    this.resetStats();
     this.startRound(false, { story: this.levelIndex === 0 });
     for (const p of this.players.values()) {
       this.io.to(p.id).emit('init', { ...this.roundPayload(), id: p.id, room: this.name, testMode: this.testMode, story: this.story });
@@ -319,7 +340,8 @@ export class GameRoom {
       this.levelIndex = 0;
       for (const p of this.players.values()) { p.inv = []; p.status = 'alive'; }
       this.phase = this.solo ? 'complete' : 'lobby';
-      this.emit('gameComplete', { escaped, dead: list('dead') });
+      this.emit('gameComplete', { escaped, dead: list('dead'), stats: this.statsPayload() });
+      this.resetStats();
       if (!this.solo) this.emitLobby();
       this.log('GAME COMPLETE');
       return;
@@ -393,6 +415,7 @@ export class GameRoom {
   collectKey(i, p) {
     if (this.keysCollected[i]) return;
     this.keysCollected[i] = true;
+    if (this.level.keys[i]?.puzzle) this.statOf(p.id).puzzles++; else this.statOf(p.id).keys++;
     const count = this.keysCollected.filter(Boolean).length;
     for (const m of this.monsters) m.speedMul = 1 + MISSION.SPEED_BONUS * count / this.level.keys.length;
     if (count >= this.level.keys.length) this.exitUnlocked = true;
@@ -414,7 +437,7 @@ export class GameRoom {
       });
       const dp = this.level.depot;
       if (held && dp && Math.hypot(dp.x - p.x, dp.y - p.y) < MISSION.DEPOT_DIST) {
-        for (const pt of o.parts) if (pt.s === 1 && pt.c === p.id) { pt.s = 2; pt.c = null; pt.x = dp.x; pt.y = dp.y; o.done++; }
+        for (const pt of o.parts) if (pt.s === 1 && pt.c === p.id) { pt.s = 2; pt.c = null; pt.x = dp.x; pt.y = dp.y; o.done++; this.statOf(p.id).delivered++; }
         this.missionProgress(o.done / o.total, p.id, 'deliver');
       }
     }
@@ -764,6 +787,13 @@ export class GameRoom {
         this.monsters.push(m);
         return reply(`${arg} 소환 (3~5칸 거리)`);
       }
+      case 'ending': {   // 엔딩 바로 보기: 마지막 레벨에서 살아 있는 사람 모두 탈출 처리
+        if (this.phase !== 'playing') return reply('라운드가 끝난 상태');
+        this.levelIndex = LEVELS.findIndex(L => L.final);
+        for (const q of this.players.values()) if (q.alive) { q.status = 'escaped'; this.emit('playerEscaped', { id: q.id }); }
+        this.checkRoundEnd();
+        return reply('엔딩');
+      }
       case 'clearEntities':
         this.monsters = [];
         return reply('엔티티 전부 제거');
@@ -798,6 +828,7 @@ export class GameRoom {
 
     if (this.phase === 'lobby' || this.paused) return;
     if (this.phase === 'playing') {
+      this.playTime += dt;                       // 엔딩 성적표의 플레이 시간 (혼자 하기 일시정지 중엔 안 셈)
       if (this.flares.length) this.flares = this.flares.filter(f => f.until > now);
       if (this.noises.length) this.noises = this.noises.filter(n => n.until > now);
       if (this.monsterGrace > 0) this.monsterGrace -= dt;
@@ -922,7 +953,7 @@ export class GameRoom {
     p.workUntil = now + 500;
     o.prog[i] = Math.min(1, o.prog[i] + d / (o.turns * Math.PI * 2));
     if (o.prog[i] > 0.999) o.prog[i] = 1;                    // 소수 계산 오차로 99.99..% 에서 멈추지 않게
-    if (o.prog[i] >= 1) { o.done++; this.missionProgress(o.done / o.total, id, 'activate'); }
+    if (o.prog[i] >= 1) { o.done++; this.statOf(id).activated++; this.missionProgress(o.done / o.total, id, 'activate'); }
   }
 
   /**
