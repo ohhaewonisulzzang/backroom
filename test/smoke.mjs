@@ -10,7 +10,7 @@ import { io } from 'socket.io-client';
 import { generateLevel } from '../shared/map.js';
 import { TS, LEVELS, MISSION, CONFIG } from '../shared/config.js';
 const LV = name => LEVELS.findIndex(L => L.name === name);
-const RUN = LV('RUN FOR YOUR LIFE'), END = LV('THE END');
+const RUN = LV('RUN FOR YOUR LIFE'), END = LV('THE END'), FINAL = LV('THE TRUE END');
 import { solve } from './puzzles.mjs';
 
 const PORT = 3999;
@@ -274,18 +274,26 @@ try {
   solo.s.emit('emote', { i: 2 });                                  // 쿨다운 안이라 무시
   await sleep(250);
   check(em.id === solo.s.id && !solo.log.some(e => e.ev === 'emote' && e.data.i === 2), '감정 표현 → 모두에게 emote, 연속 사용은 쿨다운');
-  // 13) 마지막 레벨(END) 탈출 → 엔딩
+  // 13) LEVEL END(도서관) 탈출 → 다음은 LEVEL 3999, 3999 탈출 → 엔딩
   solo.s.emit('test', { cmd: 'setLevel', arg: END });
   const endRound = await solo.waitFor('round', d => d.level === END);
   const et = [...new Set(endRound.monsters.map(m => m.type))].join(',');
   solo.s.emit('test', { cmd: 'unlockExit' });
   await solo.waitFor('keyCollected', d => d.unlocked);
   solo.s.emit('test', { cmd: 'tpExit' });
+  const endEnd = await solo.waitFor('roundEnd', () => true, 6000);
+  check(et === 'scratcher' && endEnd.nextLevel === FINAL, `LEVEL END(스크래처) 탈출 → 다음은 LEVEL 3999 (${endEnd.nextLevel})`);
+  await solo.waitFor('round', d => d.level === FINAL, 12000);
+  solo.s.emit('test', { cmd: 'unlockExit' });
+  await solo.waitFor('keyCollected', d => d.unlocked);
+  solo.s.emit('test', { cmd: 'tpExit' });
   const done = await solo.waitFor('gameComplete', () => true, 6000);
-  check(et === 'scratcher' && done.escaped.includes('Solo'), `LEVEL END(스크래처) 탈출 → gameComplete 엔딩 (생존자 ${done.escaped.join(',')})`);
+  check(done.escaped.includes('Solo'), `LEVEL 3999 탈출 → gameComplete 엔딩 (생존자 ${done.escaped.join(',')})`);
   for (const [lv, want] of [[LV('ABANDONED OFFICE'), 'wanderer,windows'], [LV('TERROR HOTEL'), 'deathmoth,hound'], [LV('LIGHTS OUT'), 'wretch'],
     [LV('THE SUBURBS'), 'wanderer,watch,wretch'], [LV('FIELD OF WHEAT'), 'faceling'], [LV('THE POOLROOMS'), 'clump'], [LV('SCHOOL HALLS'), 'partyPooper,partygoer,smiler'],
-    [LV('MOTION'), 'animatedKing,animation'], [LV('COURTYARD OF WINDOWS'), 'aranea,windows'], [LV("KITTY'S HOUSE"), 'kitty']]) {
+    [LV('MOTION'), 'animatedKing,animation'], [LV('COURTYARD OF WINDOWS'), 'aranea,windows'], [LV("KITTY'S HOUSE"), 'kitty'],
+    [LV('BOILER ROOM'), 'beast'], [LV('THALASSOPHOBIA'), 'seaThing'], [LV('CAVE SYSTEM'), 'crawler,deathrat'], [LV('HARVEST NIGHT'), 'jackLantern'],
+    [LV('THE ENDLESS CITY'), 'watch'], [LV('THE PARKING GARAGE'), 'smiler'], [LV('INFINITE APARTMENTS'), 'duller,sheet'], [FINAL, 'duller,smiler']]) {
     const g = raw('L' + lv); await g.ready; g.s.emit('solo', { name: 'L' + lv });
     await g.waitFor('init');
     g.s.emit('test', { cmd: 'setLevel', arg: lv });

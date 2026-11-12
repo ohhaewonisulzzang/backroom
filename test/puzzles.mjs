@@ -42,6 +42,8 @@ export function solve(p) {
       for (let n = -1000; n < 100000; n++) if (checkPuzzle(p, n)) return n;
       return null;
     case 'memory': return p.seq;
+    case 'quick':   // 초록불이 켜지고 0.2초 뒤
+      return p.delay + 0.2;
     case 'arcade':   // 단계마다 풍선이 구역 한가운데 근처에 오는 첫 순간
       return p.stages.map(st => { for (let t = 0; t < 30; t += 0.001) if (Math.abs(arcadePos(st, t) - st.c) < st.hw * 0.5) return t; return -1; });
     case 'slide': {
@@ -68,6 +70,7 @@ export function solve(p) {
 
 const wrongOf = (p, ans) => {
   if (p.type === 'sequence') return Number(ans) + 1;
+  if (p.type === 'quick') return p.delay - 0.1;   // 초록불 전에 누름
   if (p.type === 'memory') return [...ans.slice(0, -1), (ans[ans.length - 1] + 1) % 9];
   if (p.type === 'oneStroke') return ans.slice(0, -1);
   return ans.slice(0, -1).length ? ans.slice(0, -1) : [0];

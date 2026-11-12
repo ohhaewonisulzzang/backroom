@@ -6,7 +6,8 @@ import { drawJumpscareSprite, ART } from './sprites.js';
  *  화면 위 오버레이: drawDeathOverlay(r, game)      (game.deathT 동안, k = 0 → 1)
  *  월드 위 흔적:     drawGore(ctx, game)             (핏자국, 터진 살점 — 모두에게 보인다)
  */
-export const DEATH_DURATION = { horde: 2.8, howler: 2.4, hound: 2.4, smiler: 2.6, skinStealer: 2.6, partygoer: 2.6, deathmoth: 2.6, wretch: 2.6, scratcher: 2.4, windows: 2.6, watch: 2.4, faceling: 2.6, clump: 2.6, animation: 2.4, animatedKing: 2.6, aranea: 2.4, kitty: 2.6, hydrolitis: 3.0, sanity: 3.0 };
+export const DEATH_DURATION = { horde: 2.8, howler: 2.4, hound: 2.4, smiler: 2.6, skinStealer: 2.6, partygoer: 2.6, deathmoth: 2.6, wretch: 2.6, scratcher: 2.4, windows: 2.6, watch: 2.4, faceling: 2.6, clump: 2.6, animation: 2.4, animatedKing: 2.6, aranea: 2.4, kitty: 2.6, hydrolitis: 3.0, sanity: 3.0,
+  beast: 2.4, seaThing: 2.8, crawler: 2.4, deathrat: 2.6, jackLantern: 2.6, camoCrawler: 2.4, duller: 3.0, sheet: 2.8 };
 
 const ease = u => u * u * (3 - 2 * u);
 /** 설정 (매 프레임 drawDeathOverlay 에서 갱신): 잔인한 연출 / 사망 점프스케어 */
@@ -286,6 +287,80 @@ function drawDeathScene(r, game) {
         const rng = mulberry32(seed); for (let y = 0; y <= H; y += H / 10) ctx.lineTo(cx + (rng() - 0.5) * 120, y); ctx.stroke();
         drips(ctx, W, H, seg(k, 0.5, 1), seed, 14);
       }
+      fadeBlack(seg(k, 0.85, 1));
+      break;
+    }
+    case 'beast': {         // 돌진에 들이받힌다 — 화면이 뒤로 튕기고 이빨이 덮는다
+      redWash(0.3 + k * 0.3);
+      if (k < 0.5) lunge(0.5, 1.6, 0, 0.35);
+      if (k > 0.3) { const u = ease(seg(k, 0.3, 0.55)); teethRow(ctx, W, H * 0.5 * u, 1, M * 0.12, 9); teethRow(ctx, W, H - H * 0.5 * u, -1, M * 0.12, 9); }
+      if (k > 0.5) drips(ctx, W, H, seg(k, 0.5, 1), seed, 20);
+      fadeBlack(seg(k, 0.85, 1));
+      break;
+    }
+    case 'seaThing': {      // 물속으로 끌려 들어간다 — 화면이 남색 물에 잠기고 거품이 오른다
+      const u = ease(seg(k, 0, 0.6));
+      if (k < 0.4) lunge(0.6, 1.3, 0, 0.35);
+      ctx.fillStyle = `rgba(10,30,60,${0.35 + u * 0.55})`; ctx.fillRect(0, H * (1 - u), W, H * u + 2);
+      const rng = mulberry32(seed); ctx.fillStyle = 'rgba(190,220,255,0.6)';
+      for (let i = 0; i < 50; i++) { const y = H - ((rng() * H + t * 160 * (0.6 + rng())) % H); if (y > H * (1 - u)) { ctx.beginPath(); ctx.arc(rng() * W, y, 2 + rng() * 6, 0, Math.PI * 2); ctx.fill(); } }
+      if (k > 0.5 && GORE) { ctx.fillStyle = `rgba(110,0,0,${0.5 * seg(k, 0.5, 0.9)})`; ctx.beginPath(); ctx.arc(cx, cy + M * 0.1, M * 0.3 * seg(k, 0.5, 1), 0, Math.PI * 2); ctx.fill(); }
+      fadeBlack(seg(k, 0.8, 1));
+      break;
+    }
+    case 'crawler':
+    case 'camoCrawler': {   // 위에서/옆에서 덮쳐 마구 할퀸다
+      redWash(0.3 + k * 0.3);
+      if (k < 0.4) lunge(0.5, 1.3, 0, 0.3);
+      const rng = mulberry32(seed);
+      for (let i = 0; i < 6; i++) {
+        const u = seg(k, 0.25 + i * 0.07, 0.35 + i * 0.07);
+        if (u > 0) gash(ctx, W * rng(), H * rng() * 0.3, W * rng(), H * (0.7 + rng() * 0.3), M * 0.035, ease(u));
+      }
+      if (k > 0.55) drips(ctx, W, H, seg(k, 0.55, 1), seed, 16);
+      fadeBlack(seg(k, 0.85, 1));
+      break;
+    }
+    case 'deathrat': {      // 쥐 떼가 사방에서 기어올라 파먹는다
+      redWash(0.2 + k * 0.4);
+      if (k < 0.3) lunge(0.5, 1.0, 0, 0.3);
+      const rng = mulberry32(seed), n = Math.floor(60 * ease(seg(k, 0.1, 0.8)));
+      for (let i = 0; i < n; i++) {
+        const sx = rng() < 0.5 ? (rng() < 0.5 ? 0 : W) : rng() * W, sy = rng() < 0.5 ? H : rng() * H;
+        const u = Math.min(1, seg(k, 0.1, 0.9) * (1 + rng())), x = sx + (cx - sx) * u * 0.8 + Math.sin(t * 20 + i) * 4, y = sy + (cy - sy) * u * 0.8;
+        ctx.fillStyle = '#2a2220'; ctx.fillRect(x - M * 0.025, y - M * 0.012, M * 0.05, M * 0.024);
+        ctx.fillStyle = '#d07a7a'; ctx.fillRect(x + M * 0.025, y, M * 0.03, 2);
+        ctx.fillStyle = '#ff3a2a'; ctx.fillRect(x - M * 0.022, y - M * 0.008, 2, 2);
+      }
+      if (k > 0.5) drips(ctx, W, H, seg(k, 0.5, 1), seed, 14);
+      fadeBlack(seg(k, 0.85, 1));
+      break;
+    }
+    case 'jackLantern': {   // 주황 불빛이 번쩍 — 불타는 웃음
+      const u = ease(seg(k, 0, 0.5));
+      ctx.fillStyle = `rgba(255,${120 + Math.random() * 60},30,${0.2 + u * 0.4})`; ctx.fillRect(0, 0, W, H);
+      if (k < 0.6) lunge(0.6, 1.4, 0, 0.5);
+      if (k > 0.45) { redWash(0.4); drips(ctx, W, H, seg(k, 0.45, 1), seed, 16); }
+      fadeBlack(seg(k, 0.85, 1));
+      break;
+    }
+    case 'duller': {        // 색이 다 빠지고, 몸이 회색 먼지로 흩어진다 (피 없음)
+      const u = ease(seg(k, 0, 0.7));
+      ctx.fillStyle = `rgba(128,128,128,${0.3 + u * 0.6})`; ctx.fillRect(0, 0, W, H);
+      if (k < 0.5) lunge(0.5, 0.9, 0, 0.5);
+      const rng = mulberry32(seed); ctx.fillStyle = 'rgba(200,200,200,0.7)';
+      for (let i = 0; i < 120 * u; i++) ctx.fillRect(cx + (rng() - 0.5) * M * (0.3 + u), cy + (rng() - 0.5) * M * (0.3 + u) - u * 80 * rng(), 3, 3);
+      fadeBlack(seg(k, 0.8, 1));
+      break;
+    }
+    case 'sheet': {         // 하얀 천이 덮어씌워지고 숨이 막힌다
+      const u = ease(seg(k, 0.15, 0.7));
+      if (k < 0.3) lunge(0.6, 1.2, 0, 0.3);
+      ctx.fillStyle = `rgba(235,235,230,${u * 0.95})`;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W, 0);
+      for (let x = W; x >= 0; x -= W / 12) ctx.lineTo(x, H * u * 1.1 + Math.sin(x * 0.02 + t * 6) * 20);
+      ctx.closePath(); ctx.fill();
+      if (u > 0.6) { ctx.fillStyle = '#0a0a0a'; ctx.beginPath(); ctx.ellipse(cx - M * 0.12, cy - M * 0.05, M * 0.05, M * 0.07, 0, 0, Math.PI * 2); ctx.ellipse(cx + M * 0.12, cy - M * 0.05, M * 0.05, M * 0.07, 0, 0, Math.PI * 2); ctx.fill(); }
       fadeBlack(seg(k, 0.85, 1));
       break;
     }

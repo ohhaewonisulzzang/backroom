@@ -112,6 +112,64 @@ export const THEMES = {
     cap: [96, 56, 70], capLine: [110, 66, 82], capEdge: [44, 24, 32],
     paper: [236, 176, 196], stripe: [222, 150, 176], motif: [200, 60, 100], drip: [200, 140, 160], dripDark: [170, 110, 130],
     molding: [160, 90, 116], moldingHi: [250, 210, 224], base: [130, 70, 94], baseDark: [90, 46, 64] },
+  // Level 5.1: 보일러실 — 녹슨 철판 바닥, 붉은 벽돌 벽
+  boiler: { ...DOOR, floorTiles: 16, wallStyle: 'brick',
+    carpet: [86, 70, 58], carpetDark: [70, 56, 46], carpetLight: [104, 84, 66], stain: [100, 54, 30], stainDark: [72, 36, 20],
+    cap: [40, 28, 22], capLine: [50, 36, 28], capEdge: [18, 12, 9],
+    paper: [130, 62, 44], stripe: [86, 40, 30], motif: [150, 76, 52], drip: [110, 70, 40], dripDark: [80, 50, 28],
+    molding: [70, 48, 36], moldingHi: [150, 110, 80], base: [64, 44, 34], baseDark: [44, 30, 22] },
+  // Level 7: 탈라소포비아 — 물에 잠긴 사무실. 푸르스름한 카펫, 깊은 남색 물
+  flooded: { ...DOOR, floorTiles: 16, clearWater: true,
+    carpet: [72, 88, 100], carpetDark: [62, 76, 88], carpetLight: [86, 102, 114], stain: [52, 64, 74], stainDark: [40, 50, 60],
+    cap: [36, 44, 52], capLine: [44, 52, 60], capEdge: [16, 20, 24],
+    paper: [130, 146, 150], stripe: [110, 126, 132], motif: [130, 146, 150], drip: [90, 110, 120], dripDark: [70, 90, 100],
+    molding: [74, 86, 94], moldingHi: [140, 156, 162], base: [56, 66, 74], baseDark: [38, 46, 52],
+    puddle: [22, 44, 72], puddleHi: [80, 130, 170] },
+  // Level 8: 동굴 — 울퉁불퉁한 흙바닥, 거친 바위 벽
+  cave: { ...DOOR, wallStyle: 'rock',
+    carpet: [74, 64, 54], carpetDark: [64, 55, 46], carpetLight: [88, 76, 64], stain: [54, 46, 38], stainDark: [42, 36, 30],
+    cap: [34, 30, 28], capLine: [42, 37, 34], capEdge: [14, 12, 11],
+    paper: [84, 76, 70], stripe: [64, 58, 52], motif: [104, 94, 84], drip: [70, 80, 74], dripDark: [54, 62, 58],
+    molding: [60, 54, 48], moldingHi: [96, 88, 80], base: [52, 46, 40], baseDark: [36, 32, 28] },
+  // Level 10.1: 수확의 밤 — 검은 흙, 벽은 시든 옥수수대
+  harvest: { ...DOOR, wallStyle: 'wheat', pumpkins: true,
+    carpet: [62, 46, 34], carpetDark: [52, 38, 28], carpetLight: [74, 56, 40], stain: [44, 32, 24], stainDark: [34, 24, 18],
+    cap: [96, 86, 50], capLine: [110, 98, 58], capEdge: [50, 42, 22],
+    paper: [118, 100, 56], stripe: [80, 68, 36], motif: [150, 128, 70], drip: [90, 74, 40], dripDark: [70, 56, 30],
+    molding: [80, 68, 36], moldingHi: [150, 128, 70], base: [60, 48, 26], baseDark: [42, 34, 18] },
+  // Level 11: 끝없는 도시 — 아스팔트 바닥, 벽돌 건물 외벽
+  city: { ...DOOR, wallStyle: 'brick',
+    carpet: [70, 70, 74], carpetDark: [60, 60, 64], carpetLight: [84, 84, 88], stain: [50, 50, 54], stainDark: [40, 40, 44],
+    cap: [44, 42, 46], capLine: [52, 50, 54], capEdge: [20, 18, 22],
+    paper: [150, 92, 70], stripe: [110, 66, 50], motif: [170, 110, 84], drip: [120, 90, 70], dripDark: [96, 70, 54],
+    molding: [90, 86, 84], moldingHi: [170, 166, 160], base: [76, 72, 70], baseDark: [52, 50, 48] },
+  // Level 13: 끝없는 아파트 — 낡은 초록 카펫, 누런 꽃무늬 벽지
+  apartment: { ...DOOR, wallStyle: 'wood',
+    carpet: [74, 96, 70], carpetDark: [64, 84, 60], carpetLight: [88, 110, 82], stain: [56, 70, 50], stainDark: [44, 56, 40],
+    cap: [52, 44, 38], capLine: [62, 52, 46], capEdge: [24, 20, 16],
+    paper: [206, 190, 146], stripe: [186, 168, 124], motif: [160, 110, 100], drip: [160, 140, 100], dripDark: [130, 112, 80],
+    molding: [100, 76, 54], moldingHi: [160, 130, 96], base: [90, 66, 46], baseDark: [64, 46, 30],
+    wood: [120, 88, 60], woodDark: [90, 64, 42], woodHi: [146, 112, 80] },
+  // Level 3999: 진짜 끝 — 새하얀 바닥과 벽. 너무 깨끗해서 불안하다
+  white: { ...DOOR, floorTiles: 16, wallStyle: 'tiles',
+    carpet: [226, 228, 230], carpetDark: [208, 212, 216], carpetLight: [240, 242, 244], stain: [214, 216, 220], stainDark: [196, 200, 204],
+    cap: [176, 180, 186], capLine: [184, 188, 194], capEdge: [120, 124, 130],
+    paper: [236, 238, 240], stripe: [214, 218, 222], motif: [236, 238, 240], drip: [210, 214, 218], dripDark: [190, 194, 200],
+    molding: [190, 194, 200], moldingHi: [250, 250, 252], base: [180, 184, 190], baseDark: [150, 154, 160],
+    doorFrame: [200, 170, 90], door: [250, 240, 200], doorHi: [255, 252, 230], doorDark: [220, 200, 150], doorLine: [180, 150, 80] },
+  // Level 3999: 끝없는 오락실 — 남색 바닥에 네온 무늬 카펫, 벽엔 오락기가 줄지어 서 있다
+  arcade: { ...DOOR, wallStyle: 'arcade', confetti: true, neonCarpet: true,
+    carpet: [30, 22, 58], carpetDark: [22, 16, 44], carpetLight: [44, 34, 80], stain: [26, 18, 50], stainDark: [18, 12, 36],
+    cap: [20, 14, 34], capLine: [28, 20, 46], capEdge: [8, 6, 14],
+    paper: [36, 26, 62], stripe: [24, 18, 44], motif: [220, 90, 200], drip: [60, 40, 90], dripDark: [40, 28, 64],
+    molding: [60, 40, 110], moldingHi: [140, 90, 230], base: [40, 28, 70], baseDark: [24, 16, 44],
+    doorFrame: [230, 180, 60], door: [255, 220, 110], doorHi: [255, 245, 190], doorDark: [200, 150, 50], doorLine: [150, 100, 30] },
+  // Level P-1: 지하 주차장 — 회색 콘크리트 바닥에 흰 주차선, 기둥은 노랑·검정 경고 띠
+  parking: { ...DOOR, wallStyle: 'pillar', parkingLines: true,
+    carpet: [92, 94, 96], carpetDark: [82, 84, 86], carpetLight: [104, 106, 108], stain: [70, 72, 74], stainDark: [58, 60, 62],
+    cap: [120, 122, 124], capLine: [130, 132, 134], capEdge: [60, 62, 64],
+    paper: [150, 152, 150], stripe: [130, 132, 130], motif: [230, 190, 40], drip: [110, 112, 110], dripDark: [90, 92, 90],
+    molding: [100, 102, 100], moldingHi: [170, 172, 170], base: [36, 36, 36], baseDark: [24, 24, 24] },
   // Level 3: 어두운 전기실
   electrical: { ...DOOR,
     carpet: [70, 74, 78], carpetDark: [60, 64, 68], carpetLight: [84, 88, 92], stain: [48, 50, 54], stainDark: [36, 38, 42],
@@ -214,6 +272,44 @@ export function buildMapTexture(level) {
           if (fy < 5 && (x + fy) % 3 === 0) col = C.motif;
           put(ox + x, oy + y, col, n);
         }
+        else if (C.wallStyle === 'pillar') {
+          // 콘크리트 기둥: 아래쪽은 노랑·검정 사선 경고 띠, 가끔 층 표시 "P1"
+          const fy = y - capH, fh = P - capH - 6;
+          let col = (x * 3 + fy) % 11 === 0 ? C.stripe : C.paper;
+          if (fy > fh - 7) col = ((x + fy) >> 2) % 2 ? C.motif : [30, 30, 30];
+          if ((tx * 7 + ty * 5) % 9 === 0 && fy > 2 && fy < 9 && x > 9 && x < 23) {
+            const P1 = ['1110.010', '1010.110', '1110.010', '1000.010', '1000.111'];
+            const r = P1[Math.floor((fy - 3) * 5 / 6)] || '', ch = r[Math.floor((x - 10) * 8 / 13)];
+            if (ch === '1') col = [40, 60, 120];
+          }
+          put(ox + x, oy + y, col, n);
+        }
+        else if (C.wallStyle === 'brick') {
+          // 벽돌: 엇갈린 줄눈
+          const fy = y - capH, row = Math.floor(fy / 4), bx = (x + (row % 2) * 4 + tx * 3) % 8;
+          let col = fy % 4 === 0 || bx === 0 ? C.stripe : ((row * 3 + Math.floor((x + tx * 32) / 8)) % 5 === 0 ? C.motif : C.paper);
+          for (const dr of drips) if (x === dr.x && fy < dr.len) col = C.dripDark;
+          put(ox + x, oy + y, col, n);
+        }
+        else if (C.wallStyle === 'rock') {
+          // 거친 바위: 얼룩덜룩 + 금
+          const fy = y - capH, v = Math.sin(x * 0.7 + tx * 2.1) + Math.cos(fy * 0.9 + ty * 1.3) + (rng() - 0.5) * 0.8;
+          let col = v > 0.9 ? C.motif : v < -0.9 ? C.stripe : C.paper;
+          if ((x * 3 + fy * 5 + tx) % 23 === 0) col = C.capEdge;
+          for (const dr of drips) if (x === dr.x && fy < dr.len) col = C.drip;
+          put(ox + x, oy + y, col, n);
+        }
+        else if (C.wallStyle === 'arcade') {
+          // 오락기 한 대: 위는 색 간판, 가운데 빛나는 화면, 아래 조작판
+          const fy = y - capH, fh = P - capH - 6, k = (tx * 5 + ty * 3) % 4;
+          const NEON = [[255, 70, 160], [70, 220, 255], [255, 220, 70], [130, 255, 110]], SCR = [[120, 40, 140], [30, 110, 150], [150, 110, 30], [40, 130, 60]];
+          let col = C.paper;
+          if (x < 3 || x > P - 4) col = C.stripe;                                              // 기계 사이 틈
+          else if (fy < 4) col = NEON[k];                                                      // 간판
+          else if (fy >= 6 && fy < fh - 6 && x > 6 && x < P - 7) col = (fy + x) % 3 === 0 ? NEON[k] : SCR[k];   // 화면
+          else if (fy >= fh - 4) col = (x === 10 || x === 20) ? NEON[(k + 1) % 4] : C.molding;  // 조작판 + 버튼
+          put(ox + x, oy + y, col, Math.floor(n / 2));
+        }
         else if (C.wallStyle === 'tiles') {
           const fy = y - capH;
           put(ox + x, oy + y, x % 8 === 0 || fy % 8 === 0 ? C.stripe : C.paper, Math.floor(n / 2));
@@ -257,6 +353,26 @@ export function buildMapTexture(level) {
       }
       put(ox + x, oy + y, col, Math.floor((rng() - 0.5) * 8));
       if (C.confetti && rng() < 0.012) put(ox + x, oy + y, CONFETTI[Math.floor(rng() * CONFETTI.length)]);
+      // 주차장: 흰 주차선 (6칸마다 세로선 + 칸 끝 가로선)
+      if (C.parkingLines) {
+        const gx = tx * P + x, gy = ty * P + y;
+        if ((gx % (P * 3) < 2 && (gy % (P * 5)) < P * 2) || ((gy % (P * 5)) === P * 2 && gx % (P * 3) < P * 2)) put(ox + x, oy + y, [196, 196, 186], Math.floor((rng() - 0.5) * 10));
+      }
+      // 오락실 카펫: 네온 물결 무늬
+      if (C.neonCarpet) {
+        const gx = tx * P + x, gy = ty * P + y, w = Math.round(Math.sin(gx * 0.35) * 2);
+        if ((gy + w) % 12 === 0) put(ox + x, oy + y, (Math.floor(gx / 24) % 2) ? [70, 200, 240] : [230, 80, 190]);
+        else if ((gx + gy * 3) % 41 === 0) put(ox + x, oy + y, [240, 220, 90]);
+      }
+    }
+    // 수확의 밤: 바닥에 굴러다니는 호박 (장식)
+    if (C.pumpkins && t === T.FLOOR && rng() < 0.07) {
+      const jx = 4 + Math.floor(rng() * 18), jy = 6 + Math.floor(rng() * 16);
+      for (let y = 0; y < 6; y++) for (let x = 0; x < 9; x++) {
+        if ((x === 0 || x === 8) && (y === 0 || y === 5)) continue;
+        put(ox + jx + x, oy + jy + y, x % 3 === 1 ? [170, 74, 18] : y < 2 ? [236, 132, 40] : [206, 104, 28]);
+      }
+      put(ox + jx + 4, oy + jy - 1, [70, 90, 30]); put(ox + jx + 4, oy + jy - 2, [70, 90, 30]);
     }
     // 웅덩이 / 잔해 (밟으면 느려짐): 검푸른 물 + 붉은 비상등 반사
     if (t === T.SLOW && C.puddle) {
@@ -277,7 +393,10 @@ export function buildMapTexture(level) {
     if (wall(tx - 1, ty)) for (let y = 0; y < P; y++) for (let k = 0; k < 3; k++) shade(ox + k, oy + y, -24 + k * 8);
     if (wall(tx + 1, ty)) for (let y = 0; y < P; y++) shade(ox + P - 1, oy + y, -14);
 
-    if (t === T.EXIT) {
+    if (t === T.EXIT && level.mission?.type === 'noclip') {
+      // 노클립 존: 텍스처가 깨진 듯한 칸 (지직거림은 renderer 가 위에 그린다)
+      for (let y = 0; y < P; y++) for (let x = 0; x < P; x++) put(ox + x, oy + y, rng() < 0.5 ? [20, 20, 30] : [200, 230, 240], 0);
+    } else if (t === T.EXIT) {
       // 회색 철문 (양문)
       for (let y = 2; y < 28; y++) for (let x = 5; x < 27; x++) {
         let col = C.door;

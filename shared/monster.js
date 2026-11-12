@@ -17,6 +17,7 @@ import { hasLOS, moveEntity } from './physics.js';
  * game 인터페이스: { map, level, allPlayers(), onMonsterAlert(target, m), onEntityEvent(m, kind, data) }
  */
 const ITEM_FLARE_NOISE = 7 * 48;   // 조명탄 소리 반경 (ITEM_TYPES.flare.noise 와 같은 값)
+const GESTURE_MIMIC = ['point', 'finger', 'dance1', 'dance2'];   // 스킨 스틸러가 흉내 내는 동작 (sprites.js GESTURES)
 const VOICE_LINES = ['hello?', 'excuse me?', 'hey!', '거기 누구 있어요?', '나 좀 도와줘...'];
 
 export class Monster {
@@ -25,8 +26,13 @@ export class Monster {
     this.cfg = CONFIG.ENTITY[type];
     this.x = x; this.y = y; this.angle = Math.PI / 2;
     this.state = { howler: 'dormant', skinStealer: 'disguised', wanderer: 'wander', smiler: 'lurk', hound: 'patrol', partygoer: 'guard',
-      deathmoth: 'cling', wretch: 'wander', scratcher: 'wander', windows: 'idle', animation: 'doll', animatedKing: 'frozen', kitty: 'frozen', partyPooper: 'idle' }[type] ?? 'patrol';
+      deathmoth: 'cling', wretch: 'wander', scratcher: 'wander', windows: 'idle', animation: 'doll', animatedKing: 'frozen', kitty: 'frozen', partyPooper: 'idle',
+      seaThing: 'lurk', crawler: 'ceiling', camoCrawler: 'camo', sheet: 'drift' }[type] ?? 'patrol';
+    this.freezeT = 0;            // 키티: 순간이동 직후 얼어 있는 시간
+    this.losT = 0;               // 키티: 목표와 서로 보이는 상태가 이어진 시간 (갑툭튀 즉사 방지)
+    this.chargeDir = 0;          // 레벨 5의 야수: 돌진 방향
     this.stunT = 0;              // 카메라 플래시 등으로 기절한 남은 시간
+    this.holdT = 0;              // 사람을 잡는 중: 사망 연출 동안 멈춰 있는 남은 시간
     this.immuneT = 0;            // 데스모스: 살충제 맞은 뒤 무시 시간
     this.post = null;            // 파티고어: 지키는 자리
     this.active = type !== 'howler';
@@ -63,19 +69,29 @@ export class Monster {
 
   /** 지금 닿으면 플레이어가 죽는가 */
   canKill() {
-    if (this.stunT > 0) return false;
+    if (this.stunT > 0 || this.holdT > 0) return false;
     if (!this.active || this.type === 'wanderer' || this.type === 'partyPooper') return false;
     if (this.type === 'skinStealer' && !this.revealed) return false;
     if (this.state === 'stunned' || this.state === 'vanished') return false;
     if (this.type === 'windows' && this.state !== 'grab') return false;            // 창문에서 손을 뻗을 때만
     if (this.type === 'animation' && this.state !== 'hunt') return false;          // 낮엔 그냥 인형
     if ((this.type === 'animatedKing' || this.type === 'kitty') && this.state === 'frozen') return false;   // 쳐다보는 동안은 손대지 못한다
+    // 키티: 모퉁이에서 막 마주친 순간엔 돌아볼 시간을 준다
+    if (this.type === 'kitty' && this.losT < 0.4) return false;
+    if (this.type === 'beast' && this.state === 'dazed') return false;                // 벽에 부딪혀 비틀거리는 중
+    if (this.type === 'seaThing' && this.state === 'lurk') return false;              // 물 밑에 가라앉아 있을 때
+    if (this.type === 'crawler' && this.state !== 'chase') return false;              // 천장에 붙어 있거나 떨어지는 중
+    if (this.type === 'camoCrawler' && this.state === 'camo') return false;           // 벽인 척하는 중
+    if (this.type === 'deathrat' && this.state === 'stunned') return false;
+    if (this.type === 'sheet' && this.state === 'scared') return false;
     return true;
   }
 
   // ------------------------------------------------------------ 감지
   canSee(p, d, game) {
-    if (d > this.cfg.sight) return false;
+    // 잭-오-랜턴: 손전등을 켠 사람은 멀리서, 끈 사람은 코앞에서만 보인다
+    const sight = this.type === 'jackLantern' ? (p.flashlight ? this.cfg.sightLit : this.cfg.sightDark) : this.cfg.sight;
+    if (!(d <= sight)) return false;
     if (this.type === 'smiler' && !game.level.isDark(Math.floor(p.x / TS), Math.floor(p.y / TS))) return false;
     return hasLOS(game.map, this.x, this.y, p.x, p.y);
   }
@@ -106,12 +122,16 @@ export class Monster {
   update(dt, game) {
     this.repathT -= dt;
     if (this.stunT > 0) { this.stunT -= dt; return; }     // 기절 중엔 아무것도 안 함
+    if (this.holdT > 0) { this.holdT -= dt; return; }     // 사람을 잡는 중 (사망 연출 동안 그 자리에 멈춘다)
     if (this.immuneT > 0) this.immuneT -= dt;
     if (this.type === 'deathmoth') return this.updateDeathmoth(dt, game);
     if (this.type === 'wretch' || this.type === 'scratcher') return this.updateListener(dt, game);
     if (this.type === 'windows') return this.updateWindows(dt, game);
     if (this.type === 'animation') return this.updateAnimation(dt, game);
     if (this.type === 'partyPooper') return this.updatePooper(dt, game);
+    if (this.type === 'seaThing') return this.updateSeaThing(dt, game);
+    if (this.type === 'sheet') return this.updateSheet(dt, game);
+    if (this.type === 'duller') return this.updateDuller(dt, game);
     if (!this.active) {
       this.timer += dt;
       if (this.type === 'howler' && this.timer >= this.cfg.delay) this.awaken(game);
@@ -135,6 +155,11 @@ export class Monster {
       case 'faceling': return this.updateFaceling(dt, game, target, best, sees);
       case 'animatedKing': return this.updateWatched(dt, game, target, best);
       case 'kitty': return this.updateWatched(dt, game, target, best);
+      case 'beast': return this.updateBeast(dt, game, target, best, sees);
+      case 'crawler': return this.updateCrawler(dt, game, target, best, sees);
+      case 'deathrat': return this.updateRat(dt, game, target, best, sees);
+      case 'jackLantern': return this.updateLantern(dt, game, target, best, sees);
+      case 'camoCrawler': return this.updateCamo(dt, game, target, best, sees);
     }
   }
 
@@ -165,6 +190,29 @@ export class Monster {
 
   updateSmiler(dt, game, target, best, sees) {
     const pass = (x, y) => game.level.isDark(x, y);
+    // 정전 레벨 (Level P-1): 불이 켜져 있으면 숨어 있고, 정전이면 손전등도 무시하고 아주 빠르게 달려든다
+    const bo = game.blackoutPhase;
+    if (bo && bo !== 'dark') { this.state = 'vanished'; this.timer = 1e9; return; }
+    if (bo === 'dark') {
+      if (this.state === 'vanished') this.state = 'lurk';
+      const B = CONFIG.BLACKOUT;
+      const see = !!target && best < B.sight && game.level.isDark(Math.floor(target.x / TS), Math.floor(target.y / TS)) && hasLOS(game.map, this.x, this.y, target.x, target.y);
+      if (see) {
+        if (this.state !== 'chase') game.onMonsterAlert(target, this);
+        this.state = 'chase'; this.lostT = 0; this.lastSeen = { x: target.x, y: target.y };
+        if (best < TS * 1.3) { this.moveToward(target.x, target.y, B.smilerSpeed, dt, game.map); return; }
+        if (this.repathT <= 0) { this.path = game.map.findPath(this.tileX, this.tileY, Math.floor(target.x / TS), Math.floor(target.y / TS), pass); this.repathT = 0.2; }
+        this.followPath(B.smilerSpeed, dt, game.map);
+        return;
+      }
+      // 비상등 아래로 피했으면 빛 가장자리에서 노려본다
+      if (target) this.angle = lerpAngle(this.angle, Math.atan2(target.y - this.y, target.x - this.x), Math.min(1, dt * 4));
+      if (this.state === 'chase' && (this.lostT += dt) < 1.5) return;
+      this.state = 'lurk';
+      if (!this.path.length) this.path = this.randomGoal(game.map, this.tileX, this.tileY, 2, 8, 5, pass);
+      this.followPath(this.cfg.patrol * 1.5, dt, game.map);
+      return;
+    }
     if (this.state === 'vanished') {
       this.timer -= dt;
       if (this.timer <= 0) this.state = 'lurk';
@@ -215,7 +263,13 @@ export class Monster {
         } else this.lostT = 0;
         if (sees && best < C.speakDist) {
           this.state = 'speak'; this.timer = C.revealTime; this.path = [];
-          game.onEntityEvent(this, 'voice', { text: VOICE_LINES[Math.floor(Math.random() * VOICE_LINES.length)] });
+          if (Math.random() < 0.6) {
+            // 플레이어 흉내: 감정 표현 대사 + 동작(춤/가리키기/뻐큐)을 하다가 정체를 드러낸다
+            const g = GESTURE_MIMIC[Math.floor(Math.random() * GESTURE_MIMIC.length)];
+            const lines = CONFIG.EMOTE.LINES;
+            this.timer = C.revealTime + (g.startsWith('dance') ? 1.8 : 0.8);
+            game.onEntityEvent(this, 'emote', { text: lines[Math.floor(Math.random() * lines.length)], g });
+          } else game.onEntityEvent(this, 'voice', { text: VOICE_LINES[Math.floor(Math.random() * VOICE_LINES.length)] });
           break;
         }
         this.pursue(dt, game, this.lastSeen || target, C.approach);
@@ -318,15 +372,43 @@ export class Monster {
       const lit = this.litBy(game);
       if (lit) { this.state = 'vanished'; this.timer = C.vanish; this.path = []; game.onEntityEvent(this, 'vanish'); return; }
     }
-    this.timer += dt;
-    if (!king && this.timer > C.teleportEvery && target && best > TS * 6) {
-      this.timer = 0; this.teleportNear(game, target, 6, 10); game.onEntityEvent(this, 'teleport');
+    const los = !!target && hasLOS(game.map, this.x, this.y, target.x, target.y);
+    this.losT = los ? this.losT + dt : 0;
+    if (!king) {
+      // 순간이동 직후엔 잠깐 얼어 있다 (어디 나타났는지 찾아볼 시간)
+      if (this.freezeT > 0) { this.freezeT -= dt; this.state = 'frozen'; this.path = []; return; }
+      this.timer += dt;
+      if (this.timer > C.teleportEvery && target && best > TS * 6) {
+        this.timer = 0;
+        this.teleportBehind(game, target, C.teleportMin, C.teleportMax);
+        this.freezeT = C.appearFreeze; this.state = 'frozen'; this.losT = 0;
+        game.onEntityEvent(this, 'teleport');
+        return;
+      }
     }
     if (this.watchedBy(game)) { if (this.state !== 'frozen') this.path = []; this.state = 'frozen'; return; }
     if (!target) return;
     if (this.state !== 'stalk' && best < TS * 6) game.onMonsterAlert(target, this);
     this.state = 'stalk';
-    this.pursue(dt, game, target, C.chase * this.speedMul, best < TS * 1.5 && hasLOS(game.map, this.x, this.y, target.x, target.y));
+    // 키티: 벽에 가려 서로 안 보이면 가까이 붙지 않는다 → 모퉁이를 돌자마자 코앞에서 마주치는 일이 없다
+    if (!king && !los && best < C.lurkDist) { this.path = []; return; }
+    this.pursue(dt, game, target, C.chase * this.speedMul, best < TS * 1.5 && los);
+  }
+
+  /** 키티 순간이동: 플레이어가 바라보는 방향의 반대쪽(등 뒤), 경로 lo~hi 칸, 보이지 않는 곳 */
+  teleportBehind(game, p, lo, hi) {
+    const map = game.map, dist = map.bfs(Math.floor(p.x / TS), Math.floor(p.y / TS));
+    const cand = map.floorCells.filter(i => dist[i] >= lo && dist[i] <= hi);
+    const pos = i => ({ x: (i % map.w) * TS + TS / 2, y: ((i / map.w) | 0) * TS + TS / 2 });
+    const behind = cand.filter(i => { const c = pos(i); return Math.abs(angleDiff(Math.atan2(c.y - p.y, c.x - p.x), p.angle)) > Math.PI * 0.6; });
+    for (const pool of [behind, cand]) {
+      for (let k = 0; k < 24 && pool.length; k++) {
+        const c = pos(pool[Math.floor(Math.random() * pool.length)]);
+        if (hasLOS(map, c.x, c.y, p.x, p.y)) continue;
+        this.x = c.x; this.y = c.y; this.path = [];
+        return;
+      }
+    }
   }
 
   /** 창문들 (Level 4 / 188): 창문(post) 속에서 노크. 가까이 오면 유리를 깨고 손을 뻗어 끌고 간다 */
@@ -402,6 +484,262 @@ export class Monster {
       this.angle = Math.atan2(k.y - this.y, k.x - this.x);
       game.onEntityEvent(this, 'voice', { text: '여기...' });
     }
+  }
+
+  // ------------------------------------------------------------ Level 5.1 / 7 / 8 / 10.1 / 11 / 13 엔티티들
+  /**
+   * 레벨 5의 야수 (Level 5.1): patrol → (보임) windup 포효하며 겨눔 → charge 일직선 돌진 → 벽에 부딪히면 dazed.
+   * 돌진 방향은 포효가 끝날 때 고정되므로, 옆 통로로 피하면 지나쳐 간다.
+   */
+  updateBeast(dt, game, target, best, sees) {
+    const C = this.cfg, map = game.map;
+    const aim = () => { if (sees) this.angle = lerpAngle(this.angle, Math.atan2(target.y - this.y, target.x - this.x), Math.min(1, dt * 6)); };
+    switch (this.state) {
+      case 'windup':
+        aim();
+        this.timer -= dt;
+        if (this.timer <= 0) {
+          this.state = 'charge'; this.timer = C.chargeTime;
+          this.chargeDir = sees ? Math.atan2(target.y - this.y, target.x - this.x) : this.angle;
+          this.angle = this.chargeDir;
+        }
+        return;
+      case 'charge': {
+        this.timer -= dt;
+        const step = C.charge * this.speedMul * dt, x0 = this.x, y0 = this.y;
+        moveEntity(this, Math.cos(this.chargeDir) * step, Math.sin(this.chargeDir) * step, CONFIG.ENTITY.RADIUS, map);
+        if (Math.hypot(this.x - x0, this.y - y0) < step * 0.35) {          // 벽에 박았다
+          this.state = 'dazed'; this.timer = C.wallStun; this.path = [];
+          game.onEntityEvent(this, 'slam');
+        } else if (this.timer <= 0) {
+          if (sees) { this.state = 'windup'; this.timer = C.windup * 0.8; game.onEntityEvent(this, 'roar'); }
+          else { this.state = 'search'; this.searchT = CONFIG.ENTITY.SEARCH_TIME; this.path = []; }
+        }
+        return;
+      }
+      case 'dazed':
+        this.timer -= dt;
+        if (this.timer <= 0) { this.state = sees ? 'windup' : 'search'; this.timer = C.windup; this.searchT = CONFIG.ENTITY.SEARCH_TIME; this.path = []; if (sees) game.onEntityEvent(this, 'roar'); }
+        return;
+    }
+    if (sees) {
+      game.onMonsterAlert(target, this); game.onEntityEvent(this, 'roar');
+      this.state = 'windup'; this.timer = C.windup; this.path = [];
+      return;
+    }
+    if (this.state === 'search') {
+      this.searchT -= dt;
+      if (this.searchT <= 0) { this.state = 'patrol'; this.path = []; }
+      else if (this.lastSeen) { this.pursue(dt, game, this.lastSeen, C.patrol * 1.6); return; }
+    }
+    this.patrol(dt, map, C.patrol);
+  }
+
+  /**
+   * 레벨 7의 무언가 (Level 7): 물(T.SLOW) 속에서만 움직인다. 물에서 움직이는 사람의 소리를 듣는다
+   * (걷기/달리기는 멀리, 웅크리면 가까이서만, 가만히 있으면 안 들림). 물 밖으로 나가면 놓친다.
+   * 들리는 물웅덩이가 이어져 있지 않으면 잠시 뒤 그 웅덩이 밑으로 "잠수"해 옮겨 온다.
+   *  lurk 물 밑 (보이지 않음, 무해) → hunt 물살을 가르며 다가옴 → 가까우면 덮친다
+   */
+  updateSeaThing(dt, game) {
+    const C = this.cfg, map = game.map, now = Date.now();
+    const water = (x, y) => map.get(x, y) === T.SLOW;
+    let heard = null, bd = Infinity;
+    for (const p of game.allPlayers()) {
+      if (!p.alive || p.hidden || !water(Math.floor(p.x / TS), Math.floor(p.y / TS))) continue;
+      const moving = p.moving ?? (now - (p.lastMoveAt || 0) < 400);
+      if (!moving) continue;
+      const r = p.crouching ? C.hearCrouch : p.sprinting ? C.hearWalk * 1.4 : C.hearWalk;
+      const d = Math.hypot(p.x - this.x, p.y - this.y);
+      if (d < r && d < bd) { bd = d; heard = p; }
+    }
+    if (heard) {
+      if (this.state !== 'hunt') { game.onMonsterAlert(heard, this); this.timer = 0; }
+      this.state = 'hunt'; this.lastSeen = { x: heard.x, y: heard.y, p: heard }; this.lostT = 0;
+    } else if (this.state === 'hunt') {
+      this.lostT += dt;
+      // 소리가 멎어도 그 사람이 아직 물속에 있고 가까우면 계속 다가온다
+      const p = this.lastSeen?.p, inWater = p && p.alive && !p.hidden && water(Math.floor(p.x / TS), Math.floor(p.y / TS));
+      if (inWater && Math.hypot(p.x - this.x, p.y - this.y) < TS * 2) this.lastSeen = { x: p.x, y: p.y, p };
+      else if (this.lostT > 2) { this.state = 'lurk'; this.path = []; }
+    }
+    if (this.state === 'hunt') {
+      const g = this.lastSeen, gx = Math.floor(g.x / TS), gy = Math.floor(g.y / TS), speed = C.chase * this.speedMul;
+      if (Math.hypot(g.x - this.x, g.y - this.y) < TS * 1.2 && water(gx, gy)) { this.moveToward(g.x, g.y, speed, dt, map); return; }
+      if (this.repathT <= 0) { this.path = map.findPath(this.tileX, this.tileY, gx, gy, water); this.repathT = 0.3; }
+      if (this.path.length) { this.timer = 0; this.followPath(speed, dt, map); return; }
+      // 물길이 이어져 있지 않다 → 잠시 뒤 그 사람이 있는 물 밑으로 옮겨 온다
+      this.timer += dt;
+      if (this.timer > 2.2) {
+        this.timer = 0;
+        // 그 사람이 서 있는 물웅덩이(이어진 물 칸) 중 3~7칸 떨어진 곳
+        const pool = [], seen = new Set([gy * map.w + gx]);
+        if (water(gx, gy)) pool.push(gy * map.w + gx);
+        for (let k = 0; k < pool.length && k < 4000; k++) {
+          const c = pool[k];
+          for (const n of map.neighbors(c, water)) if (!seen.has(n)) { seen.add(n); pool.push(n); }
+        }
+        const cells = pool.filter(i => {
+          const d = Math.hypot((i % map.w) * TS + TS / 2 - g.x, ((i / map.w) | 0) * TS + TS / 2 - g.y);
+          return d > TS * 3 && d < TS * 7;
+        });
+        if (cells.length) {
+          const i = cells[Math.floor(Math.random() * cells.length)];
+          this.x = (i % map.w) * TS + TS / 2; this.y = ((i / map.w) | 0) * TS + TS / 2; this.path = [];
+          game.onEntityEvent(this, 'dive');
+        }
+      }
+      return;
+    }
+    // lurk: 물 밑을 천천히 돈다
+    if (!this.path.length) this.path = this.randomGoal(map, this.tileX, this.tileY, 2, 12, 7, water);
+    this.followPath(C.patrol, dt, map);
+  }
+
+  /**
+   * 크롤러 (Level 8): ceiling 천장에 거꾸로 붙어 있다(보이지 않음) → 바로 밑을 지나가면 drop 비명과 함께 떨어진다
+   * → chase 잠깐 쫓아온다 → climb 다시 천장으로. 웅크리면 더 가까이 지나가도 눈치채지 못한다.
+   */
+  updateCrawler(dt, game, target, best, sees) {
+    const C = this.cfg, map = game.map;
+    switch (this.state) {
+      case 'ceiling':
+        for (const p of game.allPlayers()) {
+          if (!p.alive || p.hidden) continue;
+          const d = Math.hypot(p.x - this.x, p.y - this.y);
+          if (d < (p.crouching ? C.triggerCrouch : C.trigger) && hasLOS(map, this.x, this.y, p.x, p.y)) {
+            this.state = 'drop'; this.timer = C.drop; this.path = [];
+            game.onEntityEvent(this, 'screech'); game.onMonsterAlert(p, this);
+            break;
+          }
+        }
+        return;
+      case 'drop':
+        if (target) this.angle = Math.atan2(target.y - this.y, target.x - this.x);
+        this.timer -= dt;
+        if (this.timer <= 0) { this.state = 'chase'; this.timer = C.chaseTime; this.lostT = 0; if (target) this.lastSeen = { x: target.x, y: target.y }; }
+        return;
+      case 'climb':
+        this.timer -= dt;
+        if (this.timer <= 0) this.state = 'ceiling';
+        return;
+    }
+    // chase: chaseTime 동안만, 놓치면 바로 천장으로 올라간다
+    this.timer -= dt;
+    if (sees) this.lostT = 0; else this.lostT += dt;
+    if (this.timer <= 0 || this.lostT > 2.5 || !this.lastSeen) { this.state = 'climb'; this.timer = 1.2; this.path = []; return; }
+    this.pursue(dt, game, sees ? target : this.lastSeen, C.chase * this.speedMul, sees && best < TS * 1.6);
+  }
+
+  /** 죽음쥐 (Level 8): 보이면 짧게 질주(burst) → 지쳐서 쉼(rest). 손전등을 비추면 찍찍대며 흩어진다 */
+  updateRat(dt, game, target, best, sees) {
+    const C = this.cfg;
+    if (this.state === 'stunned') {
+      this.timer -= dt;
+      if (this.fleeFrom) {
+        const dx = this.x - this.fleeFrom.x, dy = this.y - this.fleeFrom.y, d = Math.hypot(dx, dy) || 1;
+        moveEntity(this, (dx / d) * C.chase * 0.8 * dt, (dy / d) * C.chase * 0.8 * dt, CONFIG.ENTITY.RADIUS, game.map);
+        this.angle = Math.atan2(dy, dx);
+      }
+      if (this.timer <= 0) { this.state = 'rest'; this.timer = C.rest * 0.5; this.path = []; }
+      return;
+    }
+    const lit = this.litBy(game);
+    if (lit && lit.d > TS * 0.6) {
+      this.state = 'stunned'; this.timer = C.stunTime; this.fleeFrom = { x: lit.p.x, y: lit.p.y }; this.path = [];
+      game.onEntityEvent(this, 'squeak');
+      return;
+    }
+    if (this.state === 'rest') {
+      this.timer -= dt;
+      if (target) this.angle = lerpAngle(this.angle, Math.atan2(target.y - this.y, target.x - this.x), Math.min(1, dt * 3));
+      if (this.timer <= 0) { this.state = 'patrol'; this.path = []; }
+      return;
+    }
+    if (sees && this.state !== 'chase') { game.onMonsterAlert(target, this); this.state = 'chase'; this.timer = C.burst; this.lostT = 0; }
+    if (this.state === 'chase') {
+      this.timer -= dt;
+      if (this.timer <= 0) { this.state = 'rest'; this.timer = C.rest; this.path = []; return; }
+      if (sees) this.lostT = 0; else this.lostT += dt;
+      if (this.lostT > 1.5) { this.state = 'patrol'; this.path = []; return; }
+      this.pursue(dt, game, sees ? target : this.lastSeen, C.chase * this.speedMul, sees && best < TS * 1.6);
+      return;
+    }
+    this.patrol(dt, game.map, C.patrol);
+  }
+
+  /** 잭-오-랜턴 (Level 10.1): 시야 거리가 손전등에 달렸다(canSee). 조명탄 불빛에도 끌려간다 */
+  updateLantern(dt, game, target, best, sees) {
+    const C = this.cfg;
+    if (sees && this.state !== 'chase') { game.onMonsterAlert(target, this); this.state = 'chase'; game.onEntityEvent(this, 'cackle'); }
+    if (this.state === 'chase' || this.state === 'search') return this.chaseOrSearch(dt, game, target, best, sees, C.chase * this.speedMul);
+    // 조명탄: 불빛을 보러 간다
+    const flare = (game.flares || []).find(f => Math.hypot(f.x - this.x, f.y - this.y) < C.sightLit && hasLOS(game.map, this.x, this.y, f.x, f.y));
+    if (flare) { this.state = 'patrol'; this.pursue(dt, game, flare, C.patrol * 2); return; }
+    this.patrol(dt, game.map, C.patrol);
+  }
+
+  /**
+   * 위장 크롤러 (Level 11): camo 벽인 척(무해, 거의 안 보임). 아무도 안 볼 때 가장 가까운 사람 쪽으로 슬금슬금.
+   * trigger 안으로 들어오면 튀어나와 chase → 놓치면 그 자리에서 다시 camo.
+   */
+  updateCamo(dt, game, target, best, sees) {
+    const C = this.cfg;
+    if (this.state === 'camo') {
+      if (sees && best < C.trigger) {
+        this.state = 'chase'; this.lostT = 0; this.path = [];
+        game.onMonsterAlert(target, this); game.onEntityEvent(this, 'reveal');
+        return;
+      }
+      if (target && best < TS * 12 && !this.watchedBy(game)) this.pursue(dt, game, target, C.creep);
+      return;
+    }
+    this.chaseOrSearch(dt, game, target, best, sees, C.chase * this.speedMul);
+    if (this.state === 'patrol') { this.state = 'camo'; this.path = []; }
+  }
+
+  /** 덜러 (Level 13 / 3999): 보이는 사람을 아주 느리게 따라온다. 벽 너머로 놓치면 둘러보다 배회. 정신력 감소는 GameRoom 이 처리 */
+  updateDuller(dt, game) {
+    const { target, best } = this.nearestPlayer(game);
+    this.target = target; this.targetDist = best;
+    const sees = !!target && this.canSee(target, best, game);
+    if (sees) this.lastSeen = { x: target.x, y: target.y };
+    if (sees && this.state !== 'chase') { game.onMonsterAlert(target, this); this.state = 'chase'; this.lostT = 0; }
+    if (this.state === 'chase' || this.state === 'search') return this.chaseOrSearch(dt, game, target, best, sees, this.cfg.chase * this.speedMul);
+    this.patrol(dt, game.map, this.cfg.patrol);
+  }
+
+  /**
+   * 시츠 (Level 13): 벽을 통과해 떠다닌다. 가까운(sense) 사람에게 곧장 다가오고,
+   * 손전등 빛을 받으면 scared — 비춘 사람 반대쪽으로 물러난다.
+   */
+  updateSheet(dt, game) {
+    const C = this.cfg, map = game.map;
+    const drift = (dx, dy, speed) => {
+      const d = Math.hypot(dx, dy) || 1, s = Math.min(d, speed * dt);
+      this.x = Math.max(TS * 0.5, Math.min(map.w * TS - TS * 0.5, this.x + (dx / d) * s));
+      this.y = Math.max(TS * 0.5, Math.min(map.h * TS - TS * 0.5, this.y + (dy / d) * s));
+      this.angle = Math.atan2(dy, dx);
+    };
+    if (this.state === 'scared') {
+      this.timer -= dt;
+      if (this.fleeFrom) drift(this.x - this.fleeFrom.x, this.y - this.fleeFrom.y, C.flee);
+      if (this.timer <= 0) this.state = 'drift';
+      return;
+    }
+    const lit = this.litBy(game);
+    if (lit) { this.state = 'scared'; this.timer = C.scared; this.fleeFrom = { x: lit.p.x, y: lit.p.y }; game.onEntityEvent(this, 'wail'); return; }
+    const { target, best } = this.nearestPlayer(game);
+    if (target && best < C.sense) {
+      if (this.state !== 'haunt') game.onMonsterAlert(target, this);
+      this.state = 'haunt';
+      drift(target.x - this.x, target.y - this.y, C.chase * this.speedMul);
+      return;
+    }
+    this.state = 'drift';
+    this.timer -= dt;
+    if (this.timer <= 0 || !this.wander) { this.timer = 3 + Math.random() * 3; this.wander = Math.random() * Math.PI * 2; }
+    drift(Math.cos(this.wander), Math.sin(this.wander), C.chase * 0.5);
   }
 
   // ------------------------------------------------------------ 소리로 찾는 엔티티들
@@ -625,6 +963,17 @@ export class Monster {
     const { target } = this.nearestPlayer(game);
     if (target) this.teleportNear(game, target);
     game.onEntityEvent(this, 'awake');
+  }
+
+  /** 정전 스마일러: 그 사람 근처(경로 lo~hi 칸)의 어두운 칸에 나타난다. 가능하면 안 보이는 곳 */
+  appearNear(game, p, lo, hi) {
+    const map = game.map, dist = map.bfs(Math.floor(p.x / TS), Math.floor(p.y / TS));
+    const cand = map.floorCells.filter(i => dist[i] >= lo && dist[i] <= hi && game.level.isDark(i % map.w, (i / map.w) | 0));
+    if (!cand.length) return;
+    const pos = i => ({ x: (i % map.w) * TS + TS / 2, y: ((i / map.w) | 0) * TS + TS / 2 });
+    let c = pos(cand[Math.floor(Math.random() * cand.length)]);
+    for (let k = 0; k < 15; k++) { const q = pos(cand[Math.floor(Math.random() * cand.length)]); if (!hasLOS(map, q.x, q.y, p.x, p.y)) { c = q; break; } }
+    this.x = c.x; this.y = c.y; this.path = [];
   }
 
   /** 플레이어 근처(경로 lo~hi 칸)의 보이지 않는 곳으로 이동 */

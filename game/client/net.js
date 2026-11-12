@@ -14,7 +14,7 @@ const EVENTS = [
   'lobby', 'init', 'round', 'snapshot', 'playerJoined', 'playerLeft', 'keyCollected',
   'playerDied', 'playerEscaped', 'monsterAlert', 'entityEvent', 'hideState', 'itemSpawned', 'itemPicked',
   'testResult', 'roundEnd', 'correct', 'joinError', 'paused',
-  'inventory', 'itemUsed', 'emote', 'gameComplete', 'puzzleAlarm', 'objective', 'night', 'balloonPopped', 'chat', 'rtc', 'gesture',
+  'inventory', 'itemUsed', 'emote', 'gameComplete', 'dullTouch', 'puzzleAlarm', 'objective', 'night', 'blackout', 'balloonPopped', 'chat', 'rtc', 'gesture',
 ];
 
 export class NetClient {
@@ -59,6 +59,7 @@ export class NetClient {
   /** 파티 푸퍼에게 말 걸기 / 풍선 터뜨리기 */
   interact(mid) { this.socket?.emit('interact', { mid }); }
   popBalloon(index) { this.socket?.emit('popBalloon', { index }); }
+  noclip() { this.socket?.emit('noclip'); }
   /** 채팅 / 보이스 챗 (말하는 중 알림, 연결 정보 중계) */
   chat(text) { this.socket?.emit('chat', { text }); }
   speaking(on) { this.socket?.emit('speaking', { on }); }

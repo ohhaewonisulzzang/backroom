@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { PUZZLE_NAMES, PUZZLE_HINTS, lightsToggle, slideMove, arcadePos } from '../shared/puzzles.js';
+import { PUZZLE_NAMES, PUZZLE_HINTS, lightsToggle, slideMove, arcadePos, quickJudge } from '../shared/puzzles.js';
 
 /**
  * 퍼즐 단말기 화면. 게임은 멈추지 않는다 — 푸는 동안 엔티티가 다가올 수 있다.
@@ -16,11 +16,11 @@ export default function PuzzlePanel({ puzzle, wrongAt, onSubmit, onClose, sfx })
     const id = setTimeout(() => setShake(false), 600);
     return () => clearTimeout(id);
   }, [wrongAt]);
-  const Body = { oneStroke: OneStroke, lightsOut: LightsOut, sequence: Sequence, memory: Memory, slide: Slide, arcade: Arcade }[puzzle.type];
+  const Body = { oneStroke: OneStroke, lightsOut: LightsOut, sequence: Sequence, memory: Memory, slide: Slide, arcade: Arcade, quick: Quick }[puzzle.type];
   return (
     <div className={`puzzle-panel${shake ? ' wrong' : ''}`} onPointerDown={e => e.stopPropagation()}>
       <div className="pz-head">
-        <span>{puzzle.type === 'arcade' ? 'ARCADE' : 'TERMINAL'} · {PUZZLE_NAMES[puzzle.type]}</span>
+        <span>{puzzle.type === 'arcade' || puzzle.type === 'quick' ? 'ARCADE' : 'TERMINAL'} · {PUZZLE_NAMES[puzzle.type]}</span>
         <button onMouseDown={e => e.preventDefault()} onClick={onClose}>닫기 [E]</button>
       </div>
       <p className="pz-hint">{PUZZLE_HINTS[puzzle.type]}</p>
@@ -278,6 +278,61 @@ function Arcade({ puzzle, onSubmit, sfx }) {
       </svg>
       <div className="pz-row">
         <span className="pz-dim">풍선 {Math.min(hits.current.length, stages.length)} / {stages.length}</span>
+        <Btn onClick={fire}>쏘기 [Space]</Btn>
+      </div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ 퀵 드로우 (Level 3999 오락기)
+function Quick({ puzzle, onSubmit, sfx }) {
+  const W = 300, H = 170;
+  const [, tick] = useState(0);
+  const start = useRef(performance.now()), done = useRef(false), result = useRef(null), lock = useRef(false), beeped = useRef(false);
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => {
+      const t = (performance.now() - start.current) / 1000;
+      if (!done.current && !lock.current && !beeped.current && t >= puzzle.delay) { beeped.current = true; sfx('beep', 1100); }
+      // 너무 늦으면 실패 처리 → 다시
+      if (!done.current && !lock.current && quickJudge(puzzle, t) === 'late') failRef.current('late');
+      tick(v => v + 1); raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [puzzle]);
+  const failRef = useRef(null);
+  const fail = why => {
+    sfx('wrong'); onSubmit(-1);                         // 서버가 오답 판정 → 경보
+    result.current = why; lock.current = true;
+    setTimeout(() => { result.current = null; lock.current = false; beeped.current = false; start.current = performance.now(); }, 900);
+  };
+  failRef.current = fail;
+  const fire = () => {
+    if (done.current || lock.current) return;
+    const t = (performance.now() - start.current) / 1000, j = quickJudge(puzzle, t);
+    if (j === 'ok') { done.current = true; result.current = 'ok'; sfx('beep', 1500); onSubmit(t); }
+    else fail(j);
+  };
+  useEffect(() => {
+    const key = e => { if (e.code === 'Space') { e.preventDefault(); e.stopPropagation(); fire(); } };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  });
+  const t = (performance.now() - start.current) / 1000, go = t >= puzzle.delay && !lock.current;
+  const R = result.current;
+  const bg = R === 'ok' ? '#0e3a18' : R ? '#3a0610' : go ? '#0e5a24' : '#3a0a10';
+  const label = R === 'ok' ? 'CLEAR!' : R === 'early' ? '너무 빨라!' : R === 'late' ? '너무 늦어!' : go ? 'NOW!' : 'WAIT...';
+  return (
+    <>
+      <svg className="pz-svg arcade-svg" viewBox={`0 0 ${W} ${H}`} onPointerDown={e => { e.preventDefault(); fire(); }}>
+        <rect x="0" y="0" width={W} height={H} fill={bg} />
+        <circle cx={W / 2} cy={H / 2 - 12} r="34" fill={go || R === 'ok' ? '#6edc78' : '#d8312b'} opacity={go ? 1 : 0.8} />
+        <circle cx={W / 2 - 10} cy={H / 2 - 24} r="9" fill="#ffffff" opacity="0.35" />
+        <text x={W / 2} y={H - 22} textAnchor="middle" fill="#fff3c4" fontSize="34" fontFamily="VT323, monospace">{label}</text>
+      </svg>
+      <div className="pz-row">
+        <span className="pz-dim">초록불이 켜지면 바로!</span>
         <Btn onClick={fire}>쏘기 [Space]</Btn>
       </div>
     </>

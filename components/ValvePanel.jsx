@@ -11,6 +11,8 @@ import { useEffect, useRef, useState } from 'react';
 const LOOK = {
   valve:     { title: '증기 밸브', wheel: '#b8322a', dark: '#6a1410', hint: '핸들을 잡고 오른쪽(시계 방향)으로 돌려 잠가라.' },
   drain:     { title: '배수 밸브', wheel: '#2f7fb0', dark: '#164a6a', hint: '핸들을 잡고 오른쪽(시계 방향)으로 돌려 열어라.' },
+  boiler:    { title: '보일러 압력 밸브', wheel: '#c8502a', dark: '#6a2410', hint: '핸들을 잡고 오른쪽(시계 방향)으로 돌려 압력을 잠가라.' },
+  pump:      { title: '배수 펌프', wheel: '#2f8fa0', dark: '#145a66', hint: '핸들을 잡고 오른쪽(시계 방향)으로 돌려 물을 빼라.' },
   generator: { title: '발전기 크랭크', wheel: '#8a7a3a', dark: '#4a4020', hint: '손잡이를 잡고 오른쪽(시계 방향)으로 계속 돌려 시동을 걸어라.' },
 };
 const SIZE = 260, C = SIZE / 2;

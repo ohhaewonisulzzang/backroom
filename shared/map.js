@@ -9,6 +9,8 @@ export class GameMap {
     this.rng = mulberry32(seed);
     this.tiles = new Uint8Array(w * h).fill(T.WALL);
     if (layout === 'run') this.generateRun();
+    else if (layout === 'garage') this.generateGarage();
+    else if (layout === 'city') this.generateCity();
     else { this.generate(); if (roads > 0) this.addRoads(roads); if (puddles > 0) this.addPuddles(puddles); }
     this.floorCells = [];
     for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i] !== T.WALL) this.floorCells.push(i);
@@ -55,6 +57,73 @@ export class GameMap {
         for (let y = ry + 1; y < ry + rh - 1; y += 2) for (let x = rx + 1; x < rx + rw - 1; x += 2) this.set(x, y, T.WALL);
       }
     }
+  }
+
+  /**
+   * 지하 주차장: 넓게 트인 바닥 + 일정 간격 기둥(2x1) + 군데군데 낮은 벽(주차 칸 칸막이) + 큰 벽 몇 개.
+   * 바닥이 모두 이어져 있도록 칸막이는 짧게만 세운다.
+   */
+  generateGarage() {
+    const { w, h, rng } = this;
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) this.set(x, y, T.FLOOR);
+    for (let y = 4; y < h - 3; y += 5) for (let x = 4; x < w - 3; x += 6) {   // 기둥
+      this.set(x, y, T.WALL); this.set(x + 1, y, T.WALL);
+      if (rng() < 0.35) for (let k = 2; k < 4; k++) this.set(x + k, y, T.WALL);   // 기둥 사이 칸막이
+    }
+    for (let n = 0; n < 14; n++) {                     // 긴 벽 (경사로 벽 / 기계실)
+      const vert = rng() < 0.5, len = 5 + Math.floor(rng() * 8);
+      const x0 = 3 + Math.floor(rng() * (w - 6 - (vert ? 0 : len))), y0 = 3 + Math.floor(rng() * (h - 6 - (vert ? len : 0)));
+      if (x0 + y0 < 12) continue;
+      for (let k = 0; k < len; k++) this.set(vert ? x0 : x0 + k, vert ? y0 + k : y0, T.WALL);
+    }
+    // 막힌 곳이 있으면 시작점에서 못 가는 바닥을 벽으로 메운다
+    const d = this.bfs(1, 1);
+    for (let i = 0; i < w * h; i++) if (this.tiles[i] !== T.WALL && d[i] < 0) this.tiles[i] = T.WALL;
+  }
+
+  /**
+   * 끝없는 도시 (세로로 긴 맵): 가운데 3칸 대로 + 14줄마다 3칸 가로 도로(넓은 길 = 동네 감시자의 길),
+   * 양쪽 1칸 골목(군데군데 막혀 있음) + 골목과 대로를 잇는 좁은 샛길과 작은 가게방. 나머지는 건물(벽).
+   * 시작은 맨 아래 왼쪽 골목, 노클립 존(출구)은 시작에서 가장 먼 곳(맨 위쪽).
+   */
+  generateCity() {
+    const { w, h, rng } = this, ri = (a, b) => a + Math.floor(rng() * (b - a + 1));
+    const floor = (x, y) => { if (x > 0 && y > 0 && x < w - 1 && y < h - 1) this.set(x, y, T.FLOOR); };
+    const mid = w >> 1, alleys = [4, w - 5], roadRows = [];
+    for (let y = 1; y < h - 1; y++) for (let x = mid - 1; x <= mid + 1; x++) floor(x, y);          // 대로
+    for (let c = 10; c < h - 6; c += 14) { roadRows.push(c); for (let y = c; y < c + 3; y++) for (let x = 1; x < w - 1; x++) floor(x, y); }   // 가로 도로
+    for (const ax of alleys) for (let y = 1; y < h - 1; y++) floor(ax, y);                          // 골목
+    const onRoad = y => roadRows.some(c => y >= c - 1 && y <= c + 3);
+    // 블록마다: 골목 ↔ 대로 샛길 1~2개, 골목 막힘, 작은 가게방
+    const blocks = [1, ...roadRows.map(c => c + 3)];
+    for (let b = 0; b < blocks.length; b++) {
+      const y0 = blocks[b], y1 = (roadRows[b] ?? h - 1) - 1;
+      if (y1 - y0 < 4) continue;
+      for (const ax of alleys) {
+        const dir = ax < mid ? 1 : -1;
+        for (let n = 0; n < ri(1, 2); n++) {                                  // 샛길 (꺾인 1칸 길)
+          const y = ri(y0 + 1, y1 - 1), bend = ri(2, 5);
+          let x = ax;
+          while (x !== mid - dir) { x += dir; floor(x, y); if (Math.abs(x - ax) === bend) { floor(x, y + 1); } }
+        }
+        if (rng() < 0.6) {                                                    // 가게방 (3x3, 골목 쪽 문 하나)
+          const ry = ri(y0 + 1, Math.max(y0 + 1, y1 - 3)), rx = ax + dir * 2;
+          for (let yy = ry; yy < ry + 3; yy++) for (let xx = 0; xx < 3; xx++) floor(rx + dir * xx, yy);
+          floor(ax + dir, ry + 1);
+        }
+        if (rng() < 0.55) { const by = ri(y0 + 1, y1 - 1); if (!onRoad(by) && by < h - 18) this.set(ax, by, T.WALL); }   // 골목 막힘 → 돌아가야 한다
+        if (rng() < 0.5) {                                                    // 두 번째 골목 조각
+          const sx = ax + dir * ri(6, 8), a = ri(y0, y1 - 3), bb = Math.min(y1, a + ri(3, 7));
+          for (let y = a; y <= bb; y++) floor(sx, y);
+          floor(sx - dir, a); for (let x = Math.min(ax, sx); x <= Math.max(ax, sx); x++) floor(x, bb);
+        }
+      }
+    }
+    this.startX = alleys[0];
+    for (let y = h - 4; y < h - 1; y++) floor(this.startX, y);   // 시작 골목 입구는 항상 뚫려 있게
+    // 시작점에서 못 가는 바닥은 벽으로
+    const d = this.bfs(this.startX, h - 2);
+    for (let i = 0; i < w * h; i++) if (this.tiles[i] !== T.WALL && d[i] < 0) this.tiles[i] = T.WALL;
   }
 
   /** spacing 칸마다 가로/세로 3칸 너비 도로 (넓은 곳만 다니는 엔티티의 길) */
@@ -187,10 +256,13 @@ export function generateLevel(seed, levelIndex = 0) {
   const info = levelInfo(levelIndex);
   const run = info.layout === 'run';     // Level ! : 긴 복도
   const mission = missionOf(levelIndex);
-  const map = run ? new GameMap(CONFIG.RUN.LENGTH, CONFIG.RUN.HEIGHT, seed, 'run') : new GameMap(CONFIG.MAP_W, CONFIG.MAP_H, seed, 'maze', info.puddles || 0, info.roads || 0);
+  const city = info.layout === 'city';   // Level 11 : 세로로 긴 도시
+  const map = run ? new GameMap(CONFIG.RUN.LENGTH, CONFIG.RUN.HEIGHT, seed, 'run')
+    : city ? new GameMap(CONFIG.CITY.W, CONFIG.CITY.H, seed, 'city')
+    : new GameMap(CONFIG.MAP_W, CONFIG.MAP_H, seed, info.layout === 'garage' ? 'garage' : 'maze', info.puddles || 0, info.roads || 0);
   const rng = mulberry32(seed ^ 0x9e3779b9);
-  const sy = run ? map.h >> 1 : 1;      // 시작 타일 (1, sy)
-  const dist = map.bfs(1, sy);
+  const sx = city ? map.startX : 1, sy = run ? map.h >> 1 : city ? map.h - 2 : 1;      // 시작 타일 (sx, sy)
+  const dist = map.bfs(sx, sy);
   const center = i => ({ x: (i % map.w) * TS + TS / 2, y: ((i / map.w) | 0) * TS + TS / 2 });
 
   // 출구 = 시작점에서 가장 먼 타일 (질주 레벨은 복도 오른쪽 끝 가운데)
@@ -244,7 +316,7 @@ export function generateLevel(seed, levelIndex = 0) {
   const mc = map.floorCells.filter(i => dist[i] >= 18 && i !== exitIdx);
   const mi = mc.length ? mc[Math.floor(rng() * mc.length)] : map.floorCells[map.floorCells.length - 1];
 
-  const lighting = buildLighting(map, rng, dist, { ...CONFIG.LIGHTS, ...info.lights });
+  const lighting = buildLighting(map, rng, dist, { ...CONFIG.LIGHTS, ...info.lights }, sx, sy);
   const lockers = run ? [] : placeLockers(map, rng, dist, exitIdx, [...keys, ...parts, ...stations, ...(depot ? [depot] : [])]);
   // 장식 (Level Fun 의 풍선 등). 화면용이라 충돌 없음
   const decor = [];
@@ -262,11 +334,17 @@ export function generateLevel(seed, levelIndex = 0) {
     }
   }
 
+  // 쪽지 (레벨 시작 지점 옆 바닥): E 로 읽으면 이 레벨에서 할 일이 적혀 있다
+  const [nx, ny] = [[1, 0], [0, -1], [0, 1], [-1, 0], [1, 1], [1, -1]].map(([dx, dy]) => [sx + dx, sy + dy])
+    .find(([x, y]) => map.get(x, y) === T.FLOOR && !keys.some(k => k.tx === x && k.ty === y)) || [sx, sy];
+  const note = { tx: nx, ty: ny, x: nx * TS + TS / 2 + (nx === sx ? 0 : -8), y: ny * TS + TS / 2 + 6 };
+
   return {
+    note,
     waterCells: map.floorCells.filter(i => map.tiles[i] === T.SLOW),
     ...areaMasks(map, info, mulberry32(seed ^ 0x2545f491)),
     seed, level: info.id, info, mission, map, keys, parts, stations, depot, exitIdx, dist, lockers, decor,
-    spawn: { x: TS * 1.5, y: sy * TS + TS / 2 },
+    spawn: { x: sx * TS + TS / 2, y: sy * TS + TS / 2 },
     monsterSpawn: center(mi),
     ...lighting,
   };
@@ -296,7 +374,7 @@ function placeLockers(map, rng, dist, exitIdx, keys) {
  * 천장 형광등 배치 + 타일별 밝기(tileLight) 계산.
  * 대부분은 밝고, 형광등이 나간 "어두운 구역"이 몇 군데 생긴다. seed 로 결정되므로 서버/클라이언트 동일.
  */
-function buildLighting(map, rng, dist, L) {
+function buildLighting(map, rng, dist, L, sx = 1, sy = 1) {
   const { w, h } = map;
   const center = (x, y) => ({ x: x * TS + TS / 2, y: y * TS + TS / 2 });
 
@@ -307,7 +385,7 @@ function buildLighting(map, rng, dist, L) {
     if (dist[idx] < 12) continue;
     const x = idx % w, y = (idx / w) | 0;
     const r = L.DARK_ZONE_RADIUS[0] + rng() * (L.DARK_ZONE_RADIUS[1] - L.DARK_ZONE_RADIUS[0]);
-    if (Math.hypot(x - 1, y - 1) < r + 4) continue;                       // 시작 지점은 항상 밝게
+    if (Math.hypot(x - sx, y - sy) < r + 4) continue;                     // 시작 지점은 항상 밝게
     if (darkZones.some(z => Math.hypot(z.x - x, z.y - y) < z.r + r + 3)) continue;
     darkZones.push({ x, y, r });
   }
@@ -326,7 +404,9 @@ function buildLighting(map, rng, dist, L) {
     has[y * w + x] = 1;
     const broken = rng() < L.BROKEN_CHANCE && dist[y * w + x] > 6;
     const flicker = rng() < L.FLICKER_CHANCE;
-    if (!broken) lights.push({ tx: x, ty: y, ...center(x, y), flicker });
+    // 비상등 (정전 레벨만): 정전에도 켜져 있는 빨간 등. 시작 지점 근처는 항상 비상등
+    const emergency = L.EMERGENCY ? (rng() < L.EMERGENCY || (x <= 3 && y <= 3)) : false;
+    if (!broken) lights.push({ tx: x, ty: y, ...center(x, y), flicker: flicker && !emergency, ...(emergency ? { emergency: true } : {}) });
   }
 
   // 3) 타일 밝기 (벽에 가려지면 빛이 닿지 않음)
@@ -355,7 +435,30 @@ function buildLighting(map, rng, dist, L) {
 
   const isDark = (x, y) => map.inBounds(x, y) && tileLight[y * w + x] < L.DARK_THRESHOLD;
   const darkCells = map.floorCells.filter(i => tileLight[i] < L.DARK_THRESHOLD);
-  return { lights, tileLight, darkZones, darkCells, isDark };
+  // 정전 때 밝기: 비상등만 켜진다 (safeLight). 이 밝기가 어둠 기준 이상이면 정전 중에도 안전한 칸
+  let safeLight = null, isSafe = () => false;
+  if (L.EMERGENCY) {
+    safeLight = new Float32Array(w * h).fill(0.02);
+    for (const lt of lights) {
+      if (!lt.emergency) continue;
+      for (let y = lt.ty - Ri; y <= lt.ty + Ri; y++) for (let x = lt.tx - Ri; x <= lt.tx + Ri; x++) {
+        if (!map.inBounds(x, y) || map.isSolid(x, y)) continue;
+        const d = Math.hypot(x - lt.tx, y - lt.ty);
+        if (d >= R) continue;
+        const c = center(x, y);
+        if (d > 0 && !hasLOS(map, lt.x, lt.y, c.x, c.y)) continue;
+        safeLight[y * w + x] = Math.min(1, safeLight[y * w + x] + Math.pow(1 - d / R, 0.8));
+      }
+    }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {   // 벽은 이웃 바닥 중 가장 밝은 값
+      if (!map.isSolid(x, y)) continue;
+      let b = 0.02;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (map.inBounds(x + dx, y + dy) && !map.isSolid(x + dx, y + dy)) b = Math.max(b, safeLight[(y + dy) * w + x + dx]);
+      safeLight[y * w + x] = b;
+    }
+    isSafe = (x, y) => map.inBounds(x, y) && safeLight[y * w + x] >= L.DARK_THRESHOLD;
+  }
+  return { lights, tileLight, darkZones, darkCells, isDark, safeLight, isSafe };
 }
 
 /**

@@ -32,6 +32,20 @@ export class LightSystem {
     }
     g.putImageData(img, 0, 0);
 
+    // 정전 레벨: 비상등만 켜졌을 때의 라이트맵
+    this.blackmap = null;
+    if (level.safeLight) {
+      this.blackmap = document.createElement('canvas');
+      this.blackmap.width = w; this.blackmap.height = h;
+      const g2 = this.blackmap.getContext('2d'), im2 = g2.createImageData(w, h);
+      for (let i = 0; i < w * h; i++) {
+        im2.data[i * 4 + 3] = Math.round(Math.pow(1 - level.safeLight[i], 1.1) * 0.985 * 255);
+        im2.data[i * 4] = 6; im2.data[i * 4 + 1] = 0; im2.data[i * 4 + 2] = 0;
+      }
+      g2.putImageData(im2, 0, 0);
+    }
+    this.blackoutK = 0;   // 0 = 평소, 1 = 정전 (엔진이 매 프레임 넣는다)
+
     // 깜빡이는 형광등 상태
     this.flickers = level.lights.filter(l => l.flicker).map(l => ({ l, off: false, t: Math.random() * 3 }));
   }
@@ -132,6 +146,11 @@ export class LightSystem {
     lctx.setTransform(...world);
     lctx.imageSmoothingEnabled = true;
     lctx.drawImage(this.lightmap, 0, 0, map.w, map.h, 0, 0, map.w * TS, map.h * TS);
+    if (this.blackmap && this.blackoutK > 0.01) {        // 정전: 비상등만 켜진 라이트맵을 위에 덮는다
+      lctx.globalAlpha = Math.min(1, this.blackoutK);
+      lctx.drawImage(this.blackmap, 0, 0, map.w, map.h, 0, 0, map.w * TS, map.h * TS);
+      lctx.globalAlpha = 1;
+    }
 
     // 꺼진 순간의 형광등 → 그 주변이 잠깐 어두워짐
     for (const f of this.flickers) {
@@ -182,9 +201,12 @@ export class LightSystem {
     for (const l of this.level.lights) {
       if (l.x < cam.x - r || l.x > cam.x + vw + r || l.y < cam.y - r || l.y > cam.y + vh + r) continue;
       if (!this.isLightOn(l)) continue;
+      const off = !l.emergency && this.blackoutK > 0.5;           // 정전: 비상등 말고는 꺼짐
+      if (off) continue;
       const a = 0.09 + Math.sin(time * 50 + l.x) * 0.006;
+      const col = l.emergency ? '255,60,40' : tint;               // 비상등은 빨간 빛
       const gr = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, r);
-      gr.addColorStop(0, `rgba(${tint},${tint === '255,244,200' ? a : a * 2.2})`); gr.addColorStop(1, `rgba(${tint},0)`);
+      gr.addColorStop(0, `rgba(${col},${col === '255,244,200' ? a : a * (l.emergency ? 3 : 2.2)})`); gr.addColorStop(1, `rgba(${col},0)`);
       ctx.fillStyle = gr;
       ctx.fillRect(l.x - r, l.y - r, r * 2, r * 2);
     }

@@ -8,6 +8,9 @@
  *
  * 설정은 localStorage('backrooms.voice') 에 저장된다.
  *
+ * 목소리 흉내: 보이스 챗으로 들린(또는 내가 한) 말을 몇 초씩 녹음해 이 브라우저 메모리에만 둔다 (서버로 보내지 않음, 방을 나가면 지움).
+ * 서버가 'mimic' 이벤트를 보내면 그 엔티티 위치에서 녹음 하나를 낮고 먹먹하게 틀어 준다.
+ *
  * 출력 장치: 블루투스 이어폰(갤럭시 버즈 등)의 마이크를 열면 Windows 가 이어폰을 "헤드폰(스테레오)" 에서
  * "헤드셋(핸즈프리)" 이라는 다른 출력 장치로 바꾼다. 게임 소리가 예전 장치로 계속 나가면 아무것도 안 들리므로,
  * 기본(자동)으로는 마이크와 같은 기기(groupId)의 출력 장치로 효과음·목소리를 모두 옮긴다 (AudioContext.setSinkId).
@@ -21,6 +24,8 @@ export const VOICE_DEFAULTS = { enabled: false, deviceId: '', inputGain: 1, thre
   outputId: '', manualOutput: false };   // 출력 장치 ('' = 시스템 기본) / 직접 고름(false 면 마이크와 같은 기기로 자동)
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
 const HOLD = 0.7;        // 말을 멈춘 뒤 게이트가 닫히기까지 (초) — 단어 사이·말끝이 잘리지 않게
+const MIMIC_MAX = 16;    // 흉내용 녹음 최대 개수
+const MIMIC_LEN = 3.5;   // 녹음 한 개 최대 길이(초)
 const BOOST = 2.2;      // 받는 목소리 고정 증폭 (크기 비율은 그대로, 전체만 키움). 뒤의 안전장치는 찢어질 만큼 클 때만 눌러 준다
 
 function loadVoice() {
@@ -51,7 +56,9 @@ export const Voice = {
   s: null,                 // 설정
   ctx: null, stream: null, src: null, inGain: null, analyser: null, gate: null, dest: null, loop: null, out: null,
   buf: null, level: 0, speaking: false, holdT: 0, loopback: false, error: '', duck: 0,
-  peers: new Map(),        // id → { pc, gain, pan, an, buf, level, speaking, el, ice }
+  peers: new Map(),        // id → { pc, gain, pan, an, buf, level, speaking, el, ice, stream }
+  clips: [],               // 녹음된 목소리 (AudioBuffer, 최대 MIMIC_MAX 개)
+  recs: new Map(),         // 녹음 중: key(상대 id / 'me') → { r, quietT }
   myId: null, inRoom: false,
   signal: null,            // (to, data) => 서버로 중계 요청 (engine 이 넣는다)
   onSpeaking: null,        // (bool) => 서버에 "말하는 중" 알림 (엔티티가 목소리를 듣는다)
@@ -236,7 +243,53 @@ export const Voice = {
     if (this.enabled) this.hello();
     this.sendState();
   },
-  leaveRoom() { this.closeAll(true); this.inRoom = false; },
+  leaveRoom() { this.closeAll(true); this.inRoom = false; this.clips = []; for (const k of [...this.recs.keys()]) this.stopClip(k); },
+
+  // ------------------------------------------------------------ 목소리 흉내 (녹음 / 재생)
+  /** 말하기 시작하면 녹음 시작 (최대 MIMIC_LEN 초) */
+  startClip(key, stream) {
+    if (this.recs.has(key) || !stream || typeof MediaRecorder === 'undefined' || !this.ctx) return;
+    try {
+      const r = new MediaRecorder(stream), chunks = [], t0 = performance.now();
+      r.ondataavailable = e => { if (e.data?.size) chunks.push(e.data); };
+      r.onstop = async () => {
+        this.recs.delete(key);
+        if ((performance.now() - t0) / 1000 < 0.7 || !chunks.length || !this.ctx) return;   // 너무 짧은 소리는 버림
+        try {
+          const ab = await this.ctx.decodeAudioData(await new Blob(chunks, { type: r.mimeType }).arrayBuffer());
+          this.clips.push(ab);
+          if (this.clips.length > MIMIC_MAX) this.clips.splice(Math.floor(Math.random() * (this.clips.length - 1)), 1);
+        } catch { /* 디코딩 실패 — 버림 */ }
+      };
+      r.start();
+      this.recs.set(key, { r, quietT: 0 });
+      setTimeout(() => this.stopClip(key), MIMIC_LEN * 1000);
+    } catch { /* 녹음 미지원 */ }
+  },
+  stopClip(key) {
+    const x = this.recs.get(key);
+    if (x && x.r.state === 'recording') { try { x.r.stop(); } catch { this.recs.delete(key); } }
+  },
+  /** 말하는 동안 녹음, 0.5초 조용하면 끊는다 */
+  recordTick(key, stream, talking, dt) {
+    if (talking) { this.startClip(key, stream); const x = this.recs.get(key); if (x) x.quietT = 0; return; }
+    const x = this.recs.get(key);
+    if (x && (x.quietT += dt) > 0.5) this.stopClip(key);
+  },
+  get hasClips() { return this.clips.length > 0; },
+  /** 녹음 하나를 엔티티 위치에서 튼다: vol 0~1 (거리), pan -1~1. 낮고 느리게 + 먹먹하게 */
+  playMimic(vol, pan = 0) {
+    if (!this.ctx || !this.clips.length || vol <= 0) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain(), p = ctx.createStereoPanner();
+    src.buffer = this.clips[Math.floor(Math.random() * this.clips.length)];
+    src.playbackRate.value = 0.82 + Math.random() * 0.12;
+    lp.type = 'lowpass'; lp.frequency.value = 2200 + vol * 2500;
+    g.gain.value = Math.min(1.2, vol * 1.3) * this.settings().outputVolume;
+    p.pan.value = Math.max(-1, Math.min(1, pan));
+    src.connect(lp).connect(g).connect(p).connect(ctx.destination);
+    src.start(t);
+  },
   hello() { this.ensureCtx(); this.signal?.('*', { t: 'hello' }); },
 
   /** 서버가 중계해 준 연결 정보 */
@@ -281,7 +334,7 @@ export const Voice = {
       const st = e.streams[0] || new MediaStream([e.track]);
       // 크롬: 원격 스트림은 <audio> 에 붙여 둬야 WebAudio 로 소리가 흐른다 (그 자체는 음소거)
       const el = new Audio(); el.srcObject = st; el.muted = true; el.play().catch(() => {});
-      P.el = el;
+      P.el = el; P.stream = st;
       const src = ctx.createMediaStreamSource(st);
       src.connect(P.an); src.connect(P.gain);
     };
@@ -335,6 +388,7 @@ export const Voice = {
       this.speaking = open; this.speakSentAt = performance.now();
       this.onSpeaking?.(open);
     }
+    if (this.dest) this.recordTick('me', this.dest.stream, open, dt);   // 내 목소리도 녹음 (내 목소리를 흉내 내면 더 무섭다)
     let duck = 0;
     for (const [id, P] of this.peers) {
       const m = mix ? mix(id) : { gain: 1, pan: 0 };
@@ -345,6 +399,7 @@ export const Voice = {
       let sum = 0; for (let i = 0; i < P.buf.length; i++) sum += P.buf[i] * P.buf[i];
       P.level = Math.min(1, Math.sqrt(sum / P.buf.length) * 5);
       P.speaking = P.level > 0.05 && m.gain > 0.02;
+      this.recordTick(id, P.stream, P.level > 0.05, dt);   // 들린 목소리 녹음 (엔티티 흉내용)
       P.heard = m.gain;
       if (P.speaking) duck = Math.max(duck, Math.min(1, m.gain * 1.5));
     }

@@ -1,11 +1,11 @@
-import { CONFIG, TS, MISSION, levelLabel, levelInfo, missionGoal, missionKind } from '../../shared/config.js';
-import { clamp } from '../../shared/utils.js';
+import { CONFIG, TS, MISSION, levelLabel, levelInfo, missionKind } from '../../shared/config.js';
+import { clamp, mulberry32 } from '../../shared/utils.js';
 import { castRay } from '../../shared/physics.js';
 import { LightSystem } from './lighting.js';
 import { buildMapTexture, TILE_PX } from './texture.js';
 import {
   ART, drawPlayer, drawMonster, drawMonsterGlow, drawMonsterEyes, drawJumpscareSprite,
-  drawKey, drawTerminal, drawItem, drawLocker, drawExitSign, drawNameTag, drawBubble, drawPrompt, drawBalloonDecor, drawMothSwarm, humanPreview,
+  drawKey, drawTerminal, drawItem, drawNote, drawLocker, drawExitSign, drawNameTag, drawBubble, drawPrompt, drawBalloonDecor, drawMothSwarm, humanPreview,
   drawPart, drawDepot, drawStation, drawArcade, partIcon, drawPlayerGesture,
 } from './sprites.js';
 import { Hud } from './hud.js';
@@ -96,10 +96,13 @@ export class Renderer {
 
     // ---- 시야 (타일 가시성, 부드럽게) / 손전등 ----
     this.lights.updateVisibility(view, dt, game.explored, this.freshLevel);
+    this.lights.blackoutK = game.blackoutK || 0;
     this.freshLevel = false;
     const bright = !!game.test?.fullbright;
+    const nightVision = game.nightVisionT > 0;     // 야간 투시경: 어둠도 벽도 뚫고 시야 범위 안이 다 보인다
     const seen = e => {
       if (bright) return 1;
+      if (nightVision) return Math.hypot(e.x - view.x, e.y - view.y) < CONFIG.VIEW_RANGE ? 1 : 0;
       const v = this.lights.visibilityAt(e.x, e.y);
       return v < 0.05 ? 0 : Math.min(1, (v - 0.05) / 0.7);
     };
@@ -121,6 +124,7 @@ export class Renderer {
     const obj = game.obj, mkind = missionKind(level.mission);
     if (obj?.type === 'deliver') for (const pt of obj.parts) if (pt.s === 0) drawPart(ctx, pt, mkind, game.time);
     for (const it of game.items) drawItem(ctx, it, game.time);
+    if (level.note) drawNote(ctx, level.note, game.time, !game.noteRead);
 
     const inView = (o, m = TS) => o.x > cam.x - m && o.x < cam.x + vw + m && o.y > cam.y - m * 2 && o.y < cam.y + vh + m;
     // 파티고어 시야 (부채꼴) — 바닥에 옅게 표시해서 사각지대로 숨어 다닐 수 있게
@@ -141,7 +145,7 @@ export class Renderer {
       else actors.push({ y: d.y - 2, draw: () => drawBalloonDecor(ctx, d, game.time) });
     }
     // 퍼즐 단말기 (열쇠가 안에 잠겨 있다)
-    const arcade = mkind === 'games';    // Level Fun: 퍼즐 단말기 대신 스탠딩 아케이드 기계
+    const arcade = mkind === 'games' || mkind === 'cabinets';    // Level Fun / 3999: 퍼즐 단말기 대신 스탠딩 아케이드 기계
     for (const k of game.keys) if (k.puzzle && !k.collected && inView(k)) actors.push({ y: k.y + 4, draw: () => (arcade ? drawArcade : drawTerminal)(ctx, k, game.time, game.puzzleOpen === game.keys.indexOf(k)) });
     for (const f of game.flares) if (inView(f)) actors.push({ y: f.y, draw: () => this.drawFlareStick(ctx, f, game.time) });
     // 미션 장치: 배달 장치(배전반/무전기), 작동 장치(밸브/발전기/펌프)
@@ -169,7 +173,9 @@ export class Renderer {
     const shownMonsters = [];
     for (const m of game.monsters) {
       if (m.active === false) continue;
-      const a = seen(m);
+      let a = seen(m);
+      // 시츠: 벽을 통과해 다니므로 벽 속에 있어도 가까우면 희미하게 비친다
+      if (m.type === 'sheet') a = Math.max(a, 0.45 * Math.max(0, 1 - Math.hypot(m.x - view.x, m.y - view.y) / (TS * 6)));
       if (a <= 0) continue;
       shownMonsters.push({ m, a });
       actors.push({ y: m.y, draw: () => drawMonster(ctx, m, game.time, a) });
@@ -179,18 +185,20 @@ export class Renderer {
 
     // ---- 어둠 + 안개 ----
     if (!bright) {
-      this.lights.drawDarkness(this.lctx, W, H, world, flashlights, game.flares, game.time);
-      this.lights.drawFog(this.fctx, W, H, world);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(this.lightCanvas, 0, 0);
-      ctx.drawImage(this.fogCanvas, 0, 0);
+      if (!nightVision) {
+        this.lights.drawDarkness(this.lctx, W, H, world, flashlights, game.flares, game.time);
+        this.lights.drawFog(this.fctx, W, H, world);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(this.lightCanvas, 0, 0);
+        ctx.drawImage(this.fogCanvas, 0, 0);
+      }
     }
 
     // ---- 어둠 위 요소 ----
     ctx.setTransform(...world);
     for (const { m, a } of shownMonsters) {
       drawMonsterGlow(ctx, m, game.time, a);
-      if (m.state === 'chase' && view.alive) drawMonsterEyes(ctx, m, a);
+      if ((m.state === 'chase' || (m.type === 'beast' && (m.state === 'charge' || m.state === 'windup'))) && view.alive) drawMonsterEyes(ctx, m, a);
     }
     if (game.horde) this.drawHorde(ctx, game, cam, vw, vh, true);
     // 정신력 환각: 어둠도 무시하고 보이는 가짜 스마일러
@@ -200,8 +208,11 @@ export class Renderer {
       drawMonsterGlow(ctx, h, game.time, a);
       drawMonsterEyes(ctx, h, a);
     }
-    if (game.explored[level.exitIdx]) drawExitSign(ctx, map, level.exitIdx, game.exitUnlocked, game.time);
-    for (const p of game.remotes.values()) {
+    if (level.mission.type === 'noclip') this.drawNoclipZone(ctx, game);   // 끝없는 도시: 지직거리는 노클립 존
+    else if (game.explored[level.exitIdx]) drawExitSign(ctx, map, level.exitIdx, game.exitUnlocked, game.time);
+    if (game.nearNoclip && game.local.alive) { const e = level.exitIdx; drawPrompt(ctx, (e % map.w) * TS + TS / 2, ((e / map.w) | 0) * TS - 30, 'E  노클립'); }
+    // 이름표·마이크 아이콘: 살아 있는 동안엔 가린다 (누가 진짜 동료인지 모르게). 죽어서 관전할 때만 보인다
+    for (const p of game.local?.alive ? [] : game.remotes.values()) {
       if (!p.alive || p.hidden || p === view) continue;
       const a = seen(p);
       if (a > 0) drawNameTag(ctx, p, a * clamp(1.4 - Math.hypot(p.x - view.x, p.y - view.y) / CONFIG.VIEW_RANGE, 0.3, 1));
@@ -223,10 +234,11 @@ export class Renderer {
       drawPrompt(ctx, level.depot.x, level.depot.y - 46, `${obj.done}/${obj.total}`);
     }
     if (game.nearNpc && game.local.alive) drawPrompt(ctx, game.nearNpc.x, game.nearNpc.y - 84, 'E  말 걸기');
+    if (game.nearNote && !game.noteOpen && game.local.alive) drawPrompt(ctx, level.note.x, level.note.y - 40, 'E  쪽지');
     if (game.nearBalloon >= 0 && game.local.alive) { const b = level.decor[game.nearBalloon]; drawPrompt(ctx, b.x, b.y - 46, 'E  터뜨리기'); }
     if (game.nearPuzzle >= 0 && game.puzzleOpen < 0 && game.local.alive) {
       const k = game.keys[game.nearPuzzle];
-      drawPrompt(ctx, k.x, k.y - (mkind === 'games' ? 92 : 58), mkind === 'games' ? 'E  게임' : 'E  퍼즐');
+      drawPrompt(ctx, k.x, k.y - (arcade ? 92 : 58), arcade ? 'E  게임' : 'E  퍼즐');
     }
     const near = game.nearLocker;
     if (near >= 0 && game.local.alive && !game.local.hidden) {
@@ -413,6 +425,20 @@ export class Renderer {
           gr.addColorStop(0, `rgba(255,40,30,${0.5 * (1 - u)})`); gr.addColorStop(1, 'rgba(255,40,30,0)');
           ctx.fillStyle = gr; ctx.fillRect(f.x - 70, f.y - 90, 140, 140);
         }
+      } else if (f.kind === 'firework') {
+        // 폭죽: 터질 때마다 색색의 불꽃이 튄다
+        const rng = mulberry32(Math.floor(f.t * 4) * 97 + Math.round(f.x));
+        ctx.globalCompositeOperation = 'lighter';
+        const gr = ctx.createRadialGradient(f.x, f.y - 10, 0, f.x, f.y - 10, 90);
+        gr.addColorStop(0, `rgba(255,200,120,${0.45 * (1 - u)})`); gr.addColorStop(1, 'rgba(255,200,120,0)');
+        ctx.fillStyle = gr; ctx.fillRect(f.x - 90, f.y - 100, 180, 180);
+        const COL = ['255,90,80', '255,220,90', '120,220,255', '160,255,120', '255,140,220'];
+        for (let i = 0; i < 18; i++) {
+          const a = rng() * Math.PI * 2, d = ((f.t * 4) % 1) * (20 + rng() * 40);
+          ctx.fillStyle = `rgba(${COL[i % 5]},${1 - ((f.t * 4) % 1)})`;
+          ctx.fillRect(Math.round(f.x + Math.cos(a) * d), Math.round(f.y - 14 + Math.sin(a) * d), 3, 3);
+        }
+        ctx.globalCompositeOperation = 'source-over';
       } else if (f.kind === 'spray') {
         ctx.fillStyle = `rgba(200,220,170,${0.55 * (1 - u)})`;
         for (let i = 0; i < 26; i++) {
@@ -481,10 +507,6 @@ export class Renderer {
         ctx.font = `${Math.round(Math.min(W, H) * 0.035)}px VT323, monospace`;
         ctx.fillStyle = `rgba(160,146,80,${ta * Math.min(1, Math.max(0, (t - 1.4) / 0.5))})`;
         ctx.fillText(name, W / 2, H * 0.52);
-        // 미션
-        ctx.font = `${Math.round(Math.min(W, H) * 0.03)}px VT323, monospace`;
-        ctx.fillStyle = `rgba(240,220,140,${ta * Math.min(1, Math.max(0, (t - 1.9) / 0.5))})`;
-        ctx.fillText(missionGoal(levelInfo(game.levelIndex).mission || { type: 'keys', count: 5 }), W / 2, H * 0.59);
       }
     } else if (c.type === 'awake') {
       const k = Math.sin(Math.min(1, t / c.dur) * Math.PI);
@@ -641,6 +663,21 @@ export class Renderer {
     }
   }
 
+  /** 노클립 존: 벽이 지직거리며 색이 어긋나는 구멍. 어둠 위에 그려서 멀리서도 보인다 */
+  drawNoclipZone(ctx, game) {
+    const e = game.level.exitIdx, w = game.map.w, x = (e % w) * TS, y = ((e / w) | 0) * TS, t = game.time;
+    if (!game.explored[e] && Math.hypot(x - game.local.x, y - game.local.y) > TS * 14) return;
+    const gr = ctx.createRadialGradient(x + TS / 2, y + TS / 2, 0, x + TS / 2, y + TS / 2, TS * 3);
+    gr.addColorStop(0, `rgba(200,240,255,${0.35 + Math.sin(t * 6) * 0.1})`); gr.addColorStop(1, 'rgba(200,240,255,0)');
+    ctx.fillStyle = gr; ctx.fillRect(x - TS * 2.5, y - TS * 2.5, TS * 6, TS * 6);
+    const rng = mulberry32(Math.floor(t * 12));
+    for (let i = 0; i < 26; i++) {                     // 어긋난 색 조각 (RGB 갈라짐)
+      const bx = x + rng() * TS, by = y + rng() * TS, bw = 3 + rng() * 18, bh = 2 + rng() * 6;
+      ctx.fillStyle = ['rgba(255,40,80,0.8)', 'rgba(40,255,200,0.8)', 'rgba(80,120,255,0.8)', 'rgba(255,255,255,0.9)', 'rgba(0,0,0,0.9)'][i % 5];
+      ctx.fillRect(Math.round(bx - bw / 2 + (rng() - 0.5) * 10), Math.round(by), Math.round(bw), Math.round(bh));
+    }
+  }
+
   drawJumpscare(game) {
     const { ctx, W, H } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -657,9 +694,26 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'overlay';
     ctx.globalAlpha = 0.12;
-    ctx.fillStyle = { lobby: '#ffd25a', concrete: '#d8d0b0', pipes: '#d8904a', electrical: '#8aa0d8', fun: '#ff9a6a', run: '#ff3a2a', suburbs: '#5a7ad0', wheat: '#ffc860', pool: '#9ae0ff', school: '#c8e0b0', office: '#c8d0e0', motion: '#ffe0a0', courtyard: '#e0d0a0', kitty: '#ffb0d0' }[game.level?.info?.theme] || '#ffd25a';
+    ctx.fillStyle = { lobby: '#ffd25a', concrete: '#d8d0b0', pipes: '#d8904a', electrical: '#8aa0d8', fun: '#ff9a6a', run: '#ff3a2a', suburbs: '#5a7ad0', wheat: '#ffc860', pool: '#9ae0ff', school: '#c8e0b0', office: '#c8d0e0', motion: '#ffe0a0', courtyard: '#e0d0a0', kitty: '#ffb0d0',
+      boiler: '#ff8a4a', flooded: '#6aa0d8', cave: '#c89a6a', harvest: '#ff8a3a', city: '#a0a8c0', apartment: '#d8d090', white: '#f0f4ff', arcade: '#c070ff', parking: '#b0c0d0' }[game.level?.info?.theme] || '#ffd25a';
     ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'source-over';
+    // 야간 투시경: 초록 단색 + 지글거림 (끝나기 3초 전부터 깜빡)
+    if (game.nightVisionT > 0 && (game.nightVisionT > 3 || Math.floor(game.time * 6) % 2)) {
+      ctx.globalCompositeOperation = 'saturation'; ctx.globalAlpha = 1;
+      ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = '#58ff70'; ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    // 덜러 근처: 색이 바래 회색이 된다
+    if (game.dull > 0.02 || game.dullFlash > 0) {
+      ctx.globalCompositeOperation = 'saturation';
+      ctx.globalAlpha = Math.min(0.95, Math.max(game.dull || 0, game.dullFlash || 0));
+      ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (game.dullFlash > 0) { ctx.globalAlpha = game.dullFlash * 0.5; ctx.fillStyle = '#d8d8d8'; ctx.fillRect(0, 0, W, H); }   // 덜러에 닿은 회색 섬광
     ctx.globalAlpha = 1;
     ctx.fillStyle = this.vignette; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 0.06; ctx.fillStyle = this.scanPattern; ctx.fillRect(0, 0, W, H);

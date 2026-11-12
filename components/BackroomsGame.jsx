@@ -6,6 +6,7 @@ import ValvePanel from './ValvePanel.jsx';
 import ChatBox from './ChatBox.jsx';
 import { VoiceSettings, KeySettings } from './SettingsPanels.jsx';
 import { keyLabel } from '../game/client/input.js';
+import { LEVELS } from '../shared/config.js';
 
 const store = {
   get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
@@ -462,12 +463,14 @@ function PauseMenu({ solo, settings, onSettings, onResume, onLeave, engine }) {
           <button className="menu-btn big" onClick={onResume}>▶ 계속하기</button>
           <button className="menu-btn" onClick={() => setScreen('settings')}>설정</button>
           <button className="menu-btn" onClick={() => setScreen('controls')}>조작법</button>
+          <button className="menu-btn" onClick={() => setScreen('bestiary')}>괴물 도감</button>
           <button className="menu-btn" onClick={() => setScreen('confirm')}>메인 메뉴로 나가기</button>
           <p className="dim">ESC 로 닫기</p>
         </nav>
       )}
       {screen === 'settings' && <SettingsForm settings={settings} onSettings={onSettings} onBack={() => setScreen('main')} engine={engine} />}
       {screen === 'controls' && <ControlsText onBack={() => setScreen('main')} engine={engine} />}
+      {screen === 'bestiary' && <Bestiary onBack={() => setScreen('main')} />}
       {screen === 'confirm' && (
         <nav className="menu-list">
           <p>정말 나갈까? {solo ? '지금까지의 진행이 사라진다.' : '동료들은 남아서 계속 플레이한다.'}</p>
@@ -586,12 +589,17 @@ function RoundEndPanel({ escaped = [], dead = [], endAt, nextLevelName = null, o
 const ENTITY_BUTTONS = [['wanderer', '방랑자'], ['howler', '하울러'], ['smiler', '스마일러'], ['skinStealer', '스킨 스틸러'], ['hound', '하운드'],
   ['partygoer', '파티고어'], ['deathmoth', '데스모스'], ['wretch', '광인'], ['scratcher', '스크래처'],
   ['windows', '창문들'], ['watch', '동네 감시자'], ['faceling', '페이슬링'], ['clump', '클럼프'], ['animation', '애니메이션'],
-  ['animatedKing', '애니메이션 킹'], ['aranea', '아라네아 멤브리'], ['kitty', '키티'], ['partyPooper', '파티 푸퍼']];
-const LEVEL_NAMES = ['0 Lobby', '1 Habitable', '2 Pipes', '3 Electrical', '4 Office', 'Fun =)', '5 Hotel', '6 Lights Out', '9 Suburbs', '10 Wheat',
-  '37 Pool', '52 School', '94 Motion', '188 Courtyard', '974 Kitty', '! Run', 'END'];
-const ITEM_BUTTONS = [['almondWater', '아몬드 워터'], ['staminaDrink', '스테미너 드링크'], ['camera', '카메라'], ['bugSpray', '살충제'], ['flare', '조명탄'], ['compass', '나침반']];
+  ['animatedKing', '애니메이션 킹'], ['aranea', '아라네아 멤브리'], ['kitty', '키티'], ['partyPooper', '파티 푸퍼'],
+  ['beast', '레벨 5의 야수'], ['seaThing', '레벨 7의 무언가'], ['crawler', '크롤러'], ['deathrat', '죽음쥐'], ['jackLantern', '잭-오-랜턴'],
+  ['camoCrawler', '위장 크롤러'], ['duller', '덜러'], ['sheet', '시츠']];
+const LEVEL_NAMES = LEVELS.map(L => `${L.label ?? L.id} ${L.name}`);   // 테스트 패널 레벨 버튼
+const ITEM_BUTTONS = [['almondWater', '아몬드 워터'], ['staminaDrink', '스테미너 드링크'], ['camera', '카메라'], ['bugSpray', '살충제'], ['flare', '조명탄'], ['compass', '나침반'],
+  ['firecracker', '폭죽'], ['nightVision', '야간 투시경'], ['adrenaline', '아드레날린']];
+
+const TEST_TABS = [['level', '레벨'], ['entity', '괴물'], ['item', '아이템'], ['player', '플레이어'], ['mission', '진행']];
 
 function TestPanel({ onCmd, onClose }) {
+  const [tab, setTab] = useState('level');
   const B = ({ cmd, arg, children }) => (
     <button onMouseDown={e => e.preventDefault()} onClick={() => onCmd(cmd, arg)}>{children}</button>
   );
@@ -601,35 +609,39 @@ function TestPanel({ onCmd, onClose }) {
         <span>TEST MODE</span>
         <button onMouseDown={e => e.preventDefault()} onClick={onClose}>닫기 [`]</button>
       </div>
-      <h3>레벨</h3>
-      <div className="tp-row">
-        <B cmd="nextLevel">다음 레벨 ▶</B>
-        {LEVEL_NAMES.map((n, i) => <B key={i} cmd="setLevel" arg={i}>{n}</B>)}
+      <div className="tp-tabs">
+        {TEST_TABS.map(([k, n]) => (
+          <button key={k} className={tab === k ? 'on' : undefined} onMouseDown={e => e.preventDefault()} onClick={() => setTab(k)}>{n}</button>
+        ))}
       </div>
-      <h3>진행</h3>
-      <div className="tp-row">
-        <B cmd="giveKey">미션 +1</B>
-        <B cmd="unlockExit">출구 열기</B>
-        <B cmd="tpKey">목표로 이동</B>
-        <B cmd="tpPuzzle">퍼즐로 이동</B>
-        <B cmd="tpExit">출구로 이동</B>
-      </div>
-      <h3>아이템 소환</h3>
-      <div className="tp-row">
-        {ITEM_BUTTONS.map(([t, n]) => <B key={t} cmd="spawnItem" arg={t}>{n}</B>)}
-      </div>
-      <h3>엔티티 소환 (3~5칸 거리)</h3>
-      <div className="tp-row">
-        {ENTITY_BUTTONS.map(([t, n]) => <B key={t} cmd="spawnEntity" arg={t}>{n}</B>)}
-        <B cmd="clearEntities">전부 제거</B>
-      </div>
-      <h3>플레이어 / 화면</h3>
-      <div className="tp-row">
-        <B cmd="god">무적 ON/OFF</B>
-        <B cmd="revive">부활</B>
-        <B cmd="drainSanity">정신력 -30</B>
-        <B cmd="fullbright">밝게 ON/OFF</B>
-        <B cmd="revealMap">미니맵 공개</B>
+      <div className="tp-body">
+        {tab === 'level' && <div className="tp-grid">
+          <B cmd="nextLevel">다음 레벨 ▶</B>
+          {LEVEL_NAMES.map((n, i) => <B key={i} cmd="setLevel" arg={i}>{n}</B>)}
+        </div>}
+        {tab === 'entity' && <div className="tp-grid">
+          {ENTITY_BUTTONS.map(([t, n]) => <B key={t} cmd="spawnEntity" arg={t}>{n}</B>)}
+          <B cmd="clearEntities">전부 제거</B>
+        </div>}
+        {tab === 'item' && <div className="tp-grid">
+          {ITEM_BUTTONS.map(([t, n]) => <B key={t} cmd="spawnItem" arg={t}>{n}</B>)}
+        </div>}
+        {tab === 'player' && <div className="tp-grid">
+          <B cmd="addSanity" arg={30}>정신력 +30</B>
+          <B cmd="addSanity" arg={-30}>정신력 -30</B>
+          <B cmd="addSanity" arg={100}>정신력 가득</B>
+          <B cmd="god">무적 ON/OFF</B>
+          <B cmd="revive">부활</B>
+          <B cmd="fullbright">밝게 ON/OFF</B>
+          <B cmd="revealMap">미니맵 공개</B>
+        </div>}
+        {tab === 'mission' && <div className="tp-grid">
+          <B cmd="giveKey">미션 +1</B>
+          <B cmd="unlockExit">출구 열기</B>
+          <B cmd="tpKey">목표로 이동</B>
+          <B cmd="tpPuzzle">퍼즐로 이동</B>
+          <B cmd="tpExit">출구로 이동</B>
+        </div>}
       </div>
     </div>
   );

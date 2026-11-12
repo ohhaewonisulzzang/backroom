@@ -1,4 +1,4 @@
-import { CONFIG, TS, T } from '../../shared/config.js';
+import { CONFIG, TS, T, ITEM_TYPES } from '../../shared/config.js';
 import { moveEntity } from '../../shared/physics.js';
 import { Input } from './input.js';
 import { Sound } from './sound.js';
@@ -32,7 +32,9 @@ export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   }
 
   const slow = map.get(Math.floor(p.x / TS), Math.floor(p.y / TS)) === T.SLOW ? CONFIG.RUN.SLOW : 1;   // 웅덩이/잔해
-  const speed = (p.crouching ? C.CROUCH : p.sprinting ? C.SPRINT : C.WALK) * slow;
+  if (p.adrenalineT > 0) p.adrenalineT -= dt;
+  const rush = p.adrenalineT > 0 ? ITEM_TYPES.adrenaline.speed : 1;            // 아드레날린 주사 효과 중
+  const speed = (p.crouching ? C.CROUCH : p.sprinting ? C.SPRINT : C.WALK) * slow * rush;
   const bx = p.x, by = p.y;
   moveEntity(p, ix * speed * dt, iy * speed * dt, C.RADIUS, map);
   const moved = Math.hypot(p.x - bx, p.y - by);

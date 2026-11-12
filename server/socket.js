@@ -22,6 +22,7 @@ const sanitizeCode = v => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''
  *  turnValve  {index, delta}   → 밸브/크랭크를 시계 방향으로 delta(라디안) 만큼 돌림
  *  interact   {mid}           → NPC(파티 푸퍼)에게 말 걸기
  *  popBalloon {index}         → Level Fun 풍선 터뜨리기
+ *  noclip                     → 끝없는 도시: 노클립 존에서 E (다음 레벨로)
  *  chat       {text}          → 채팅 (같은 방 모두에게)
  *  speaking   {on}            → 보이스 챗으로 말하는 중 (소리 듣는 엔티티가 듣는다)
  *  voiceState {vc}            → 보이스 챗 상태 0 안 씀 / 1 마이크 켜짐 / 2 음소거 (이름표 옆 아이콘)
@@ -104,6 +105,7 @@ export function attachGameServer(io, { testMode = false } = {}) {
     on('turnValve', data => room?.onTurnValve(socket.id, data));
     on('interact', data => room?.onInteract(socket.id, data));
     on('popBalloon', data => room?.onPopBalloon(socket.id, data));
+    on('noclip', () => room?.onNoclip(socket.id));
     on('chat', data => room?.onChat(socket.id, data));
     on('speaking', data => room?.onSpeaking(socket.id, data));
     on('voiceState', data => room?.onVoiceState(socket.id, data));

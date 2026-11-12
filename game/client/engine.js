@@ -128,6 +128,7 @@ const Game = {
     this.exitUnlocked = d.exitUnlocked;
     this.obj = d.obj || null;
     this.night = d.night || null; this.toxicT = 0;
+    this.blackout = d.blackout || null; this.blackoutK = this.blackout === 'dark' ? 1 : 0;   // 정전 레벨: 단계 / 화면 어둠 정도(0~1)
     this.popped = new Set(d.popped || []);
 
     this.remotes = new Map();
@@ -144,7 +145,9 @@ const Game = {
     this.monsters = (d.monsters || []).map(s => { const m = new ClientMonster(); m.reset(s); return m; });
     this.items = (d.items || []).map(it => ({ ...it }));
     this.flares = (d.flares || []).map(f => ({ ...f, until: this.time + Math.max(0, (f.until - Date.now()) / 1000), dur: 30 }));
-    this.fx = []; this.compassT = 0; this.flashT = 0; this.emoteOpen = false;
+    this.fx = []; this.compassT = 0; this.flashT = 0; this.emoteOpen = false; this.nightVisionT = 0;
+    this.noteOpen = false; this.noteRead = false; this.nearNote = false;
+    if (this.local) { this.local.adrenalineT = 0; this.local.boostT = 0; }
     this.gore = []; this.hallu = []; this.halluT = 0;
     this.horde = d.horde ? { x: d.horde.x, tx: d.horde.x, speed: d.horde.speed, roarT: 2 } : null;
     if (this.levelIndex === 0) this.totalTime = 0;
@@ -229,6 +232,8 @@ const Game = {
     this.shake = Math.max(0, this.shake - dt * 14);
     this.lockMsgT -= dt; this.alertMsgT -= dt;
     if (!this.settings.shake) this.shake = 0;
+    // 레벨 배경 음악 (Level Fun): 게임 화면에 있을 때만, 레벨이 바뀌면 멈춘다
+    Sound.syncBgm(this.phase === 'game' && this.level?.info?.bgm ? this.level.info.bgm : null);
     // 영상(오프닝/엔딩) 건너뛰기: 건너뛰기 키를 1초 동안 꾹 누른다
     const skippable = this.cine && ((this.cine.type === 'story' && this.cine.t > 1) || (this.cine.type === 'ending' && this.cine.t > 3));
     if (skippable && Input.held('skip') && !this.chatOpen) { this.skipHold += dt; if (this.skipHold >= 1) { this.skipHold = 0; this.skipCine(); } }
@@ -248,10 +253,20 @@ const Game = {
       const G = pl.gesture;
       if (G && ((G.t += dt) > GESTURES[G.g].dur || (pl.moving && G.t > 0.15) || pl.hidden || !pl.alive)) pl.gesture = null;
     }
+    // 스킨 스틸러의 흉내 동작: 시간이 다 되거나 정체를 드러내면 풀린다
+    for (const m of this.monsters) if (m.gesture && ((m.gesture.t += dt) > GESTURES[m.gesture.g].dur || m.revealed || m.state !== 'speak')) m.gesture = null;
     for (const f of this.fx) f.t += dt;
     this.fx = this.fx.filter(f => f.t < f.dur);
     this.flares = this.flares.filter(f => f.until > this.time);
     if (this.compassT > 0) this.compassT -= dt;
+    if (this.nightVisionT > 0) this.nightVisionT -= dt;
+    // 정전 어둠: 경고 중엔 지직거리며 깜빡, 정전이면 빠르게 꺼지고, 불이 들어오면 서서히 밝아진다
+    if (this.blackout) {
+      const want = this.blackout === 'dark' ? 1 : this.blackout === 'warn' ? (Math.random() < 0.25 ? 0.85 : 0) : 0;
+      this.blackoutK += (want - this.blackoutK) * Math.min(1, dt * (want > this.blackoutK ? 14 : 3));
+      if (this.blackout === 'warn' && Math.random() < dt * 6) Sound.flickerTick(0.6);
+    }
+    if (this.dullFlash > 0) this.dullFlash = Math.max(0, this.dullFlash - dt * 0.8);
     if (this.flashT > 0) this.flashT -= dt;
 
     if (this.deathT > 0) {
@@ -313,6 +328,18 @@ const Game = {
       }
       if (this.nearNpc || this.nearBalloon >= 0) this.nearLocker = -1;
     }
+    // 시작 지점 쪽지 (사물함보다 우선). 멀어지면 저절로 닫힌다
+    const nt = this.level.note;
+    this.nearNote = !!nt && p.alive && !p.hidden && this.roundPhase === 'playing' && Math.hypot(nt.x - p.x, nt.y - p.y) < 44;
+    if (this.nearNote) this.nearLocker = -1;
+    if (this.noteOpen && (!nt || !p.alive || Math.hypot(nt.x - p.x, nt.y - p.y) > 90)) this.noteOpen = false;
+    // 끝없는 도시: 노클립 존 앞이면 E 로 빠진다 (가장 우선)
+    this.nearNoclip = false;
+    if (this.level.mission.type === 'noclip' && p.alive && !p.hidden && this.roundPhase === 'playing') {
+      const e = this.level.exitIdx, w = this.map.w;
+      this.nearNoclip = Math.hypot((e % w) * TS + TS / 2 - p.x, ((e / w) | 0) * TS + TS / 2 - p.y) < CONFIG.CITY.NOCLIP_DIST;
+      if (this.nearNoclip) this.nearLocker = -1;
+    }
     if (this.valveOpen >= 0 && (!p.alive || p.hidden || this.roundPhase !== 'playing' || (O?.prog?.[this.valveOpen] || 0) >= 1 ||
       Math.hypot(this.level.stations[this.valveOpen].x - p.x, this.level.stations[this.valveOpen].y - p.y) > MISSION.STATION_DIST * 1.5)) this.closeValve();
     const intro = (this.cine?.type === 'intro' && this.cine.t < 3.4) || this.cine?.type === 'story';
@@ -342,10 +369,13 @@ const Game = {
       this.loudT = 0.4;
       const v0 = this.viewTarget();
       for (const m of this.monsters) {
-        if (!m.moving && m.type !== 'faceling') continue;
+        if (!m.moving && m.type !== 'faceling' && m.type !== 'sheet') continue;
         const near = clamp(1 - Math.hypot(m.x - v0.x, m.y - v0.y) / (TS * 14), 0, 1);
         if (near <= 0) continue;
-        if (m.type === 'watch' || m.type === 'clump') { if (Math.random() < 0.6) Sound.stomp(near * (m.type === 'watch' ? 1 : 0.6)); }
+        if (m.type === 'watch' || m.type === 'clump' || m.type === 'beast') { if (Math.random() < 0.6) Sound.stomp(near * (m.type === 'watch' ? 1 : m.type === 'beast' ? (m.state === 'charge' ? 1.2 : 0.7) : 0.6)); }
+        else if (m.type === 'seaThing' && m.state === 'hunt') Sound.splash(near);
+        else if (m.type === 'deathrat' && m.state === 'chase') Sound.skitter(near * 0.6);
+        else if (m.type === 'sheet' && m.state === 'haunt' && Math.random() < 0.25) Sound.moan(near * 0.6);
         else if (m.type === 'aranea' && m.state === 'chase') Sound.skitter(near);
         else if (m.type === 'faceling') Sound.chainsaw(near * (m.state === 'chase' ? 1 : 0.5));
       }
@@ -368,6 +398,10 @@ const Game = {
       if (d < md) { md = d; mon = m; }
     }
     this.monster = mon;
+    // 덜러: 가까이 있으면 세상의 색이 바랜다 (서버는 정신력을 더 빨리 깎는다)
+    let dull = 0;
+    for (const m of this.monsters) if (m.type === 'duller') dull = Math.max(dull, 1 - Math.hypot(m.x - view.x, m.y - view.y) / CONFIG.ENTITY.duller.aura);
+    this.dull = (this.dull || 0) + (clamp(dull, 0, 1) - (this.dull || 0)) * Math.min(1, dt * 3);
     let prox = mon && view.alive ? clamp(1 - md / (TS * 8), 0, 1) : 0;
     if (H && view.alive) {
       const hp = clamp(1 - (view.x - H.x) / (TS * 10), 0, 1);
@@ -629,6 +663,13 @@ const handlers = {
     Game.fx.push({ kind: 'pop', x, y, t: 0, dur: 0.7 });
     if (item && by === Game.myId) { Sound.unlock(); UI.notify?.(`풍선 속에서 ${ITEM_TYPES[item]?.name ?? '아이템'} 이(가) 떨어졌다!`); }
   },
+  /** Level P-1: 정전 예고(깜빡임) / 정전 / 불 들어옴 */
+  onBlackout({ phase }) {
+    Game.blackout = phase;
+    if (phase === 'warn') { Sound.flickerTick(1); Sound.flickerTick(0.8); UI.notify?.('불이 깜빡인다 — 빨간 비상등 아래로 뛰어라!'); }
+    else if (phase === 'dark') { Sound.thud(1.2); Sound.staticBurst(0.5, 0.6); Game.shake = Math.max(Game.shake, 5); }
+    else { Sound.tone?.(120, 240, 0.6, 0.08, 'sawtooth'); UI.notify?.('불이 들어왔다'); }
+  },
   /** Level 94: 밤 예고 / 밤 / 낮 */
   onNight({ phase }) {
     Game.night = phase;
@@ -684,8 +725,12 @@ const handlers = {
         if (m) m.bubble = { text: e.text, t: 2.5 };
         if (near > 0) Sound.voice(e.text, near);
         break;
+      case 'emote':       // 스킨 스틸러가 플레이어처럼 감정 표현 + 동작을 한다
+        if (m) { m.bubble = { text: e.text, t: 2.6 }; if (GESTURES[e.g]) m.gesture = { g: e.g, t: 0 }; }
+        if (near > 0) { Sound.speak(e.text, near); if (e.g?.startsWith('dance')) Sound.danceTune(near, e.g === 'dance2'); }
+        break;
       case 'reveal':
-        if (m) m.revealed = true;
+        if (m) { m.revealed = true; m.gesture = null; }
         Sound.reveal(Math.max(0.2, near));
         if (near > 0.4) Game.shake = Math.max(Game.shake, 10);
         break;
@@ -707,6 +752,30 @@ const handlers = {
         break;
       case 'teleport':
         if (near > 0) Sound.warp(Math.max(0.3, near));
+        break;
+      case 'mimic':       // 엔티티가 보이스 챗에서 녹음한 목소리를 흉내 낸다
+        if (near > 0 && view) Voice.playMimic(near, clamp((e.x - view.x) / (TS * 6), -1, 1));
+        break;
+      case 'roar':        // 레벨 5의 야수: 돌진 직전 포효
+        if (near > 0) { Sound.roar(Math.max(0.3, near)); Game.shake = Math.max(Game.shake, 6 * near); }
+        break;
+      case 'slam':        // 야수가 벽에 박았다
+        if (near > 0) { Sound.thud(1.3 * near); Sound.crunch(near, 0.05); Game.shake = Math.max(Game.shake, 12 * near); }
+        break;
+      case 'dive':        // 레벨 7의 무언가가 다른 물웅덩이 밑으로 옮겨 왔다
+        if (near > 0) Sound.splash(Math.max(0.4, near), true);
+        break;
+      case 'screech':     // 크롤러가 천장에서 떨어진다
+        if (near > 0) { Sound.screech(Math.max(0.3, near)); Game.shake = Math.max(Game.shake, 8 * near); }
+        break;
+      case 'squeak':      // 죽음쥐가 손전등에 흩어진다
+        if (near > 0) Sound.squeak(near);
+        break;
+      case 'cackle':      // 잭-오-랜턴이 불빛을 발견
+        if (near > 0) Sound.giggle(Math.max(0.4, near));
+        break;
+      case 'wail':        // 시츠가 손전등에 물러난다
+        if (near > 0) Sound.moan(near, true);
         break;
       case 'poof':        // 안내를 마친 파티 푸퍼가 사라진다
         Game.fx.push({ kind: 'poof', x: e.x, y: e.y, t: 0, dur: 0.8 });
@@ -770,11 +839,32 @@ const handlers = {
         Game.fx.push({ kind: 'spray', x: fx.x, y: fx.y, angle: fx.angle, t: 0, dur: 0.9 });
         if (near > 0 || mine) Sound.spray(mine ? 1 : near);
         break;
+      case 'firecracker':      // 앞쪽에 날아가 터진다 (소리로 엔티티 유인)
+        if (fx.at) {
+          Game.fx.push({ kind: 'firework', x: fx.at.x, y: fx.at.y, t: 0, dur: ITEM_TYPES.firecracker.dur });
+          const v = view ? clamp(1 - Math.hypot(fx.at.x - view.x, fx.at.y - view.y) / (TS * 14), 0, 1) : 0;
+          if (v > 0) for (let i = 0; i < 8; i++) setTimeout(() => Sound.pop(v * (0.5 + Math.random() * 0.5)), 300 + i * 220 + Math.random() * 120);
+        }
+        break;
+      case 'nightVision':      // 어둠 속이 초록빛으로 보인다
+        if (mine) { Game.nightVisionT = ITEM_TYPES.nightVision.dur; Sound.click(); }
+        break;
+      case 'adrenaline':       // 잠깐 빨라지고 지치지 않는다
+        if (mine) { const p = Game.local; p.adrenalineT = ITEM_TYPES.adrenaline.dur; p.boostT = Math.max(p.boostT || 0, ITEM_TYPES.adrenaline.dur); p.stamina = CONFIG.PLAYER.STAMINA; p.exhausted = false; Sound.drink(); }
+        break;
       case 'flare':
         if (fx.flare) Game.flares.push({ id: fx.flare.id, x: fx.flare.x, y: fx.flare.y, until: Game.time + fx.flare.dur, dur: fx.flare.dur });
         if (near > 0 || mine) Sound.flare(mine ? 1 : near);
         break;
     }
+  },
+  /** 덜러에 닿음: 정신력 30% 감소 (죽지 않음). 내 화면만 회색 섬광 + 흔들림 */
+  onDullTouch({ id, sanity }) {
+    if (id !== Game.myId) return;
+    Game.local.sanity = sanity;
+    Game.dullFlash = 1; Game.shake = Math.max(Game.shake, 9);
+    Sound.death('duller');
+    Game.msg('덜러에게 닿았다 — 정신력을 빼앗겼다', 2);
   },
   onEmote({ id, i }) {
     const p = Game.playerById(id);
@@ -892,6 +982,9 @@ export function startGame({ canvas, ui }) {
     if (Game.puzzleOpen >= 0) { Game.closePuzzle(); return; }
     if (Game.valveOpen >= 0) { Game.closeValve(); return; }
     if (Game.local.hidden) net.hide(null);
+    else if (Game.nearNoclip) net.noclip();
+    else if (Game.noteOpen) Game.noteOpen = false;
+    else if (Game.nearNote && Game.nearPuzzle < 0 && Game.nearStation < 0) { Game.noteOpen = true; Game.noteRead = true; Sound.click(); }
     else if (Game.nearPuzzle >= 0) Game.openPuzzle(Game.nearPuzzle);
     else if (Game.nearStation >= 0) Game.openValve(Game.nearStation);
     else if (Game.nearNpc) net.interact(Game.nearNpc.id);
@@ -999,7 +1092,7 @@ export function startGame({ canvas, ui }) {
       net.disconnect();
       Input.dispose();
       renderer.dispose();
-      Sound.setDrone(0);
+      Sound.setDrone(0); Sound.stopBgm();
       Game.phase = 'menu';
       Game.local = null;
       Game.map = null;

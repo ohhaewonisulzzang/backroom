@@ -97,6 +97,92 @@ export const Sound = {
     this.tone(240, 120, 0.1, 0.05 * v, 'sawtooth');
     this.noise(4200, 0.14, 0.06 * v, 0.01);
   },
+  // ------------------------------------------------------------ 배경 음악 (Level Fun)
+  /**
+   * 레벨 배경 음악: 파일을 받아 무한 반복. 가끔(5~13초마다) 지지직 — 잡음, 끊김, 테이프 늘어짐, 먹먹해짐.
+   * syncBgm(url) 을 매 프레임 불러도 된다 (url 이 바뀔 때만 시작/정지).
+   */
+  bgm: null, bgmCache: new Map(),
+  syncBgm(url) {
+    if ((this.bgm?.url || null) === (url || null)) return;
+    this.stopBgm();
+    if (url && this.ctx) this.startBgm(url);
+  },
+  async startBgm(url) {
+    const c = this.ctx, B = this.bgm = { url, nodes: null, timer: null };
+    let buf = this.bgmCache.get(url);
+    if (!buf) {
+      try { buf = await c.decodeAudioData(await (await fetch(url)).arrayBuffer()); this.bgmCache.set(url, buf); }
+      catch { return; }                                      // 파일이 없거나 재생 불가 — 조용히 넘어감
+    }
+    if (this.bgm !== B) return;                              // 받는 사이에 레벨이 바뀜
+    // 반복 구간: 앞뒤의 무음(인코더가 붙이는 빈 소리 포함)은 건너뛰어 끝나자마자 바로 처음으로 이어지게
+    if (!buf.loopRange) {
+      const d = buf.getChannelData(0), th = 0.004;
+      let a = 0, b = d.length - 1;
+      while (a < b && Math.abs(d[a]) < th) a++;
+      while (b > a && Math.abs(d[b]) < th) b--;
+      buf.loopRange = [a / buf.sampleRate, (b + 1) / buf.sampleRate];
+    }
+    const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
+    [src.loopStart, src.loopEnd] = buf.loopRange;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 9000;
+    const crush = c.createGain(); crush.gain.value = 1;     // 끊김(드롭아웃)용
+    const out = c.createGain(); out.gain.value = 0;
+    src.connect(lp).connect(crush).connect(out).connect(this.master);
+    src.start(0, src.loopStart);
+    out.gain.setTargetAtTime(0.32, c.currentTime, 0.8);     // 서서히 들려온다
+    B.nodes = { src, lp, crush, out };
+    let next = c.currentTime + 4 + Math.random() * 5;
+    B.timer = setInterval(() => {
+      if (this.bgm !== B || c.currentTime < next) return;
+      next = c.currentTime + 5 + Math.random() * 8;
+      this.bgmGlitch(B);
+    }, 250);
+  },
+  /** 지지직: 여러 효과 중 하나 또는 둘을 섞는다 */
+  bgmGlitch(B) {
+    const c = this.ctx, t = c.currentTime, { src, lp, crush } = B.nodes;
+    const kinds = ['crackle', 'dropout', 'wobble', 'muffle', 'stutter'];
+    const pick = new Set([kinds[Math.floor(Math.random() * kinds.length)]]);
+    if (Math.random() < 0.4) pick.add(kinds[Math.floor(Math.random() * kinds.length)]);
+    const static_ = (at, dur, v) => { this.noise(2600 + Math.random() * 2400, dur, v, at); this.noise(500, dur, v * 0.5, at); };
+    if (pick.has('crackle')) {               // 지지직 잡음이 연달아
+      for (let i = 0; i < 8; i++) static_(Math.random() * 0.8, 0.03 + Math.random() * 0.08, 0.06 + Math.random() * 0.08);
+    }
+    if (pick.has('dropout')) {               // 소리가 뚝 끊겼다 돌아온다 + 잡음
+      const d = 0.15 + Math.random() * 0.5;
+      crush.gain.setValueAtTime(1, t); crush.gain.setValueAtTime(0.03, t + 0.02); crush.gain.setValueAtTime(1, t + d);
+      static_(0, d, 0.1);
+    }
+    if (pick.has('wobble')) {                // 테이프가 늘어지듯 음이 축 처졌다 돌아온다
+      src.playbackRate.cancelScheduledValues(t);
+      src.playbackRate.setValueAtTime(1, t);
+      src.playbackRate.linearRampToValueAtTime(0.78 + Math.random() * 0.1, t + 0.35);
+      src.playbackRate.linearRampToValueAtTime(1, t + 0.9);
+    }
+    if (pick.has('muffle')) {                // 벽 너머처럼 먹먹해졌다 돌아온다
+      lp.frequency.cancelScheduledValues(t);
+      lp.frequency.setValueAtTime(9000, t); lp.frequency.exponentialRampToValueAtTime(450, t + 0.3);
+      lp.frequency.setValueAtTime(450, t + 1.4); lp.frequency.exponentialRampToValueAtTime(9000, t + 2);
+    }
+    if (pick.has('stutter')) {               // 버벅임: 짧게 여러 번 끊긴다
+      for (let i = 0; i < 6; i++) { const a = t + i * 0.09; crush.gain.setValueAtTime(0.05, a); crush.gain.setValueAtTime(1, a + 0.045); }
+      static_(0, 0.5, 0.05);
+    }
+  },
+  stopBgm() {
+    const B = this.bgm;
+    this.bgm = null;
+    if (!B) return;
+    clearInterval(B.timer);
+    if (B.nodes) {
+      const t = this.ctx.currentTime;
+      B.nodes.out.gain.setTargetAtTime(0, t, 0.3);
+      try { B.nodes.src.stop(t + 1.5); } catch { /* 이미 멈춤 */ }
+    }
+  },
+
   setDrone(v) { if (this.ctx) this.droneGain.gain.setTargetAtTime(v * 0.25, this.ctx.currentTime, 0.25); },
 
   noise(freq, dur, vol, when = 0) {
@@ -187,6 +273,13 @@ export const Sound = {
     else if (type === 'hydrolitis') { this.heartbeat(0.5); this.heartbeat(0.3); this.noise(300, 2.5, 0.12); }
     else if (type === 'watch' || type === 'aranea' || type === 'clump') { this.thud(1); this.crunch(1, 0.8); this.crunch(0.8, 1.1); }
     else if (type === 'kitty' || type === 'animation') { this.staticBurst(0.8, 1); this.crunch(1, 0.9); }
+    else if (type === 'beast') { this.roar(1); this.thud(1.4, 0.5); this.crunch(1, 0.8); this.crunch(1, 1.0); }
+    else if (type === 'seaThing') { this.splash(1, true); this.crunch(1, 0.6); this.noise(300, 1.5, 0.15, 0.8); }
+    else if (type === 'crawler' || type === 'camoCrawler') { this.screech(0.8); for (let i = 0; i < 4; i++) this.slash(1, 0.6 + i * 0.15); }
+    else if (type === 'deathrat') { for (let i = 0; i < 10; i++) this.squeak(0.6); for (let i = 0; i < 5; i++) this.crunch(0.5, 0.4 + i * 0.15); }
+    else if (type === 'jackLantern') { this.giggle(1); this.crunch(1, 0.7); }
+    else if (type === 'duller') { this.tone(220, 40, 2.4, 0.15, 'sine'); this.noise(200, 2.2, 0.1); }
+    else if (type === 'sheet') { this.moan(1.2, true); this.moan(1); this.tone(60, 30, 1.8, 0.2, 'sine', 0.6); }
   },
   // ---- Level ! 괴물 떼 ----
   hordeRoar(v) { this.tone(140 + Math.random() * 80, 60, 0.9, 0.12 * v, 'sawtooth'); this.noise(500, 0.8, 0.12 * v); if (Math.random() < 0.4) this.howl(v * 0.4); },
@@ -219,6 +312,14 @@ export const Sound = {
     else if (type === 'aranea') { for (let i = 0; i < 8; i++) this.noise(3000, 0.03, 0.15, i * 0.05); this.tone(800, 300, 0.4, 0.1, 'sawtooth'); }
     else if (type === 'animation') { this.tone(200, 120, 0.4, 0.15, 'square'); this.noise(800, 0.3, 0.15); }
     else if (type === 'animatedKing' || type === 'kitty' || type === 'clump') this.staticBurst(0.4, 0.5);
+    else if (type === 'beast') this.roar(1);
+    else if (type === 'seaThing') this.splash(1, true);
+    else if (type === 'crawler') this.screech(1);
+    else if (type === 'deathrat') this.squeak(1);
+    else if (type === 'jackLantern') this.giggle(1);
+    else if (type === 'camoCrawler') { this.screech(0.6); this.noise(800, 0.3, 0.2); }
+    else if (type === 'duller') this.tone(200, 160, 1.0, 0.1, 'sine');
+    else if (type === 'sheet') this.moan(1);
     else this.growl();
   },
   /** 춤출 때 나오는 짧은 칩튠 (약 5초). spin = 춤 2 */
@@ -242,6 +343,16 @@ export const Sound = {
   /** 동네 감시자 / 클럼프 발소리 (쿵), 아라네아 (다다닥) */
   stomp(v = 1) { this.noise(90, 0.25, 0.35 * v); this.tone(50, 35, 0.25, 0.15 * v, 'sine'); },
   skitter(v = 1) { for (let i = 0; i < 4; i++) this.noise(2600 + Math.random() * 1500, 0.025, 0.12 * v, i * 0.04); },
+  /** 레벨 5의 야수 포효 */
+  roar(v = 1) { this.tone(110, 55, 1.1, 0.28 * v, 'sawtooth'); this.tone(165, 70, 1.0, 0.14 * v, 'square', 0.05); this.noise(300, 1.0, 0.3 * v); },
+  /** 물 첨벙 (레벨 7의 무언가). big = 물속에서 솟구침 */
+  splash(v = 1, big = false) { this.noise(1800, big ? 0.6 : 0.18, (big ? 0.35 : 0.12) * v); this.noise(500, big ? 0.5 : 0.15, (big ? 0.25 : 0.08) * v, 0.03); },
+  /** 크롤러가 떨어지며 내는 비명 */
+  screech(v = 1) { this.tone(1600, 2600, 0.5, 0.12 * v, 'sawtooth'); this.tone(2200, 900, 0.4, 0.08 * v, 'square', 0.15); this.noise(5000, 0.5, 0.15 * v); },
+  /** 죽음쥐 찍찍 */
+  squeak(v = 1) { for (let i = 0; i < 4; i++) this.tone(2800 + Math.random() * 800, 3400, 0.05, 0.07 * v, 'square', i * 0.07); },
+  /** 시츠: 낮은 신음 / 물러날 때 높은 울음 */
+  moan(v = 1, high = false) { this.tone(high ? 520 : 180, high ? 260 : 140, high ? 0.7 : 1.2, 0.06 * v, 'sine'); this.tone(high ? 530 : 186, high ? 270 : 146, high ? 0.7 : 1.2, 0.04 * v, 'triangle'); },
   /** 키티 순간이동: 이상한 소리 */
   warp(v = 1) { this.tone(1200, 200, 0.6, 0.1 * v, 'sine'); this.tone(240, 1800, 0.6, 0.06 * v, 'triangle', 0.1); },
   /** Level 94: 밤 예고 종소리 */

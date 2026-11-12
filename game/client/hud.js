@@ -1,21 +1,58 @@
-import { CONFIG, TS, T, SUIT_HEX, MISSION, MISSION_TEXT, levelLabel, missionKind } from '../../shared/config.js';
+import { CONFIG, TS, T, SUIT_HEX, MISSION, MISSION_TEXT, levelLabel, levelInfo, missionKind, missionGoal } from '../../shared/config.js';
 import { itemIcon } from './sprites.js';
+import { BESTIARY, typesInLevel } from './bestiary.js';
 
 const fmtTime = t => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
 /**
  * 최소한의 HUD (글자는 최대한 줄였다):
- *  왼쪽 위  레벨 이름, 열쇠 아이콘, 스태미나 바
+ *  왼쪽 위  레벨 이름, 열쇠 아이콘, 뇌(정신력) 픽셀 게이지
+ *  맨 아래 가운데 스태미나 막대
  *  오른쪽 위 시간, (멀티일 때) 동료 색 점
  *  아래 가운데 인벤토리 1~4 칸, 나침반 화살표
  *  오른쪽 아래 미니맵
  */
+/**
+ * 픽셀 아이콘 게이지 (정신력 뇌): X 테두리, O 채움, H 반짝임, L 주름. 값만큼 아래에서부터 색이 차고, 나머지는 어둡게.
+ */
+const BRAIN = [
+  '....XXXXXX....',
+  '..XXOOHOOOXX..',
+  '.XOHOOLOOOLOX.',
+  'XOOOOLOOLOOOOX',
+  'XOLOOOOLOOOLOX',
+  'XOOLLOOOOLOOOX',
+  'XOOOOOLLOOOOX.',
+  '.XOOLOOOOLOX..',
+  '..XXOOOXXXX...',
+  '....XOOX......',
+  '.....XX.......',
+];
+function drawPixelGauge(ctx, rows, x, y, s, value, col, pop = 0) {
+  const h = rows.length, w = rows[0].length;
+  const sc = s * (1 + pop), ox = x - (w * (sc - s)) / 2, oy = y - (h * (sc - s)) / 2;   // pop: 가운데 기준으로 살짝 커진다 (심장 박동)
+  // 채울 수 있는 줄 범위 (테두리 제외 맨 위 ~ 맨 아래 내부 칸)
+  let top = h, bot = -1;
+  rows.forEach((r, j) => { if (/[OHL]/.test(r)) { top = Math.min(top, j); bot = Math.max(bot, j); } });
+  const level = bot + 1 - value * (bot - top + 1);   // 이 줄(실수)보다 아래가 차 있다
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (rows[j][i] !== '.') ctx.fillRect(Math.round(ox + i * sc + 2), Math.round(oy + j * sc + 2), Math.ceil(sc), Math.ceil(sc));   // 그림자
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    const c = rows[j][i];
+    if (c === '.') continue;
+    const filled = j + 1 > level + 0.001 && value > 0;
+    ctx.fillStyle = c === 'X' ? col.line : !filled ? col.empty : c === 'H' ? col.hi : c === 'L' ? col.fold : col.fill;
+    ctx.fillRect(Math.round(ox + i * sc), Math.round(oy + j * sc), Math.ceil(sc), Math.ceil(sc));
+  }
+}
+
 export class Hud {
   setMap(map) {
     this.map = map;
     this.minimap = document.createElement('canvas');
-    this.minimap.width = map.w * 2;
-    this.minimap.height = map.h * 2;
+    this.mmScale = map.h > 100 || map.w > 100 ? 1 : 2;     // 세로로 긴 도시 맵은 작게
+    this.minimap.width = map.w * this.mmScale;
+    this.minimap.height = map.h * this.mmScale;
     this.minimapT = 0;
   }
 
@@ -68,6 +105,14 @@ export class Hud {
     // 미션 (팀 공유): 열쇠 아이콘 / 부품·장치 개수 / 남은 시간
     if (!game.horde) this.drawMission(ctx, game);
     // Level 94: 밤 경고
+    // Level P-1 정전 경고
+    if (game.blackout === 'warn' || game.blackout === 'dark') {
+      ctx.textAlign = 'center'; ctx.font = '30px VT323, monospace';
+      const safe = game.level?.isSafe?.(Math.floor(p.x / TS), Math.floor(p.y / TS));
+      ctx.fillStyle = game.blackout === 'dark' ? `rgba(255,70,50,${0.7 + Math.sin(game.time * 8) * 0.3})` : 'rgba(255,230,140,0.95)';
+      ctx.fillText(game.blackout === 'dark' ? (safe ? '정전 — 비상등 밑에서 버텨라' : '정전! 빛으로 가라!') : '불이 깜빡인다 — 빨간 비상등 아래로!', W / 2, 64);
+      ctx.textAlign = 'left';
+    }
     if (game.night === 'warn' || game.night === 'night') {
       ctx.textAlign = 'center'; ctx.font = '30px VT323, monospace';
       ctx.fillStyle = game.night === 'night' ? `rgba(255,80,60,${0.7 + Math.sin(game.time * 6) * 0.3})` : 'rgba(255,220,120,0.95)';
@@ -81,25 +126,30 @@ export class Hud {
       ctx.fillRect(x + 5, y - 1.5, 13, 3); ctx.fillRect(x + 14, y + 1.5, 2, 4);
     }
 
-    // 스태미나 (아몬드 워터 효과 중엔 하늘색)
+    // 정신력 = 뇌 (픽셀 아이콘이 아래에서부터 차오른다), 스태미나 = 화면 아래 막대
     if (p.alive) {
-      const sw = 150, sx = 20, sy = 80;
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(sx, sy, sw, 7);
-      ctx.fillStyle = p.boostT > 0 ? '#9fd4e8' : p.exhausted ? '#7a2a1c' : '#b9a552';
-      ctx.fillRect(sx + 1, sy + 1, (sw - 2) * (p.stamina / CONFIG.PLAYER.STAMINA), 5);
-      // 정신력 (보라색). 낮으면 깜빡인다
+      const sta = Math.max(0, Math.min(1, p.stamina / CONFIG.PLAYER.STAMINA));
       const san = Math.max(0, Math.min(1, (p.sanity ?? CONFIG.SANITY.MAX) / CONFIG.SANITY.MAX));
-      const low = san * CONFIG.SANITY.MAX < CONFIG.SANITY.HALLUCINATE;
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(sx, sy + 11, sw, 7);
-      ctx.fillStyle = low && Math.floor(game.time * 4) % 2 ? '#e0508a' : '#9a6ad0';
-      ctx.fillRect(sx + 1, sy + 12, (sw - 2) * san, 5);
-      ctx.font = '14px VT323, monospace'; ctx.fillStyle = low ? '#e0508a' : 'rgba(154,106,208,0.8)';
-      ctx.fillText('정신력', sx + sw + 6, sy + 8);
+      const low = san * CONFIG.SANITY.MAX < CONFIG.SANITY.HALLUCINATE, blink = Math.floor(game.time * 4) % 2 === 0;
+      // 스태미나: 화면 맨 아래 가운데 막대. 줄어들 때 양쪽에서 가운데로 짧아진다
+      //   평소 노랑, 스테미너 드링크/아드레날린 중엔 하늘색, 지치면 어두운 빨강이 깜빡
+      const bw = Math.min(360, W * 0.5), bh = 6, bx = W / 2 - bw / 2, by = H - 11;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+      ctx.fillStyle = p.boostT > 0 ? '#9fd4e8' : p.exhausted ? (blink ? '#a03020' : '#5a1810') : sta < 0.25 ? '#e0803a' : '#e6c24e';
+      const fw = Math.round(bw * sta);
+      ctx.fillRect(Math.round(W / 2 - fw / 2), by, fw, bh);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(Math.round(W / 2 - fw / 2), by, fw, 2);
+      // 뇌: 정신력이 낮으면 깜빡인다
+      const brainCol = low && blink ? ['#e0508a', '#ff9ac0', '#a02860'] : ['#e89ab8', '#ffd0e0', '#b0607e'];
+      drawPixelGauge(ctx, BRAIN, 20, 79, 3, san, { fill: brainCol[0], hi: brainCol[1], fold: brainCol[2], line: '#140810', empty: '#2e1a26' },
+        low ? Math.sin(game.time * 20) * 0.03 : 0);
     }
     if (game.testMode && (game.test.god || game.test.fullbright)) {
       ctx.font = '16px VT323, monospace'; ctx.fillStyle = '#c87ad0';
-      ctx.fillText(`TEST${game.test.god ? ' 무적' : ''}${game.test.fullbright ? ' 밝게' : ''}`, 20, 104);
+      ctx.fillText(`TEST${game.test.god ? ' 무적' : ''}${game.test.fullbright ? ' 밝게' : ''}`, 20, 118);
     }
+
+    if (game.noteOpen) this.drawNote(ctx, game, W, H);
 
     // 시간 + (멀티) 동료 색 점
     ctx.textAlign = 'right';
@@ -139,26 +189,88 @@ export class Hud {
       ctx.fillText(m.text, W / 2, H - 150 - i * 22);
     });
 
-    // 미니맵 (탐색한 구역 + 동료 위치). 질주 레벨은 진행 막대로 대신
+    // 미니맵 (탐색한 구역 + 내 위치). 질주 레벨은 진행 막대로 대신
     if (game.horde) return;
     this.minimapT -= dt;
     if (this.minimapT <= 0) { this.renderMinimap(game); this.minimapT = 0.25; }
-    const s = 2, mw = this.minimap.width, mh = this.minimap.height, mx = W - mw - 16, my = H - mh - 16;
+    const s = this.mmScale, mw = this.minimap.width, mh = this.minimap.height, mx = W - mw - 16, my = H - mh - 16;
     ctx.globalAlpha = 0.85;
     ctx.drawImage(this.minimap, mx, my);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = '#4a4222'; ctx.lineWidth = 1;
     ctx.strokeRect(mx - 0.5, my - 0.5, mw + 1, mh + 1);
-    for (const pl of game.allPlayers()) {
-      if (!pl.alive) continue;
-      ctx.fillStyle = pl === p ? '#fff3c4' : (SUIT_HEX[pl.color] || pl.color);
-      ctx.fillRect(mx + (pl.x / TS) * s - 1.5, my + (pl.y / TS) * s - 1.5, 3, 3);
+    // 내 위치만 (관전 중이면 보고 있는 사람). 동료 위치는 보이지 않는다
+    const me = game.viewTarget();
+    if (me?.alive) {
+      ctx.fillStyle = '#fff3c4';
+      ctx.fillRect(mx + (me.x / TS) * s - 1.5, my + (me.y / TS) * s - 1.5, 3, 3);
     }
   }
+
+  /** 시작 지점 쪽지: 낡은 종이에 손글씨로 이 레벨에서 할 일 */
+  drawNote(ctx, game, W, H) {
+    const info = levelInfo(game.levelIndex ?? 0), goal = missionGoal(game.level.mission);
+    const pw = Math.min(480, W - 40), tw = pw - 56;
+    // 글자 단위 줄바꿈 (한글이라 공백이 적다)
+    const wrap = (text, font, indent = 0) => {
+      ctx.font = font;
+      const out = [];
+      let cur = '';
+      for (const ch of text) { if (ctx.measureText(cur + ch).width > tw - (out.length ? indent : 0)) { out.push(cur); cur = ch.trim() ? ch : ''; } else cur += ch; }
+      if (cur) out.push(cur);
+      return out;
+    };
+    // 1) 할 일  2) 이 레벨 괴물별 대처법 (괴물 도감의 대처법)
+    const F1 = '22px VT323, monospace', F2 = '19px VT323, monospace';
+    const rows = [];
+    for (const part of goal.split(' — ')) for (const l of wrap(part, F1)) rows.push({ text: l, font: F1, col: '#2a2016', h: 27 });
+    const over = info.tips || {};
+    const tips = typesInLevel(game.levelIndex ?? 0).map(t => BESTIARY.find(b => b.type === t)).filter(Boolean)
+      .map(b => (over[b.type] ? { ...b, counter: over[b.type] } : b));
+    if (tips.length) {
+      rows.push({ gap: 10 });
+      rows.push({ text: '살아남는 법', font: '22px VT323, monospace', col: '#8a1a10', h: 27 });
+      for (const b of tips) {
+        const ls = wrap(`${b.name} — ${b.counter}`, F2, 14);
+        ls.forEach((l, i) => rows.push({ text: l, font: F2, col: '#3a2c1a', h: 23, x: i ? 14 : 0, name: i ? null : b.name }));
+      }
+    }
+    const bodyH = rows.reduce((t, r) => t + (r.gap ?? r.h), 0);
+    const ph = 92 + bodyH, x = Math.round(W / 2 - pw / 2), y = Math.max(12, Math.round(H / 2 - ph / 2 - 30));
+    ctx.save();
+    ctx.translate(W / 2, y + ph / 2); ctx.rotate(-0.02); ctx.translate(-W / 2, -(y + ph / 2));
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x + 6, y + 8, pw, ph);
+    ctx.fillStyle = '#e8dfc2'; ctx.fillRect(x, y, pw, ph);
+    ctx.fillStyle = 'rgba(120,30,20,0.35)'; ctx.beginPath(); ctx.arc(x + pw - 46, y + ph - 30, 12, 0, Math.PI * 2); ctx.fill();               // 얼룩
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.font = '26px VT323, monospace'; ctx.fillStyle = '#4a3a22';
+    ctx.fillText(`${levelLabel(game.levelIndex ?? 0)} — ${info.name}`, x + 24, y + 18);
+    let yy = y + 58;
+    for (const r of rows) {
+      if (r.gap) { ctx.fillStyle = 'rgba(120,100,60,0.35)'; ctx.fillRect(x + 24, yy + r.gap / 2 - 1, pw - 48, 1); yy += r.gap; continue; }
+      ctx.font = r.font;
+      const tx = x + 28 + (r.x || 0);
+      if (r.name && r.text.startsWith(r.name)) {        // 괴물 이름은 붉은 글씨
+        ctx.fillStyle = '#8a1a10'; ctx.fillText(r.name, tx, yy);
+        ctx.fillStyle = r.col; ctx.fillText(r.text.slice(r.name.length), tx + ctx.measureText(r.name).width, yy);
+      } else { ctx.fillStyle = r.col; ctx.fillText(r.text, tx, yy); }
+      yy += r.h;
+    }
+    ctx.font = '16px VT323, monospace'; ctx.fillStyle = '#7a6a4a'; ctx.textAlign = 'right';
+    ctx.fillText('E 로 닫기', x + pw - 18, y + ph - 22);
+    ctx.restore();
+  }
+
 
   /** 열쇠가 아닌 미션: "퓨즈 2/4  (들고 있음 1)" / "밸브 1/4" / "체크아웃까지 01:42" */
   drawMission(ctx, game) {
     const o = game.obj;
+    if (!o && game.level?.mission?.type === 'noclip') {          // 끝없는 도시: 목표 = 맨 위 노클립 존
+      const e = game.level.exitIdx, ey = (e / game.map.w) | 0, py = Math.floor((game.local?.y ?? 0) / TS);
+      ctx.font = '20px VT323, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = '#9fd8ff';
+      ctx.fillText(`노클립 존까지 ${Math.max(0, py - ey)}칸 ↑`, 20, 50);
+      return;
+    }
     if (!o) return;
     const M = game.level.mission, TXT = MISSION_TEXT[missionKind(M)] || {};
     let text;

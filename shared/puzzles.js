@@ -11,10 +11,11 @@ import { mulberry32 } from './utils.js';
  *  slide     : 슬라이드    — 숫자 타일을 1~8 순서로 맞춘다                     answer = [움직인 타일 칸...]
  *  arcade    : 파티 팝     — (Level Fun 게임기) 좌우로 오가는 풍선이 다트 구역에 왔을 때 눌러 3번 터뜨린다
  *                            answer = [단계별로 누른 시각(초, 그 단계 시작부터)...]
+ *  quick     : 퀵 드로우   — (Level 3999 오락기) 빨간불이 초록불로 바뀌면 바로 누른다. 한 판 2~3초  answer = 누른 시각(초)
  */
-export const PUZZLE_TYPES = ['oneStroke', 'lightsOut', 'sequence', 'memory', 'slide', 'arcade'];
+export const PUZZLE_TYPES = ['oneStroke', 'lightsOut', 'sequence', 'memory', 'slide', 'arcade', 'quick'];
 export const PUZZLE_NAMES = {
-  oneStroke: '한붓 그리기', lightsOut: '전등 끄기', sequence: '숫자 퀴즈', memory: '기억력', slide: '슬라이드 퍼즐', arcade: '파티 팝',
+  oneStroke: '한붓 그리기', lightsOut: '전등 끄기', sequence: '숫자 퀴즈', memory: '기억력', slide: '슬라이드 퍼즐', arcade: '파티 팝', quick: '퀵 드로우',
 };
 export const PUZZLE_HINTS = {
   oneStroke: '모든 선을 딱 한 번씩만 지나가도록 한 번에 이어라. 점을 누르고 이웃 점으로 끌거나 차례로 눌러라.',
@@ -23,6 +24,7 @@ export const PUZZLE_HINTS = {
   memory: '불이 켜지는 순서를 기억했다가 그대로 눌러라. 틀려도 다시 보여 준다 (대신 경보가 울린다).',
   slide: '빈칸 옆 타일을 눌러 밀어서 1~8 순서로 맞춰라.',
   arcade: '풍선이 다트 구역(초록)에 들어왔을 때 클릭(또는 Space)! 3번 터뜨리면 클리어. 빗나가면 경보가 울린다.',
+  quick: '빨간불이 초록불로 바뀌는 순간 클릭(또는 Space)! 먼저 누르거나 늦으면 경보.',
 };
 
 const edgeKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
@@ -194,9 +196,21 @@ function checkArcade(p, ans) {
   return ans.every((t, k) => Number.isFinite(t) && t >= 0 && t < 60 && Math.abs(arcadePos(p.stages[k], t) - p.stages[k].c) <= p.stages[k].hw + 0.02);
 }
 
+// ------------------------------------------------------------------ 퀵 드로우 (Level 3999 오락기)
+/**
+ * 화면이 빨간 "WAIT" 이다가 delay 초 뒤 초록 "NOW!" 로 바뀐다. 그때부터 window 초 안에 누르면 클리어 (한 판, 2~3초).
+ * 초록이 되기 전에 누르면 실패.
+ */
+function genQuick(rng, diff) {
+  return { type: 'quick', delay: 1 + rng() * 1.5, window: Math.max(0.45, 0.8 - diff * 0.08) };
+}
+/** 누른 시각 t(초, 시작부터) 판정: 'early' | 'ok' | 'late' */
+export function quickJudge(p, t) { return t < p.delay ? 'early' : t <= p.delay + p.window ? 'ok' : 'late'; }
+function checkQuick(p, ans) { return Number.isFinite(ans) && quickJudge(p, ans) === 'ok'; }
+
 // ------------------------------------------------------------------
-const GEN = { oneStroke: genOneStroke, lightsOut: genLightsOut, sequence: genSequence, memory: genMemory, slide: genSlide, arcade: genArcade };
-const CHECK = { oneStroke: checkOneStroke, lightsOut: checkLightsOut, sequence: checkSequence, memory: checkMemory, slide: checkSlide, arcade: checkArcade };
+const GEN = { oneStroke: genOneStroke, lightsOut: genLightsOut, sequence: genSequence, memory: genMemory, slide: genSlide, arcade: genArcade, quick: genQuick };
+const CHECK = { oneStroke: checkOneStroke, lightsOut: checkLightsOut, sequence: checkSequence, memory: checkMemory, slide: checkSlide, arcade: checkArcade, quick: checkQuick };
 
 /** 같은 (type, seed, diff) → 같은 퍼즐. diff 0~3 */
 export function generatePuzzle(type, seed, diff = 0) {
