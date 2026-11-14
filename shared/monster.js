@@ -398,16 +398,17 @@ export class Monster {
   /** 키티 순간이동: 플레이어가 바라보는 방향의 반대쪽(등 뒤), 경로 lo~hi 칸, 보이지 않는 곳 */
   teleportBehind(game, p, lo, hi) {
     const map = game.map, dist = map.bfs(Math.floor(p.x / TS), Math.floor(p.y / TS));
-    const cand = map.floorCells.filter(i => dist[i] >= lo && dist[i] <= hi);
     const pos = i => ({ x: (i % map.w) * TS + TS / 2, y: ((i / map.w) | 0) * TS + TS / 2 });
+    // 걸어서 lo~hi 칸 + 직선으로도 4칸 이상 (벽 바로 너머에 붙지 않게)
+    const cand = map.floorCells.filter(i => { if (dist[i] < lo || dist[i] > hi) return false; const c = pos(i); return Math.hypot(c.x - p.x, c.y - p.y) > TS * 4; });
     const behind = cand.filter(i => { const c = pos(i); return Math.abs(angleDiff(Math.atan2(c.y - p.y, c.x - p.x), p.angle)) > Math.PI * 0.6; });
+    // 후보 중 플레이어에게서 안 보이는 칸만 골라 무작위로 (몇 번 뽑다 말면 좁은 맵에서 순간이동을 못 하는 일이 생긴다)
     for (const pool of [behind, cand]) {
-      for (let k = 0; k < 24 && pool.length; k++) {
-        const c = pos(pool[Math.floor(Math.random() * pool.length)]);
-        if (hasLOS(map, c.x, c.y, p.x, p.y)) continue;
-        this.x = c.x; this.y = c.y; this.path = [];
-        return;
-      }
+      const hidden = pool.filter(i => { const c = pos(i); return !hasLOS(map, c.x, c.y, p.x, p.y); });
+      if (!hidden.length) continue;
+      const c = pos(hidden[Math.floor(Math.random() * hidden.length)]);
+      this.x = c.x; this.y = c.y; this.path = [];
+      return;
     }
   }
 
@@ -1023,7 +1024,7 @@ export class Monster {
   moveToward(tx, ty, speed, dt, map) {
     const dx = tx - this.x, dy = ty - this.y, d = Math.hypot(dx, dy);
     if (d < 2) return true;
-    const s = Math.min(d, speed * dt);
+    const s = Math.min(d, speed * (this.modeMul ?? 1) * dt);   // modeMul: '엔티티 가속' 모드
     moveEntity(this, (dx / d) * s, (dy / d) * s, CONFIG.ENTITY.RADIUS, map);
     this.angle = lerpAngle(this.angle, Math.atan2(dy, dx), Math.min(1, dt * 9));
     return d - s < 2;

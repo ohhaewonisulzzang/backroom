@@ -14,6 +14,7 @@ const sanitizeCode = v => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''
  *  joinRoom   {name, code}    → 코드로 대기방(또는 진행 중인 게임) 입장 → 'lobby' | 'init'
  *  solo       {name, color}   → 혼자 하기 방을 만들고 바로 시작 → 'init'
  *  setColor   {color}         → 대기방에서 방호복 색 변경 (default | green | blue | red)
+ *  setMode    {mode, on}      → 대기방에서 게임 모드 켜기/끄기 (방장만, shared/config.js MODES)
  *  startMatch                 → 방장만: 게임 시작 → 모두 'init'
  *  leaveRoom                  → 방 나가기
  *  pause      {paused}        → ESC 메뉴 (혼자 하기에서만 실제 일시정지)
@@ -47,7 +48,8 @@ export function attachGameServer(io, { testMode = false } = {}) {
 
   io.on('connection', socket => {
     let room = null;
-    const fail = message => socket.emit('joinError', { message });
+    // 문장은 한국어 원문 + {자리} 값으로 보내고, 클라이언트가 자기 언어로 바꿔 보여 준다 (shared/i18n.js)
+    const fail = (message, vars) => socket.emit('joinError', { message, vars });
     // 클라이언트가 보낸 값은 믿지 않는다: 객체가 아니면 {} 로 바꾸고, 핸들러 예외가 서버 전체를 죽이지 않게 막는다
     const on = (event, fn) => socket.on(event, data => {
       try { fn(data && typeof data === 'object' ? data : {}); }
@@ -64,7 +66,7 @@ export function attachGameServer(io, { testMode = false } = {}) {
       if (room) return;
       const r = rooms.get(sanitizeCode(data.code));
       if (!r || r.solo) return fail('그런 코드의 방이 없습니다.');
-      if (r.isFull) return fail(`방이 가득 찼습니다 (최대 ${CONFIG.NET.MAX_PLAYERS}명).`);
+      if (r.isFull) return fail('방이 가득 찼습니다 (최대 {max}명).', { max: CONFIG.NET.MAX_PLAYERS });
       room = r;
       if (r.phase === 'lobby') r.addToLobby(socket, sanitizeName(data.name));
       else r.addPlayer(socket, sanitizeName(data.name));
@@ -80,12 +82,13 @@ export function attachGameServer(io, { testMode = false } = {}) {
       if (room) return;
       const roomName = sanitizeRoom(data.room);
       const r = rooms.get(roomName) ?? makeRoom(roomName, {});
-      if (r.isFull) return fail(`방 "${roomName}" 이 가득 찼습니다.`);
+      if (r.isFull) return fail('방 "{room}" 이 가득 찼습니다.', { room: roomName });
       room = r;
       r.addPlayer(socket, sanitizeName(data.name));
     });
 
     on('setColor', data => room?.setColor(socket.id, data?.color));
+    on('setMode', data => room?.setMode(socket.id, data));
     on('startMatch', () => room?.startMatch(socket.id));
     on('pause', data => room?.setPaused(socket.id, data?.paused));
     on('leaveRoom', () => {

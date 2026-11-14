@@ -1,9 +1,10 @@
 // 서버와 클라이언트가 함께 사용하는 상수. 값을 바꾸면 양쪽에 동시에 반영된다.
+import { t } from './i18n.js';
 export const CONFIG = {
   TILE: 48,
   PIX: 3,                  // 픽셀아트 1픽셀 = 월드 3단위 (타일 = 16x16 픽셀)
-  MAP_W: 81,               // 홀수여야 함 (81x81 = 예전 41x41 의 약 4배 넓이)
-  MAP_H: 81,
+  MAP_W: 77,               // 홀수여야 함 (77x77, 예전 81x81 에서 조금 줄임)
+  MAP_H: 77,
   KEY_COUNT: 5,
   PICKUP_RADIUS: 24,
 
@@ -330,26 +331,26 @@ export const MISSION = {
 };
 /** 미션 화면 문구. kind 별 이름 / 인트로 설명 */
 export const MISSION_TEXT = {
-  keys:      { unit: '열쇠', goal: n => `열쇠 ${n}개를 모아 출구를 열어라` },
-  games:     { unit: '게임', goal: n => `파티 게임기 ${n}대를 모두 클리어하라` },
-  exams:     { unit: '시험', goal: n => `교실 단말기 ${n}대의 시험을 통과하라` },
-  valve:     { unit: '밸브', goal: n => `벽의 증기 밸브 ${n}개를 잠가라 — E 를 누르고 오른쪽으로 돌려라` },
-  generator: { unit: '발전기', goal: n => `발전기 ${n}대의 크랭크를 돌려 시동을 걸어라 — 시끄럽다` },
-  drain:     { unit: '배수 밸브', goal: n => `벽의 배수 밸브 ${n}개를 열어라 — E 를 누르고 오른쪽으로 돌려라` },
-  fuse:      { unit: '퓨즈', depot: '배전반', goal: n => `퓨즈 ${n}개를 찾아 시작 지점 배전반에 꽂아라` },
-  radio:     { unit: '부품', depot: '무전기', goal: n => `무전기 부품 ${n}개를 모아 시작 지점 무전기를 고쳐라` },
-  files:     { unit: '서류', depot: '팩스', goal: n => `서류 ${n}장을 찾아 시작 지점 팩스로 보내라 — 창문 가까이 가지 마라` },
-  toys:      { unit: '장난감', depot: '장난감 상자', goal: n => `장난감 ${n}개를 모아 장난감 상자에 넣어라 — 키티에게서 눈을 떼지 마라` },
-  gas:       { unit: '기름통', depot: '트럭', goal: n => `기름통 ${n}개를 찾아 시작 지점 트럭에 넣어라 — 잭-오-랜턴은 불빛을 쫓는다` },
-  boiler:    { unit: '압력 밸브', goal: n => `보일러 압력 밸브 ${n}개를 잠가라 — 야수가 돌진하면 옆으로 피하라` },
-  pump:      { unit: '배수 펌프', goal: n => `벽의 배수 펌프 ${n}개를 돌려라 — 물속에선 조용히 움직여라` },
-  cabinets:  { unit: '오락기', goal: n => `오락기 ${n}대를 클리어해 집으로 가는 문을 열어라` },
-  elevator:  { unit: '엘리베이터', goal: t => `엘리베이터가 올 때까지 ${t}초 버텨라 — 숨어만 있으면 시간이 멈춘다` },
-  motion:    { unit: '탈출', goal: t => `${t}초 버텨라 — 밤이 오면 옷장(사물함)에 숨어라` },
-  checkout:  { unit: '체크아웃', goal: t => `체크아웃 시간까지 ${t}초 버텨라 — 숨어만 있으면 시간이 멈춘다` },
-  dawn:      { unit: '새벽', goal: t => `해가 뜰 때까지 ${t}초 버텨라 — 숨어만 있으면 시간이 멈춘다` },
-  run:       { unit: '', goal: () => '오른쪽 끝까지 달려라' },
-  noclip:    { unit: '', goal: () => '도시 맨 위 끝의 노클립 존을 찾아 E 를 눌러라 — 넓은 도로엔 눈알이 걸어 다닌다' },
+  keys:      { unit: '열쇠', goal: n => t('열쇠 {n}개를 모아 출구를 열어라', { n }) },
+  games:     { unit: '게임', goal: n => t('파티 게임기 {n}대를 모두 클리어하라', { n }) },
+  exams:     { unit: '시험', goal: n => t('교실 단말기 {n}대의 시험을 통과하라', { n }) },
+  valve:     { unit: '밸브', goal: n => t('벽의 증기 밸브 {n}개를 잠가라 — E 를 누르고 오른쪽으로 돌려라', { n }) },
+  generator: { unit: '발전기', goal: n => t('발전기 {n}대의 크랭크를 돌려 시동을 걸어라 — 시끄럽다', { n }) },
+  drain:     { unit: '배수 밸브', goal: n => t('벽의 배수 밸브 {n}개를 열어라 — E 를 누르고 오른쪽으로 돌려라', { n }) },
+  fuse:      { unit: '퓨즈', depot: '배전반', goal: n => t('퓨즈 {n}개를 찾아 시작 지점 배전반에 꽂아라', { n }) },
+  radio:     { unit: '부품', depot: '무전기', goal: n => t('무전기 부품 {n}개를 모아 시작 지점 무전기를 고쳐라', { n }) },
+  files:     { unit: '서류', depot: '팩스', goal: n => t('서류 {n}장을 찾아 시작 지점 팩스로 보내라 — 창문 가까이 가지 마라', { n }) },
+  toys:      { unit: '장난감', depot: '장난감 상자', goal: n => t('장난감 {n}개를 모아 장난감 상자에 넣어라 — 키티에게서 눈을 떼지 마라', { n }) },
+  gas:       { unit: '기름통', depot: '트럭', goal: n => t('기름통 {n}개를 찾아 시작 지점 트럭에 넣어라 — 잭-오-랜턴은 불빛을 쫓는다', { n }) },
+  boiler:    { unit: '압력 밸브', goal: n => t('보일러 압력 밸브 {n}개를 잠가라 — 야수가 돌진하면 옆으로 피하라', { n }) },
+  pump:      { unit: '배수 펌프', goal: n => t('벽의 배수 펌프 {n}개를 돌려라 — 물속에선 조용히 움직여라', { n }) },
+  cabinets:  { unit: '오락기', goal: n => t('오락기 {n}대를 클리어해 집으로 가는 문을 열어라', { n }) },
+  elevator:  { unit: '엘리베이터', goal: s => t('엘리베이터가 올 때까지 {s}초 버텨라 — 숨어만 있으면 시간이 멈춘다', { s }) },
+  motion:    { unit: '탈출', goal: s => t('{s}초 버텨라 — 밤이 오면 옷장(사물함)에 숨어라', { s }) },
+  checkout:  { unit: '체크아웃', goal: s => t('체크아웃 시간까지 {s}초 버텨라 — 숨어만 있으면 시간이 멈춘다', { s }) },
+  dawn:      { unit: '새벽', goal: s => t('해가 뜰 때까지 {s}초 버텨라 — 숨어만 있으면 시간이 멈춘다', { s }) },
+  run:       { unit: '', goal: () => t('오른쪽 끝까지 달려라') },
+  noclip:    { unit: '', goal: () => t('도시 맨 위 끝의 노클립 존을 찾아 E 를 눌러라 — 넓은 도로엔 눈알이 걸어 다닌다') },
 };
 export const missionOf = i => { const L = levelInfo(i); return { type: 'keys', count: CONFIG.KEY_COUNT, ...L.mission }; };
 export const missionKind = m => m.kind || m.type;
@@ -357,16 +358,20 @@ export const missionGoal = m => { const T = MISSION_TEXT[missionKind(m)] || MISS
 /**
  * 아이템 (주우면 인벤토리 1~4번 칸, 숫자키로 사용). perLevel = 레벨마다 자연 배치 개수 (LEVELS[].items 로 덮어씀)
  */
+/**
+ * 아이템. 숫자 키로 손에 들고(장착) 마우스 왼쪽 클릭으로 쓴다.
+ * hold = 쓰려면 왼쪽 버튼을 그만큼(초) 꾹 누르고 있어야 한다 (마시기·주사·쓰기). 없으면 클릭 한 번.
+ */
 export const ITEM_TYPES = {
-  almondWater: { name: '아몬드 워터', perLevel: 6, uses: 1, sanity: 60 },               // 정신력 +60
-  staminaDrink: { name: '스테미너 드링크', perLevel: 6, uses: 1, boost: 8 },             // 스태미나 가득 + 8초 무한 질주
+  almondWater: { name: '아몬드 워터', perLevel: 6, uses: 1, sanity: 60, hold: 1.2 },               // 정신력 +60
+  staminaDrink: { name: '스테미너 드링크', perLevel: 6, uses: 1, boost: 8, hold: 1 },             // 스태미나 가득 + 8초 무한 질주
   camera:      { name: '카메라', perLevel: 3, uses: 3, range: 6 * 48, fov: Math.PI / 2.2, stun: 3 },   // 플래시: 엔티티 기절, 스마일러 소멸
   bugSpray:    { name: '살충제', perLevel: 2, uses: 3, range: 3.5 * 48, fov: Math.PI / 2 },            // 데스모스를 벽으로 쫓아냄
   flare:       { name: '조명탄', perLevel: 3, uses: 1, dur: 30, radius: 4 * 48, noise: 7 * 48 },       // 빛 + 소리 미끼
   compass:     { name: '나침반', perLevel: 3, uses: 1, dur: 25 },                                       // 가장 가까운 열쇠/출구 방향
   firecracker: { name: '폭죽', perLevel: 2, uses: 1, throw: 5 * 48, noise: 10 * 48, dur: 4 },        // 앞쪽으로 던져 터뜨림: 소리 듣는 엔티티를 그쪽으로 유인
-  nightVision: { name: '야간 투시경', perLevel: 1, uses: 1, dur: 20 },                                 // 20초 동안 어둠·벽 너머까지 초록빛으로 보인다
-  adrenaline:  { name: '아드레날린', perLevel: 2, uses: 1, dur: 6, speed: 1.3 },                      // 6초 동안 더 빠르게, 지치지 않음
+  nightVision: { name: '야간 투시경', perLevel: 1, uses: 1, dur: 20, hold: 0.8 },                                 // 20초 동안 어둠·벽 너머까지 초록빛으로 보인다
+  adrenaline:  { name: '아드레날린', perLevel: 2, uses: 1, dur: 6, speed: 1.3, hold: 0.8 },                      // 6초 동안 더 빠르게, 지치지 않음
 };
 
 export const levelInfo = i => LEVELS[Math.max(0, Math.min(LEVELS.length - 1, i | 0))];
@@ -383,3 +388,28 @@ export const PLAYER_COLORS = ['default', 'green', 'blue', 'red'];
 export const SUIT_HEX = { default: '#e7b92e', green: '#5fae4e', blue: '#3f7fd0', red: '#c8423a' };
 export const SUIT_NAMES = { default: '기본', green: '초록', blue: '파랑', red: '빨강' };
 export const randomSuit = () => PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)];
+
+/**
+ * 게임 모드 (대기방에서 방장만 넣고 뺀다). on = 처음 방을 만들 때 켜져 있는지.
+ *  mimic        — 엔티티가 보이스 챗에서 녹음한 목소리를 흉내 낸다 (자기 목소리는 자기한테 안 들린다)
+ *  finger       — 뻐큐 이모트를 쓸 수 있다
+ *  hideNames    — 살아 있는 동안엔 가까이 있어도 동료 이름표가 안 보인다 (누가 진짜 동료인지 모르게)
+ *  mapPlayers   — 미니맵에 동료 위치도 표시한다 (끄면 내 위치만)
+ *  hardSanity   — 정신력이 2배 빨리 준다
+ *  fastEntities — 엔티티가 25% 빠르다
+ *  moreEntities — 엔티티가 1.5배 많다
+ *  moreItems    — 아이템이 2배 많이 떨어져 있다
+ *  noFlashlight — 손전등을 켤 수 없다
+ */
+export const MODES = [
+  { id: 'mimic', name: '목소리 흉내', desc: '엔티티가 녹음된 목소리를 흉내 낸다', on: true },
+  { id: 'finger', name: '뻐큐 이모트', desc: '뻐큐 동작을 쓸 수 있다', on: true },
+  { id: 'hideNames', name: '이름 숨김', desc: '가까이 있어도 동료 이름이 안 보인다', on: true },
+  { id: 'mapPlayers', name: '미니맵 동료 표시', desc: '미니맵에 동료 위치도 보인다', on: false },
+  { id: 'hardSanity', name: '정신력 하드코어', desc: '정신력이 2배 빨리 준다', on: false },
+  { id: 'fastEntities', name: '엔티티 가속', desc: '엔티티가 25% 빨라진다', on: false },
+  { id: 'moreEntities', name: '엔티티 증가', desc: '엔티티가 1.5배 많이 나온다', on: false },
+  { id: 'moreItems', name: '아이템 풍족', desc: '아이템이 2배 많이 떨어져 있다', on: false },
+  { id: 'noFlashlight', name: '손전등 금지', desc: '손전등을 켤 수 없다', on: false },
+];
+export const defaultModes = () => Object.fromEntries(MODES.map(m => [m.id, !!m.on]));

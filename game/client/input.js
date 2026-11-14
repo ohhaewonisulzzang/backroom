@@ -4,11 +4,13 @@
  *  - onAction(name, fn): 그 동작의 키를 눌렀을 때 / held(name): 누르고 있는가
  *  - onPress(code, fn): 바꿀 수 없는 고정 키 (ESC, ` 테스트 패널, 감정 표현 숫자)
  */
+import { t as tr } from '../../shared/i18n.js';
+
 export const ACTIONS = [
   ['up', '위로 이동', 'KeyW'], ['down', '아래로 이동', 'KeyS'], ['left', '왼쪽으로 이동', 'KeyA'], ['right', '오른쪽으로 이동', 'KeyD'],
   ['sprint', '달리기', 'ShiftLeft'], ['crouch', '웅크리기', 'KeyC'], ['flashlight', '손전등', 'KeyF'], ['interact', '상호작용', 'KeyE'],
   ['slot1', '아이템 1', 'Digit1'], ['slot2', '아이템 2', 'Digit2'], ['slot3', '아이템 3', 'Digit3'], ['slot4', '아이템 4', 'Digit4'],
-  ['drop', '버리기 (+아이템 키)', 'KeyG'], ['emote', '감정 표현', 'Comma'], ['chat', '채팅', 'Enter'], ['mic', '마이크', 'KeyM'],
+  ['drop', '버리기 (손에 든 아이템)', 'KeyG'], ['emote', '감정 표현', 'Comma'], ['chat', '채팅', 'Enter'], ['mic', '마이크', 'KeyM'],
   ['skip', '관전 / 건너뛰기(길게)', 'Space'],
 ];
 export const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(([a, , k]) => [a, k]));
@@ -25,7 +27,7 @@ export function saveBinds(b) { try { localStorage.setItem(KEY_STORE, JSON.string
 
 /** 'KeyW' → 'W', 'ShiftLeft' → 'SHIFT' ... */
 export function keyLabel(code) {
-  if (!code) return '없음';
+  if (!code) return tr('없음');
   if (code.startsWith('Key')) return code.slice(3);
   if (code.startsWith('Digit')) return code.slice(5);
   if (code.startsWith('Numpad')) return 'NUM ' + code.slice(6);
@@ -52,6 +54,7 @@ export const Input = {
   touch: { active: false, move: { x: 0, y: 0 }, aim: null, sprint: false, crouch: false },
 
   listeners: [],
+  mouseDown: false, mouseDownHandlers: [], mouseUpHandlers: [],
 
   init() {
     this.binds = loadBinds();
@@ -67,7 +70,23 @@ export const Input = {
       this.keys.add(e.code);
     });
     on('keyup', e => this.keys.delete(e.code));
-    on('blur', () => { this.keys.clear(); this.resetTouch(); });
+    // 우클릭 메뉴(브라우저의 뒤로/새로고침/검사 등)를 띄우지 않는다. 글 입력칸에서는 그대로 둔다 (붙여넣기 등)
+    on('contextmenu', e => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      e.preventDefault();
+    });
+    on('blur', () => { this.keys.clear(); this.resetTouch(); if (this.mouseDown) { this.mouseDown = false; this.mouseUpHandlers.forEach(fn => fn()); } });
+    // 마우스 왼쪽 버튼 = 손에 든 아이템 사용 (게임 화면(캔버스)을 눌렀을 때만, 메뉴·패널 클릭은 무시)
+    on('pointerdown', e => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || !(e.target instanceof HTMLCanvasElement)) return;
+      this.mouseDown = true;
+      this.mouseDownHandlers.forEach(fn => fn());
+    });
+    on('pointerup', e => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || !this.mouseDown) return;
+      this.mouseDown = false;
+      this.mouseUpHandlers.forEach(fn => fn());
+    });
     // 마우스를 실제로 움직이면 마우스 조준으로 돌아온다 (터치가 흉내 내는 mousemove 는 무시)
     on('pointermove', e => {
       if (e.pointerType !== 'mouse') return;
@@ -81,6 +100,7 @@ export const Input = {
     this.listeners = [];
     this.handlers.clear();
     this.actionHandlers.clear();
+    this.mouseDownHandlers = []; this.mouseUpHandlers = []; this.mouseDown = false;
     this.keys.clear();
   },
 
@@ -106,6 +126,8 @@ export const Input = {
     if (!this.handlers.has(code)) this.handlers.set(code, []);
     this.handlers.get(code).push(fn);
   },
+  onMouseDown(fn) { this.mouseDownHandlers.push(fn); },
+  onMouseUp(fn) { this.mouseUpHandlers.push(fn); },
   onAction(a, fn) {
     if (!this.actionHandlers.has(a)) this.actionHandlers.set(a, []);
     this.actionHandlers.get(a).push(fn);

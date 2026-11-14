@@ -10,7 +10,8 @@ export const viewport = { width: 'device-width', initialScale: 1, maximumScale: 
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="ko">
+    // lang 은 브라우저에서 shared/i18n.js 가 고른 언어로 바뀐다 (그래서 hydration 경고를 끈다)
+    <html lang="ko" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />

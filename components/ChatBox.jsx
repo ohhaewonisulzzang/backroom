@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { t } from '../shared/i18n.js';
 
 /**
  * 인게임 / 대기방 채팅.
@@ -19,18 +20,18 @@ export default function ChatBox({ messages, open, onSend, onClose, colorHex }) {
   const now = performance.now();
   const shown = open ? messages.slice(-30) : messages.filter(m => now - m.at < 10000).slice(-6);
   if (!open && !shown.length) return null;
-  const send = () => { const t = text.trim(); if (t) onSend(t); onClose(); };
+  const send = () => { const msg = text.trim(); if (msg) onSend(msg); onClose(); };
   return (
     <div className={`chat-box${open ? ' open' : ''}`} onPointerDown={e => open && e.stopPropagation()}>
       <div className="chat-list" ref={list}>
         {shown.map(m => (
           <div key={m.key} className="chat-line" style={{ opacity: open ? 1 : Math.max(0, Math.min(1, (10000 - (now - m.at)) / 2000)) }}>
-            <b style={{ color: colorHex(m.color) }}>{m.dead ? '(관전) ' : ''}{m.name}</b>: {m.text}
+            <b style={{ color: colorHex(m.color) }}>{m.dead ? t('(관전) ') : ''}{m.name}</b>: {m.text}
           </div>
         ))}
       </div>
       {open && (
-        <input ref={input} className="chat-input" value={text} maxLength={120} placeholder="메시지 입력 (ENTER 보내기 · ESC 닫기)"
+        <input ref={input} className="chat-input" value={text} maxLength={120} placeholder={t('메시지 입력 (ENTER 보내기 · ESC 닫기)')}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => {
             e.stopPropagation();

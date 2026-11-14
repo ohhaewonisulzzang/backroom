@@ -6,9 +6,10 @@ import { buildMapTexture, TILE_PX } from './texture.js';
 import {
   ART, drawPlayer, drawMonster, drawMonsterGlow, drawMonsterEyes, drawJumpscareSprite,
   drawKey, drawTerminal, drawItem, drawNote, drawLocker, drawExitSign, drawNameTag, drawBubble, drawPrompt, drawBalloonDecor, drawMothSwarm, humanPreview,
-  drawPart, drawDepot, drawStation, drawArcade, partIcon, drawPlayerGesture,
+  drawPart, drawDepot, drawStation, drawArcade, partIcon, drawPlayerGesture, drawCorpse, drawHeldItem, drawGoggles, dirOf,
 } from './sprites.js';
 import { Hud } from './hud.js';
+import { t as tr } from '../../shared/i18n.js';
 import { drawStory } from './story.js';
 import { drawEnding } from './ending.js';
 import { drawDeathOverlay, drawGore } from './deaths.js';
@@ -121,6 +122,7 @@ export class Renderer {
     if (wx1 > wx0 && wy1 > wy0) ctx.drawImage(this.mapTex, wx0 * k, wy0 * k, (wx1 - wx0) * k, (wy1 - wy0) * k, wx0, wy0, wx1 - wx0, wy1 - wy0);
     this.lights.drawLightPools(ctx, cam, vw, vh, game.time);
     drawGore(ctx, game);
+    for (const c of game.corpses || []) drawCorpse(ctx, c);   // 멀티플레이 시체 (아이템은 그 위에 떨어져 있다)
     for (const key of game.keys) if (!key.collected && !key.puzzle) drawKey(ctx, key, game.time);
     const obj = game.obj, mkind = missionKind(level.mission);
     if (obj?.type === 'deliver') for (const pt of obj.parts) if (pt.s === 0) drawPart(ctx, pt, mkind, game.time);
@@ -160,7 +162,16 @@ export class Renderer {
       if (!p.alive || p.hidden) continue;
       const a = p === view || p === game.local ? 1 : seen(p);
       if (a > 0) actors.push({ y: p.y, draw: () => {
-        if (p.gesture) drawPlayerGesture(ctx, p, game.time, a); else drawPlayer(ctx, p, a);
+        if (p.gesture) drawPlayerGesture(ctx, p, game.time, a);
+        else {
+          // 손에 든 아이템 + 야간 투시경 (나는 내 가방·효과로, 다른 사람은 스냅샷으로)
+          const me = p === game.local, hold = me ? game.inv[game.held]?.type : p.hold, nv = me ? game.nightVisionT > 0 : p.nv;
+          const back = dirOf(p.angle) === 'up';
+          if (back) drawHeldItem(ctx, p, hold, game.time, a);           // 뒷모습: 몸에 가려지게 먼저
+          drawPlayer(ctx, p, a);
+          if (!back) drawHeldItem(ctx, p, hold, game.time, a);
+          if (nv) drawGoggles(ctx, p, game.time, a);
+        }
         // 들고 있는 부품은 머리 위에 표시
         if (obj?.type === 'deliver') {
           const held = obj.parts.filter(pt => pt.s === 1 && pt.c === p.id);
@@ -211,15 +222,15 @@ export class Renderer {
     }
     if (level.mission.type === 'noclip') this.drawNoclipZone(ctx, game);   // 끝없는 도시: 지직거리는 노클립 존
     else if (game.explored[level.exitIdx]) drawExitSign(ctx, map, level.exitIdx, game.exitUnlocked, game.time);
-    if (game.nearNoclip && game.local.alive) { const e = level.exitIdx; drawPrompt(ctx, (e % map.w) * TS + TS / 2, ((e / map.w) | 0) * TS - 30, 'E  노클립'); }
-    // 이름표·마이크 아이콘: 살아 있는 동안엔 가린다 (누가 진짜 동료인지 모르게). 죽어서 관전할 때만 보인다
-    for (const p of game.local?.alive ? [] : game.remotes.values()) {
+    if (game.nearNoclip && game.local.alive) { const e = level.exitIdx; drawPrompt(ctx, (e % map.w) * TS + TS / 2, ((e / map.w) | 0) * TS - 30, tr('E  노클립')); }
+    // 이름표·마이크 아이콘: '이름 숨김' 모드면 살아 있는 동안엔 가린다 (누가 진짜 동료인지 모르게). 죽어서 관전할 때만 보인다
+    for (const p of game.local?.alive && game.modes?.hideNames !== false ? [] : game.remotes.values()) {
       if (!p.alive || p.hidden || p === view) continue;
       const a = seen(p);
       if (a > 0) drawNameTag(ctx, p, a * clamp(1.4 - Math.hypot(p.x - view.x, p.y - view.y) / CONFIG.VIEW_RANGE, 0.3, 1));
       if (a > 0 && p.vc) { ctx.font = '14px VT323, monospace'; this.drawSpeaker(ctx, p.x + ctx.measureText(p.name).width / 2 + 11, p.y - 54, p.vc === 2, game.voice?.levelOf(p.id) || 0, a); }
     }
-    for (const { m, a } of shownMonsters) if (m.bubble && m.bubble.t > 0) drawBubble(ctx, m.x, m.y, m.bubble.text, Math.min(1, m.bubble.t) * a, m.revealed ? 120 : 64);
+    for (const { m, a } of shownMonsters) if (m.bubble && m.bubble.t > 0) drawBubble(ctx, m.x, m.y, tr(m.bubble.text), Math.min(1, m.bubble.t) * a, m.revealed ? 120 : 64);
     for (const p of game.allPlayers()) {   // 플레이어 감정 표현 말풍선
       if (!p.bubble || !p.alive) continue;
       const a = p === game.local || p === view ? 1 : seen(p);
@@ -229,17 +240,17 @@ export class Renderer {
     // 밸브/크랭크 옆: E 안내 / 배달 장치 옆: 개수
     if (game.nearStation >= 0 && game.valveOpen < 0 && game.local.alive) {
       const st = level.stations[game.nearStation], pr = Math.round((obj.prog[game.nearStation] || 0) * 100);
-      drawPrompt(ctx, st.x, st.y - 70, `E  ${mkind === 'generator' ? '크랭크' : '밸브'}${pr ? ` ${pr}%` : ''}`);
+      drawPrompt(ctx, st.x, st.y - 70, `E  ${tr(mkind === 'generator' ? '크랭크' : '밸브')}${pr ? ` ${pr}%` : ''}`);
     }
     if (obj?.type === 'deliver' && level.depot && game.local.alive && Math.hypot(level.depot.x - game.local.x, level.depot.y - game.local.y) < TS * 2.5 && !game.exitUnlocked) {
       drawPrompt(ctx, level.depot.x, level.depot.y - 46, `${obj.done}/${obj.total}`);
     }
-    if (game.nearNpc && game.local.alive) drawPrompt(ctx, game.nearNpc.x, game.nearNpc.y - 84, 'E  말 걸기');
-    if (game.nearNote && !game.noteOpen && game.local.alive) drawPrompt(ctx, level.note.x, level.note.y - 40, 'E  쪽지');
-    if (game.nearBalloon >= 0 && game.local.alive) { const b = level.decor[game.nearBalloon]; drawPrompt(ctx, b.x, b.y - 46, 'E  터뜨리기'); }
+    if (game.nearNpc && game.local.alive) drawPrompt(ctx, game.nearNpc.x, game.nearNpc.y - 84, tr('E  말 걸기'));
+    if (game.nearNote && !game.noteOpen && game.local.alive) drawPrompt(ctx, level.note.x, level.note.y - 40, tr('E  쪽지'));
+    if (game.nearBalloon >= 0 && game.local.alive) { const b = level.decor[game.nearBalloon]; drawPrompt(ctx, b.x, b.y - 46, tr('E  터뜨리기')); }
     if (game.nearPuzzle >= 0 && game.puzzleOpen < 0 && game.local.alive) {
       const k = game.keys[game.nearPuzzle];
-      drawPrompt(ctx, k.x, k.y - (arcade ? 92 : 58), arcade ? 'E  게임' : 'E  퍼즐');
+      drawPrompt(ctx, k.x, k.y - (arcade ? 92 : 58), tr(arcade ? 'E  게임' : 'E  퍼즐'));
     }
     const near = game.nearLocker;
     if (near >= 0 && game.local.alive && !game.local.hidden) {
@@ -481,7 +492,7 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.font = '20px VT323, monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillStyle = `rgba(220,210,170,${0.5 + k * 0.5})`;
-    ctx.fillText(`${game.skipKey || 'SPACE'} 길게 눌러 건너뛰기`, W - 46, H - 24);
+    ctx.fillText(tr('{key} 길게 눌러 건너뛰기', { key: game.skipKey || 'SPACE' }), W - 46, H - 24);
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(220,210,170,0.25)'; ctx.beginPath(); ctx.arc(W - 26, H - 24, 10, 0, Math.PI * 2); ctx.stroke();
     if (k > 0) { ctx.strokeStyle = '#f0dc8c'; ctx.beginPath(); ctx.arc(W - 26, H - 24, 10, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); ctx.stroke(); }
@@ -507,7 +518,7 @@ export class Renderer {
         ctx.fillText(label.slice(0, shown), W / 2 + (Math.random() < 0.05 ? 3 : 0), H * 0.44);
         ctx.font = `${Math.round(Math.min(W, H) * 0.035)}px VT323, monospace`;
         ctx.fillStyle = `rgba(160,146,80,${ta * Math.min(1, Math.max(0, (t - 1.4) / 0.5))})`;
-        ctx.fillText(name, W / 2, H * 0.52);
+        ctx.fillText(tr(name), W / 2, H * 0.52);
       }
     } else if (c.type === 'awake') {
       const k = Math.sin(Math.min(1, t / c.dur) * Math.PI);
@@ -660,8 +671,8 @@ export class Renderer {
       boiler: '#ff8a4a', flooded: '#6aa0d8', cave: '#c89a6a', harvest: '#ff8a3a', city: '#a0a8c0', apartment: '#d8d090', white: '#f0f4ff', arcade: '#c070ff', parking: '#b0c0d0' }[game.level?.info?.theme] || '#ffd25a';
     ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'source-over';
-    // 야간 투시경: 초록 단색 + 지글거림 (끝나기 3초 전부터 깜빡)
-    if (game.nightVisionT > 0 && (game.nightVisionT > 3 || Math.floor(game.time * 6) % 2)) {
+    // 야간 투시경: 초록 단색 (끝나기 전에 깜빡이지 않는다 — 남은 시간은 아이템 칸 위에 초로 표시)
+    if (game.nightVisionT > 0) {
       ctx.globalCompositeOperation = 'saturation'; ctx.globalAlpha = 1;
       ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, W, H);
       ctx.globalCompositeOperation = 'multiply';

@@ -1,5 +1,6 @@
 import { TS } from '../../shared/config.js';
 import { mulberry32 } from '../../shared/utils.js';
+import { t as tr } from '../../shared/i18n.js';
 
 /**
  * 고해상도 픽셀아트 스프라이트 (실제 비율, 1픽셀 = 월드 1.5단위).
@@ -317,6 +318,124 @@ export function drawHuman(g, p, variant = 'player', alpha = 1) {
 }
 export function drawPlayer(g, p, alpha = 1) { drawHuman(g, p, 'player', alpha); }
 
+/**
+ * 손에 든 아이템 (사람 스프라이트 위에 덧그림). 손전등은 오른손이라 아이템은 반대쪽 손에 든다.
+ *  앞모습: 화면 왼쪽 손 / 뒷모습: 화면 오른쪽 손 / 옆모습: 앞쪽으로 내민 손. 걸을 때 팔 흔들림만큼 같이 움직인다.
+ */
+export function drawHeldItem(g, p, type, t, alpha = 1) {
+  if (!type || alpha <= 0.01) return;
+  const dir = dirOf(p.angle), k = p.crouching ? 0.78 : 1, foot = p.y + 10;
+  const f = frameOf((p.walkPhase ?? p.anim * 1.6) * 0.9, p.moving), sw = Math.round(cyc(f)) * ART;
+  let hx, hy;
+  if (dir === 'down') { hx = p.x - 10.5; hy = foot - 19.5 * k - sw; }
+  else if (dir === 'up') { hx = p.x + 10.5; hy = foot - 19.5 * k + sw; }
+  else { hx = p.x + (dir === 'left' ? -1 : 1) * 3; hy = foot - 18 * k; }
+  const ic = itemIcon(type), sc = 0.8, w = ic.width * sc, h = ic.height * sc;
+  const prev = g.globalAlpha; g.globalAlpha = prev * alpha;
+  g.imageSmoothingEnabled = false;
+  g.drawImage(ic, snap(hx - w / 2), snap(hy - h / 2), w, h);
+  g.globalAlpha = prev;
+}
+
+/** 야간 투시경을 얼굴에 쓴 모습 (쌍안 통 + 초록 렌즈 + 머리끈). 사람 스프라이트 위에 덧그림 */
+export function drawGoggles(g, p, t, alpha = 1) {
+  if (alpha <= 0.01) return;
+  const dir = dirOf(p.angle), k = p.crouching ? 0.78 : 1, top = p.y + 10 - 34 * ART * k, A = ART;
+  const Y = v => snap(top + v * A * k), X = v => snap(p.x - 9 * A + v * A);
+  const lens = `rgba(110,255,130,${0.75 + Math.sin(t * 6) * 0.25})`;
+  const prev = g.globalAlpha; g.globalAlpha = prev * alpha;
+  const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
+  if (dir === 'up') {                                            // 뒷모습: 머리끈과 버클만
+    R(X(4.5), Y(5), 9 * A, A, '#1a1a16'); R(X(8), Y(4.5), 2 * A, 2 * A, '#2c2c26');
+  } else if (dir === 'down') {                                   // 앞모습: 두 개의 통 + 초록 렌즈
+    R(X(3.5), Y(4.5), 11 * A, A, '#1a1a16');
+    R(X(5), Y(3.5), 3.5 * A, 4 * A, '#2a2a24'); R(X(9.5), Y(3.5), 3.5 * A, 4 * A, '#2a2a24');
+    R(X(8.5), Y(4.5), A, A, '#1a1a16');
+    R(X(5.5), Y(4.5), 2.5 * A, 2.5 * A, lens); R(X(10), Y(4.5), 2.5 * A, 2.5 * A, lens);
+    R(X(5.5), Y(4.5), A, A, '#e8ffe8'); R(X(10), Y(4.5), A, A, '#e8ffe8');
+  } else {                                                       // 옆모습: 앞으로 튀어나온 통 (오른쪽 기준, 왼쪽은 좌우 반전)
+    g.save();
+    if (dir === 'left') { g.translate(snap(p.x) * 2, 0); g.scale(-1, 1); }
+    R(X(4), Y(4.5), 7 * A, A, '#1a1a16');
+    R(X(10), Y(3.5), 5 * A, 3.5 * A, '#2a2a24');
+    R(X(13.5), Y(4), 1.5 * A, 2.5 * A, lens);
+    g.restore();
+  }
+  g.globalAlpha = prev;
+}
+
+/**
+ * 멀티플레이 시체: 방호복 차림으로 바닥에 반듯이 누워 있다 (앞모습을 눕힘, 머리가 왼쪽).
+ * 배가 찢겨 열려 갈비뼈와 내장이 드러나고, 찢긴 배 주변과 바닥에 피가 흥건하다.
+ */
+const GORE = { cavity: '#2a0303', meat: '#5e0b0b', meatHi: '#8a1a16', bone: '#e8e0cc', boneSh: '#b0a48c',
+  gut: '#c4687a', gutHi: '#e89aa6', gutSh: '#8a3046', organ: '#6a1010', organHi: '#9a2a22',
+  blood: '#6e0707', bloodHi: '#a8140f', bloodDk: '#3c0202', pool: '#4e0404', poolHi: '#7a0a08' };
+const CORPSE_W = 50, CORPSE_H = 34, CB_X = 8, CB_Y = 8;   // 몸(누운 34x18)을 놓는 자리
+function corpseBody(color) {
+  // 1) 서 있는 앞모습을 그린 뒤 90도 돌려 눕힌다 (머리가 왼쪽)
+  const up = humanSprite('down', -1, 'player', color);   // 이미 외곽선이 둘려 있다
+  return build(`corpseBody:${color}`, HUMAN_H, HUMAN_W, g => {
+    const P = suitPalette(color, 'player'), rng = mulberry32(57);
+    g.save(); g.translate(0, HUMAN_W); g.rotate(-Math.PI / 2); g.drawImage(up, 0, 0); g.restore();   // (x,y) → (y, 17-x)
+    // 2) 찢긴 배 (눕힌 좌표: 몸통 x 11..21, y 5..14 / 배 한가운데 ≈ (17, 9.5))
+    const cx = 17, cy = 9.5;
+    // 배 주변에 흥건히 번진 피 (찢긴 곳에서 멀어질수록 듬성듬성)
+    ellipse(g, cx, cy, 6.5, 4.6, GORE.blood);
+    ellipse(g, cx + 0.5, cy - 0.5, 5.5, 4, GORE.bloodHi);
+    for (let i = 0; i < 55; i++) {
+      const a = rng() * Math.PI * 2, r = 4.5 + rng() * 3.5;
+      px(g, cx + Math.cos(a) * r * 1.3, cy + Math.sin(a) * r * 0.9, rng() < 0.6 ? GORE.blood : GORE.bloodDk);
+    }
+    // 찢어진 방호복 가장자리: 톱니처럼 너덜너덜
+    ellipse(g, cx, cy, 5.2, 3.8, GORE.meat);
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2, r = i % 2 ? 4.4 : 5.6;
+      px(g, cx + Math.cos(a) * r * 1.1, cy + Math.sin(a) * r * 0.8, i % 4 === 1 ? P.tape : i % 2 ? P.dk : P.sh);
+    }
+    ellipse(g, cx + 0.3, cy + 0.2, 4.2, 2.8, GORE.cavity);
+    // 갈비뼈 (가슴 쪽 = 왼쪽): 몸을 가로지르는 활 모양 뼈 3개
+    for (const [x, h] of [[13, 3], [15, 3], [17, 2]]) {
+      for (let y = -h; y <= h; y++) px(g, x - (Math.abs(y) >= h ? 1 : 0), cy + y, y > 0 ? GORE.boneSh : GORE.bone);
+    }
+    px(g, 12, cy, GORE.bone);                                                  // 흉골 끝
+    // 짙은 장기 + 꼬불꼬불한 창자 (배 쪽 = 오른쪽, 찢긴 틈으로 밀려 나온다)
+    ellipse(g, 18.5, cy - 1.5, 1.5, 1, GORE.organ); px(g, 18, cy - 2, GORE.organHi);
+    for (const [x, y] of [[19.5, 10.5], [21, 9], [21.5, 11], [20, 12.5], [22.5, 12.5], [23, 10]]) {
+      ellipse(g, x + 0.4, y + 0.4, 1.5, 1.2, GORE.gutSh); ellipse(g, x, y, 1.1, 0.8, GORE.gut); px(g, x - 0.5, y - 0.5, GORE.gutHi);
+    }
+    // 찢겨 젖혀진 방호복 조각
+    poly(g, [[14, 5], [17, 2], [17, 5]], P.suit); px(g, 16, 4, P.dk);
+    poly(g, [[16, 14], [19, 17], [19, 14]], P.sh); px(g, 18, 15, P.dk);
+    // 몸 옆으로 흘러내린 핏줄기
+    for (const [x, y, dy] of [[12, 13, 3], [15, 14, 3], [21, 14, 2], [14, 5, -3], [20, 5, -2]]) line(g, x, y, x, y + dy, GORE.blood);
+  }, null);
+}
+function corpseSprite(color, flip) {
+  return build(`corpse:${color}:${flip}`, CORPSE_W, CORPSE_H, g => {
+    if (flip) { g.translate(CORPSE_W, 0); g.scale(-1, 1); }
+    const rng = mulberry32(83);
+    // 바닥의 피 웅덩이: 배 아래를 중심으로 불규칙하게 퍼짐 (외곽선 없이)
+    const px0 = CB_X + 17, py0 = CB_Y + 10;
+    ellipse(g, px0, py0, 16, 8, GORE.pool);
+    for (const [dx, dy, rx, ry] of [[-11, 3, 6, 4], [8, 5, 9, 5], [13, -3, 6, 4], [-3, 7, 8, 4], [3, -6, 7, 4], [18, 3, 3, 3], [-16, -1, 4, 2]]) ellipse(g, px0 + dx, py0 + dy, rx, ry, GORE.pool);
+    for (const [dx, dy] of [[22, 8], [-19, 6], [7, 13], [17, -8], [-9, -9], [-20, -4]]) rect(g, px0 + dx, py0 + dy, 2, 2, GORE.pool);   // 튄 방울
+    speckle(g, px0 - 20, py0 - 10, 42, 24, GORE.bloodDk, 0.1, rng);
+    ellipse(g, px0 + 2, py0 + 2, 10, 5, GORE.blood);
+    for (const [dx, dy] of [[-7, 5], [9, 7], [12, -4], [-2, 9], [14, 5], [-12, 2]]) px(g, px0 + dx, py0 + dy, GORE.poolHi);   // 젖은 반사
+    // 몸 (자동 외곽선이 둘린 캔버스)
+    g.drawImage(corpseBody(color), CB_X, CB_Y);
+    // 몸 바깥으로 흘러내린 창자 한 가닥
+    for (const [x, y] of [[21, 16], [22, 17.5], [24, 18], [25.5, 17]]) { ellipse(g, CB_X + x, CB_Y + y, 1.2, 0.9, GORE.gut); px(g, CB_X + x - 0.5, CB_Y + y - 0.5, GORE.gutHi); }
+  }, null);
+}
+export function drawCorpse(g, c, alpha = 1) {
+  if (alpha <= 0.01) return;
+  const color = SUIT_BASE[c.color] ? c.color : 'default';
+  const flip = (typeof c.id === 'number' ? c.id : [...String(c.id ?? '')].reduce((h, ch) => h + ch.charCodeAt(0), 0)) % 2 === 1;   // 머리 방향 (시체마다 고정)
+  blit(g, corpseSprite(color, flip), c.x, c.y + (CORPSE_H * ART) / 2, false, alpha);
+}
+
 /** 메뉴/대기방 미리보기용: 지정 색의 방호복 스프라이트 캔버스 */
 export function humanPreview(color, dir = 'down', f = -1) { return humanSprite(dir, f, 'player', color); }
 
@@ -502,72 +621,111 @@ function drawHoundArt(g, f, stunned) {
 }
 
 // ================================================================ 파티고어 (Level Fun / 52)
-// 비쩍 마른 몸, 주름지고 병든 노란 가죽, 움푹 꺼진 갈비뼈. 눈이 없는 머리에 세로로 찢어진 입 — 피가 흘러내린다.
+// 평범하게 마른 성인 남자의 몸, 병든 노란 가죽. 입이 없는 민얼굴에 움푹 꺼진 눈. 오른손에 붉은 풍선 (줄에 매달려 둥실둥실).
 // 다른 엔티티보다 픽셀이 조금 촘촘하다 (44x80 을 PG_K 배율로 → 사람보다 머리 둘쯤 크다)
 const PG_W = 44, PG_H = 80, PG_K = ART * 0.8;
-const PG = { skin: '#c4aa34', hi: '#e2cc62', sh: '#8c7620', dk: '#584810', wr: '#6c5a16', rib: '#463808',
-  blood: '#7e0c08', bloodHi: '#c02018', bloodDk: '#360303', mouth: '#120303', tooth: '#e6dcbc',
-  balloon: '#b8221e', balloonHi: '#ff7a6a', balloonSh: '#6a0e0a', string: '#cfcabc' };
+const PG = { skin: '#c4aa34', hi: '#e2cc62', sh: '#8c7620', dk: '#584810', wr: '#6c5a16', rib: '#7a6618', eye: '#140e02',
+  blood: '#7e0c08', bloodHi: '#c02018', bloodDk: '#360303',
+  balloon: '#b8221e', balloonHi: '#ff7a6a', balloonSh: '#6a0e0a', string: '#cfcabc', stringSh: '#3a3420' };
+/** 팔 자세: 걸을 땐 다리와 반대로 앞뒤로 흔든다 (앞으로 갈수록 손이 올라온다). 뛸 땐 팔꿈치를 굽혀 크게 흔든다 */
+function pgArms(f, chase) {
+  const s = cyc(f);
+  const arm = (side, v) => {   // side: -1 왼팔(화면 왼쪽) / +1 오른팔, v: +면 앞으로
+    const fw = Math.max(0, v), bk = Math.max(0, -v), sx = 22 + side * 9;
+    if (chase) return { sh: [sx, 19], el: [sx + side * (1 + bk), 29 - fw * 3], hd: [sx - side * (fw * 2 - 1), 37 - fw * 9 + bk * 2] };
+    return { sh: [sx, 19], el: [sx + side * (1 + bk * 0.6), 31 - fw * 1.5], hd: [sx + side * (1 + bk) - side * fw * 1.5, 42 - fw * 7 + bk] };
+  };
+  // 오른손은 풍선 줄을 쥐고 배 앞쪽으로 들고 있다 (걸을 땐 살짝, 뛸 땐 조금 더 출렁인다)
+  const sxR = 31, bob = s * (chase ? 1.5 : 0.7);
+  const R = { sh: [sxR, 19], el: [sxR + 2, 29 + bob * 0.5], hd: [sxR + 3, 35 + bob] };
+  return { L: arm(-1, -s), R };
+}
 function drawPartygoerArt(g, f, chase) {
   const s = cyc(f), rng = mulberry32(31 + (chase ? 7 : 0));
-  const lift = v => Math.round(Math.max(0, v) * 2);
+  const lift = v => Math.round(Math.max(0, v) * (chase ? 3 : 2));
   const cx = 22, jit = chase ? Math.round(Math.sin(f * 2.3)) : 0;   // 쫓을 땐 머리가 경련하듯 까딱
-  const bx = 38 + (chase ? 0 : Math.round(Math.sin((f / FRAMES) * Math.PI * 2))), by = 7;
-  // ---- 다리: 곧게, 무릎이 튀어나왔다
+  const { L, R } = pgArms(f, chase);
+  // ---- 다리: 가늘고 곧게
   const lL = lift(s), rL = lift(-s);
   const leg = (hip, knee, foot, c, sh) => {
-    limb(g, hip, knee, 4, 3, c, sh); limb(g, knee, foot, 3, 2, c, sh);
-    ellipse(g, knee[0], knee[1], 1.5, 1.5, sh);
+    limb(g, hip, knee, 5, 4, c, sh); limb(g, knee, foot, 4, 3, c, sh);
+    px(g, knee[0], knee[1], sh);
     rect(g, foot[0] - 2, foot[1], 5, 2, PG.dk);
   };
-  leg([18, 52], [17, 64 - lL], [17, 76 - lL], PG.skin, PG.sh);
-  leg([26, 52], [27, 64 - rL], [27, 76 - rL], PG.skin, PG.sh);
-  // ---- 몸통: 넓은 어깨 → 개미허리 (좌우 대칭)
-  poly(g, [[11, 27], [33, 27], [31, 37], [27, 46], [27, 53], [17, 53], [17, 46], [13, 37]], PG.skin);
-  poly(g, [[25, 27], [33, 27], [31, 37], [27, 46], [27, 53], [24, 53], [24, 37]], PG.sh);       // 오른쪽 그늘
-  ellipse(g, 15, 30, 2.5, 1.5, PG.hi);
-  for (let k = 0; k < 5; k++) {                                     // 움푹 꺼진 갈비뼈
-    const y = 32 + k * 2.5, w = 7 - Math.abs(k - 1.5);
-    line(g, cx - w, y, cx - 1, y + 1, PG.rib); line(g, cx + 1, y + 1, cx + w, y, PG.rib);
-  }
-  line(g, cx, 29, cx, 50, PG.dk);                                   // 가운데 꺼진 골
-  poly(g, [[20, 35], [24, 35], [23, 43], [21, 44]], PG.blood);      // 가슴의 찢긴 상처
-  px(g, 21, 37, PG.bloodDk); px(g, 23, 36, PG.bloodHi);
-  line(g, 18, 49, 26, 49, PG.wr);
-  // ---- 팔: 길게 늘어진다 (쫓을 땐 두 팔을 앞으로 뻗는다). 손가락 끝에 피
-  const arm = (sh, el, hd, c, shade, up) => {
-    limb(g, sh, el, 3, 3, c, shade); limb(g, el, hd, 3, 2, c, shade);
-    for (let k = -1; k <= 1; k++) { line(g, hd[0] + k, hd[1], hd[0] + k, hd[1] + (up ? -4 : 4), PG.sh); px(g, hd[0] + k, hd[1] + (up ? -4 : 4), PG.blood); }
-    px(g, hd[0], hd[1], PG.blood);
+  leg([18, 45], [18, 60 - lL], [18, 74 - lL], PG.skin, PG.sh);
+  leg([26, 45], [26, 60 - rL], [26, 74 - rL], PG.sh, PG.dk);
+  // ---- 팔 (몸 뒤로 지나가는 쪽은 몸통보다 먼저) — 손가락 끝에 피
+  const arm = (a, c, shade) => {
+    limb(g, a.sh, a.el, 3, 2, c, shade); limb(g, a.el, a.hd, 2, 2, c, shade);
+    const [hx, hy] = a.hd.map(Math.round);
+    rect(g, hx - 1, hy, 3, 2, c);
+    for (let k = -1; k <= 1; k++) { px(g, hx + k, hy + 2, shade); px(g, hx + k, hy + 3, PG.blood); }
   };
-  if (chase) {
-    arm([12, 29], [7, 37], [5, 31], PG.skin, PG.sh, true);
-    arm([32, 29], [37, 37], [39, 31], PG.sh, PG.dk, true);
-  } else {
-    arm([12, 29], [10, 42], [10, 56 - Math.round(s)], PG.skin, PG.sh, false);
-    arm([32, 29], [34, 42], [34, 56 + Math.round(s)], PG.sh, PG.dk, false);
+  // ---- 몸통: 어깨에서 엉덩이까지 곧은 몸, 마른 편이지만 살짝 살집이 있어 배가 조금 나왔다
+  poly(g, [[14, 18], [30, 18], [30, 26], [31, 33], [30, 40], [29, 46], [15, 46], [14, 40], [13, 33], [14, 26]], PG.skin);
+  poly(g, [[27, 18], [30, 18], [30, 26], [31, 33], [30, 40], [29, 46], [27, 46]], PG.sh);          // 오른쪽 그늘
+  ellipse(g, 14.5, 19.5, 1.8, 1.8, PG.skin); ellipse(g, 29.5, 19.5, 1.8, 1.8, PG.sh);   // 둥근 어깨
+  line(g, 17, 20, 21, 21, PG.sh); line(g, 23, 21, 27, 20, PG.dk);         // 쇄골
+  line(g, 16, 39, 21, 41, PG.sh); line(g, 23, 41, 28, 39, PG.dk);         // 아랫배 주름
+  ellipse(g, 19, 23, 2, 1, PG.hi);
+  for (let k = 0; k < 4; k++) {                                     // 드러난 갈비뼈
+    const y = 25 + k * 2, w = 4 - Math.abs(k - 1) * 0.5;
+    line(g, cx - 1 - w, y + 1, cx - 1, y, PG.rib); line(g, cx + 1, y, cx + 1 + w, y + 1, PG.dk);
   }
-  // ---- 목 + 머리 (눈이 없는 길쭉한 민머리)
-  const hx = cx + jit, hy = 13;
-  rect(g, hx - 3, 20, 7, 8, PG.sh); line(g, hx - 3, 23, hx + 3, 24, PG.wr);
-  ellipse(g, hx + 0.5, hy, 7, 9.5, PG.sh);
-  ellipse(g, hx, hy - 0.5, 6.5, 9, PG.skin);
-  ellipse(g, hx - 2, hy - 5, 2.5, 3, PG.hi);
-  px(g, hx - 3, hy - 1, PG.sh); px(g, hx - 2, hy - 1, PG.sh); px(g, hx + 2, hy - 1, PG.sh); px(g, hx + 3, hy - 1, PG.sh);   // 눈 자리가 살짝 꺼짐
-  // 세로로 찢어진 입 + 이빨 + 흘러내리는 피
-  const mw = chase ? 3 : 2, mt = hy + 1, mb = hy + 9;
-  poly(g, [[hx, mt], [hx + mw, mt + 4], [hx + mw - 1, mb], [hx - mw + 1, mb], [hx - mw, mt + 4]], PG.bloodDk);
-  rect(g, hx - mw + 2, mt + 3, Math.max(1, mw * 2 - 3), mb - mt - 4, PG.mouth);
-  for (let y = mt + 3; y < mb - 1; y += 2) { px(g, hx - mw + 1, y, PG.tooth); px(g, hx + mw - 1, y + 1, PG.tooth); }
-  const drips = chase ? [[-2, 16], [0, 22], [2, 14]] : [[-1, 12], [1, 18]];
-  for (const [dx, len] of drips) { line(g, hx + dx, mb, hx + dx, mb + len, PG.blood); px(g, hx + dx, mb + len, PG.bloodDk); }
+  line(g, cx, 22, cx, 38, PG.sh);                                   // 가운데 골
+  poly(g, [[20, 27], [23, 27], [22, 33], [21, 34]], PG.blood);      // 가슴의 찢긴 상처
+  px(g, 21, 29, PG.bloodDk); px(g, 22, 28, PG.bloodHi);
+  px(g, cx, 39, PG.dk);                                             // 배꼽
+  line(g, 16, 44, 21, 46, PG.wr); line(g, 28, 44, 23, 46, PG.dk);    // 골반선
+  arm(L, PG.skin, PG.sh); arm(R, PG.sh, PG.dk);
+  // ---- 목 + 머리 (입이 없는 민얼굴)
+  const hx = cx + jit, hy = 9;
+  rect(g, hx - 2, 14, 5, 5, PG.sh); px(g, hx - 2, 16, PG.wr);
+  ellipse(g, hx + 0.5, hy, 5, 6.5, PG.sh);
+  ellipse(g, hx, hy - 0.5, 4.5, 6, PG.skin);
+  ellipse(g, hx - 1.5, hy - 3.5, 1.8, 1.8, PG.hi);
+  rect(g, hx - 3, hy - 1, 2, 2, PG.sh); rect(g, hx + 1, hy - 1, 2, 2, PG.dk);   // 움푹 꺼진 눈자리
+  px(g, hx - 2, hy, PG.eye); px(g, hx + 2, hy, PG.eye);                       // 까만 점 같은 눈
+  px(g, hx, hy + 2, PG.sh);                                                   // 코 그늘 (입은 없다)
   // ---- 가죽 질감 (그려진 픽셀 위에만)
-  speckle(g, 4, 2, 36, 76, PG.wr, 0.04, rng);
-  // ---- 풍선: 오른손에 쥔 줄 끝 (쫓을 땐 놓쳐서 떠 있다)
-  line(g, bx, by + 7, chase ? bx - 1 : 34, chase ? by + 16 : 56, PG.string);
+  speckle(g, 4, 2, 36, 76, PG.wr, 0.035, rng);
+}
+/** 풍선 위치 (스프라이트 픽셀 좌표): 시간에 따라 둥실둥실 흔들리고, 움직이면 뒤로 끌린다 */
+function pgBalloon(t, moving, chase, hand) {
+  const drag = chase ? 3 : moving ? 1.5 : 0;
+  return [hand[0] + 3 + Math.sin(t * 1.7) * 2 + Math.sin(t * 0.83 + 1.3) * 1 + (chase ? Math.sin(t * 9) * 0.8 : 0),
+    hand[1] - 25 + Math.sin(t * 2.3 + 0.4) * 1.8 + drag];
+}
+/** 풍선 + 줄 (스프라이트 픽셀 좌표계에 바로 그림). 줄은 손에서 매듭까지 살짝 휘어진다 */
+function drawPGBalloonArt(g, hand, b, t) {
+  const [hx, hy] = [Math.round(hand[0]), Math.round(hand[1]) + 1], bx = Math.round(b[0]), by = Math.round(b[1]);
+  const kx = bx, ky = by + 7, bend = Math.sin(t * 2.1) * 2 + (hx - kx) * 0.15;
+  let px0 = hx, py0 = hy;
+  for (let i = 1; i <= 8; i++) {
+    const u = i / 8, x = hx + (kx - hx) * u + Math.sin(u * Math.PI) * bend, y = hy + (ky - hy) * u;
+    line(g, px0 + 1, py0, x + 1, y, PG.stringSh); line(g, px0, py0, x, y, PG.string);
+    px0 = x; py0 = y;
+  }
+  ellipse(g, bx, by, 5.5, 7, PG.stringSh);                                     // 외곽선
+  rect(g, bx - 2, by + 6, 4, 3, PG.stringSh);
   ellipse(g, bx, by, 4.5, 6, PG.balloon); ellipse(g, bx + 1.5, by + 2, 2.5, 3, PG.balloonSh);
-  px(g, bx - 2, by - 3, PG.balloonHi); px(g, bx - 2, by - 2, PG.balloonHi);
-  rect(g, bx - 1, by + 6, 2, 1, PG.balloonSh);
+  px(g, bx - 2, by - 3, PG.balloonHi); px(g, bx - 2, by - 2, PG.balloonHi); px(g, bx - 1, by - 4, PG.balloonHi);
+  rect(g, bx - 1, by + 6, 2, 2, PG.balloonSh);
+  // 줄을 꽉 쥔 주먹 (줄 위에 덧그려서 손에 들고 있는 것처럼)
+  rect(g, hx - 1, hy - 2, 4, 3, PG.sh); rect(g, hx - 1, hy - 2, 4, 1, PG.skin); px(g, hx + 2, hy, PG.dk); px(g, hx, hy + 1, PG.blood);
+}
+/** 월드에 파티고어 그리기: 몸은 캐시 스프라이트, 풍선과 줄은 매 프레임 시간에 맞춰 같은 픽셀 격자로 덧그린다 */
+function drawPartygoer(g, m, f, time, alpha, left) {
+  const chase = m.state === 'chase';
+  const spr = build(`pg:${f}:${chase}`, PG_W, PG_H, gg => drawPartygoerArt(gg, f, chase));
+  blit(g, spr, m.x, m.y + 12, left, alpha, PG_K);
+  const w = PG_W * PG_K, x = snap(m.x - w / 2), y = snap(m.y + 12 - PG_H * PG_K);
+  g.save();
+  g.globalAlpha *= alpha;
+  if (left) { g.translate(x + w, y); g.scale(-PG_K, PG_K); } else { g.translate(x, y); g.scale(PG_K, PG_K); }
+  const hand = pgArms(f, chase).R.hd;
+  drawPGBalloonArt(g, hand, pgBalloon(time + (typeof m.id === 'number' ? m.id : parseInt(String(m.id || '').replace(/\D/g, ''), 10) || 0) * 1.7, f >= 0, chase, hand), time);
+  g.restore();
 }
 function drawTableArt(g) {
   const red = '#d23a32', white = '#f1ece0', sh = '#8e231d', shW = '#c8c2b2', leg = '#5a4026';
@@ -1263,10 +1421,8 @@ export function drawMonster(g, m, time = 0, alpha = 1) {
       break;
     }
     case 'partygoer': {
-      const chase = m.state === 'chase';
       shadow(g, m.x, m.y + 10, 16, 6, alpha);
-      const frp = m.moving ? ff : Math.floor(time * 2) % FRAMES;   // 서 있어도 풍선은 흔들림
-      blit(g, build(`pg:${frp}:${chase}`, PG_W, PG_H, gg => drawPartygoerArt(gg, frp, chase)), m.x, m.y + 12, left, alpha, PG_K);
+      drawPartygoer(g, m, m.moving ? ff : -1, time, alpha, left);   // 서 있으면 팔은 가만히, 풍선만 시간에 맞춰 흔들림
       break;
     }
     case 'deathmoth': {
@@ -1524,7 +1680,7 @@ export function drawJumpscareSprite(g, type, time, cx, cy, size) {
   if (type === 'howler') spr = build(`hw:${f}:true`, 44, 82, gg => drawHowlerArt(gg, f, true));
   else if (type === 'hound') spr = build(`hd:${f}:false`, 60, 38, gg => drawHoundArt(gg, f, false));
   else if (type === 'skinStealer') spr = build(`ss:${f}`, 36, 78, gg => drawStealerArt(gg, f));
-  else if (type === 'partygoer') spr = build(`pg:${f}:true`, PG_W, PG_H, gg => drawPartygoerArt(gg, f, true));
+  else if (type === 'partygoer') spr = build(`pgj:${f}`, PG_W, PG_H, gg => { drawPartygoerArt(gg, f, true); { const hd = pgArms(f, true).R.hd; drawPGBalloonArt(gg, hd, pgBalloon(f * 0.45, false, false, hd).map((v, i) => i ? Math.max(v, 7) : Math.min(v, 38)), f * 0.45); } });
   else if (type === 'deathmoth') spr = build(`dm:${f}:false`, 56, 40, gg => drawMothArt(gg, f, false));
   else if (type === 'wretch') spr = build(`wr:${f}`, 28, 62, gg => drawWretchArt(gg, f));
   else if (type === 'scratcher') spr = build(`sc:${f}`, 60, 36, gg => drawScratcherArt(gg, f));
@@ -1637,6 +1793,7 @@ export function drawBubble(g, x, y, text, alpha, lift = 80) {
 
 /** 월드 공간 안내 문구 ("[E] 숨기") */
 export function drawPrompt(g, x, y, text) {
+  text = tr(text);
   g.font = '15px VT323, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
   const w = Math.ceil(g.measureText(text).width) + 10;
   g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(snap(x - w / 2), snap(y - 9), w, 17);
@@ -1845,6 +2002,7 @@ export const GESTURES = {
   point:  { name: '가리키기', dur: 2.4 },
   dance1: { name: '춤 1 (들썩)', dur: 5 },
   dance2: { name: '춤 2 (빙글)', dur: 5 },
+  twerk:  { name: '트월킹', dur: 4 },
 };
 /**
  * 동작 중인 플레이어 그리기 (p.gesture = { g, t }). 몸은 기존 스프라이트를 움직이고, 팔·손은 위에 덧그린다.
@@ -1863,10 +2021,62 @@ export function drawPlayerGesture(g, p, t, alpha = 1, variant = 'player') {
     drawNotes(g, p, u, alpha);
     return;
   }
+  if (G.g === 'twerk') {         // 옆으로 서서 허리를 숙이고 엉덩이를 빠르게 튕긴다 (프레임 4장, 초당 14장)
+    const color = SUIT_BASE[p.color] ? p.color : 'default', f = Math.floor(u * 14) % TWERK.length;
+    const left = dirOf(p.angle) === 'left';
+    shadow(g, p.x, p.y + 8, 15, 4, alpha);
+    blit(g, twerkSprite(variant, color, f), p.x, p.y + 10, left, alpha);
+    drawNotes(g, p, u, alpha);
+    return;
+  }
   // 뻐큐 / 가리키기: 그 자세로 그린 캐릭터 스프라이트 (바라보는 방향별로 앞/뒤/옆 모습)
   const color = SUIT_BASE[p.color] ? p.color : 'default', dir = dirOf(p.angle);
   shadow(g, p.x, p.y + 8, 10, 4, alpha);
   blit(g, posedSprite(dir, variant, color, G.g), p.x, p.y + 10, dir === 'left', alpha);
+}
+/**
+ * 트월킹 (옆모습, 오른쪽을 봄 — 왼쪽은 뒤집어 그림): 허리를 앞으로 숙이고 두 손은 굽힌 무릎에,
+ * 엉덩이를 뒤로 쭉 뺀 채 위아래로 빠르게 튕긴다. 프레임별 [엉덩이 높이 dy, 납작해짐 sq(0/1)]
+ */
+const TWERK = [[0, 0], [-2, 0], [-3, 0], [1, 1]];
+const TW_W = 34, TW_H = 34;
+function twerkSprite(variant, color, f) {
+  return build(`tw:${variant}:${color}:${f}`, TW_W, TW_H, g => {
+    g.translate(1, 0);
+    const P = suitPalette(color, variant), [d, sq] = TWERK[f];
+    const hip = [11, 17 + d], kF = [22, 22], aF = [18, 29], kB = [19, 22], aB = [13, 29], sh = [21, 8];
+    const boot = a => { rect(g, a[0] - 1, 28, 4, 1, P.tape); rect(g, a[0] - 1, 29, 5, 2, P.boot); rect(g, a[0] - 1, 31, 5, 1, P.sole); };
+    // 뒷다리 (그늘색)
+    limb(g, hip, kB, 4, 3, P.sh, P.dk); limb(g, kB, aB, 3, 3, P.sh, P.dk); boot(aB);
+    // 몸통: 엉덩이 위에서 어깨까지 비스듬히 숙인 등 (등선 / 배선)
+    poly(g, [[hip[0] - 2, hip[1] - 4], [sh[0] - 2, sh[1] - 3], [sh[0] + 1, sh[1] - 2], [sh[0] + 2, sh[1] + 2], [hip[0] + 3, hip[1] + 1]], P.suit);
+    line(g, hip[0] + 3, hip[1], sh[0] + 1, sh[1] + 2, P.sh);                    // 배 쪽 그늘
+    line(g, hip[0] + 1, hip[1] - 3, hip[0] + 4, hip[1] + 1, P.dk);              // 허리띠
+    px(g, hip[0] + 2, hip[1] - 2, P.tape);
+    // 산소통 (등 위에 비스듬히)
+    limb(g, [hip[0] + 3, hip[1] - 5], [sh[0] - 3, sh[1] - 2], 3, 3, P.tank, P.tankSh);
+    line(g, hip[0] + 3, hip[1] - 6, sh[0] - 3, sh[1] - 3, P.tankHi);
+    // 엉덩이: 뒤로 쭉 빼서 둥글게. 내려앉을 땐 납작하게 퍼진다
+    const bx = hip[0] - 4, by = hip[1] - 1 + sq, rx = 5 + sq, ry = 4.5 - sq;
+    ellipse(g, bx, by, rx, ry, P.sh);
+    ellipse(g, bx - 0.5, by - 0.8, rx - 1, ry - 1.2, P.suit);
+    px(g, bx - 2, by - 2 + sq, P.hi); px(g, bx - 1, by - 3 + sq, P.hi); px(g, bx - 3, by - 1 + sq, P.hi); px(g, bx, by - 3 + sq, P.hi);
+    // 앞다리: 엉덩이 → 앞으로 굽힌 무릎 → 발목
+    limb(g, [hip[0] + 1, hip[1] + 1], kF, 4, 3, P.suit, P.sh); limb(g, kF, aF, 3, 3, P.suit, P.sh); boot(aF);
+    line(g, hip[0] + 2, hip[1] + 3, kF[0] - 1, kF[1] + 1, P.sh);                // 허벅지 아래 그늘
+    line(g, bx - 1, by + ry, hip[0] + 1, hip[1] + 3, P.dk);                    // 엉덩이와 허벅지 사이 주름
+    // 팔: 어깨에서 내려와 무릎을 짚는다
+    limb(g, [sh[0], sh[1] + 2], [kF[0], kF[1] - 3], 2, 2, P.hi, P.sh);
+    rect(g, kF[0] - 1, kF[1] - 3, 2, 1, P.tape); rect(g, kF[0] - 1, kF[1] - 2, 4, 2, P.glove);
+    // 머리 (앞으로 숙여 아래를 봄: 후드 + 방독면)
+    const hx = sh[0] + 3, hy = sh[1] - 2;
+    ellipse(g, hx, hy, 4, 4.5, P.suit); ellipse(g, hx - 1, hy - 2, 2, 1.6, P.hi); ellipse(g, hx - 2, hy + 2, 2, 2, P.sh);
+    ellipse(g, hx + 3, hy + 1.5, 2.4, 3.2, P.mask); px(g, hx + 2, hy - 1, P.maskHi);
+    rect(g, hx + 2, hy - 1, 3, 3, P.visor); px(g, hx + 2, hy - 1, P.visorHi); px(g, hx + 3, hy - 1, P.visorHi);
+    ellipse(g, hx + 4, hy + 4, 1.6, 1.4, P.filter); px(g, hx + 4, hy + 4, P.filterHi);
+    // 튕길 때 흔들림 선
+    if (d <= -2) { line(g, bx - rx - 2, by - 3, bx - rx - 2, by - 1, P.tape); line(g, bx - rx - 2, by + 2, bx - rx - 2, by + 3, P.tape); }
+  });
 }
 /** 춤출 때 머리 위로 떠오르는 음표 */
 function drawNotes(g, p, u, alpha) {

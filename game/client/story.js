@@ -1,5 +1,6 @@
 import { humanPreview } from './sprites.js';
 import { Sound } from './sound.js';
+import { t as tr } from '../../shared/i18n.js';
 
 /**
  * 오프닝: 처음 Level 0 에 들어갈 때.
@@ -9,6 +10,11 @@ import { Sound } from './sound.js';
  * 멀티: 실제 동료들이 같이 촬영하던 친구들이고, 모두 함께 떨어진다.
  * 혼자: NPC 친구 둘이 촬영하고, 나만 떨어진다.
  */
+
+/** 대사 한 줄을 지금 언어로 (e.vars 가 있으면 {name} 등을 채운다) */
+export const lineText = e => tr(e.text, e.vars);
+/** 화면에 보이는 이름. 기본 이름 '나' 만 번역하고 플레이어가 지은 이름은 그대로 */
+export const castName = who => (who?.name === '나' ? tr('나') : who?.name ?? '');
 
 const NPC = [{ name: 'Jake', color: 'green' }, { name: 'Emily', color: 'blue' }];
 
@@ -36,7 +42,7 @@ export function storyScript(cast) {
     { t: 12.4, who: me, pitch: 1.05, text: '이 소리 뭐야? 형광등...?' },
     { t: 14.6, who: me, pitch: 1.15, text: '어? 바닥이—', sfx: 'glitch' },
     { t: 16.0, sfx: 'noclip' },
-    { t: 16.3, who: holder, pitch: 0.95, text: solo ? `${me.name}?! 야, 어디 갔어?!` : '어? 다들 어디— 으악!' },
+    { t: 16.3, who: holder, pitch: 0.95, text: solo ? '{name}?! 야, 어디 갔어?!' : '어? 다들 어디— 으악!', vars: solo ? { name: me.name } : undefined },
     { t: 17.6, sfx: 'static' },
   ];
 }
@@ -47,7 +53,7 @@ export function playStoryEvents(cine, prevT) {
   const t = cine.t;
   for (const e of cine.data.script) {
     if (e.t <= prevT || e.t > t) continue;
-    if (e.text) Sound.say(e.text, e.pitch, 0.75);
+    if (e.text) Sound.say(lineText(e), e.pitch, 0.75);
     if (e.sfx === 'camBeep') Sound.camBeep();
     else if (e.sfx === 'glitch') Sound.staticBurst(0.4, 0.6);
     else if (e.sfx === 'noclip') Sound.noclip();
@@ -202,10 +208,11 @@ export function drawScene(r, game, t, d) {
   // ---- 자막 ----
   const line = [...d.script].reverse().find(e => e.text && t >= e.t && t < e.t + 2.8);
   if (line) {
-    const shown = line.text.slice(0, Math.floor((t - line.t) * 24));
-    const label = line.who ? `${line.who.name}: ` : '';
+    const full = lineText(line);
+    const shown = full.slice(0, Math.floor((t - line.t) * 24));
+    const label = line.who ? `${castName(line.who)}: ` : '';
     ctx.font = `${fs}px VT323, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const tw = ctx.measureText(label + line.text).width;
+    const tw = ctx.measureText(label + full).width;
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(W / 2 - tw / 2 - 12, H * 0.8 - fs * 0.75, tw + 24, fs * 1.5);
     ctx.textAlign = 'left';
     const x0 = W / 2 - tw / 2;

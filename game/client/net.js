@@ -1,10 +1,11 @@
 import { io } from 'socket.io-client';
 import { CONFIG } from '../../shared/config.js';
+import { t as tr } from '../../shared/i18n.js';
 
 /**
  * Socket.io 클라이언트 래퍼. 서버 이벤트 'fooBar' 는 handlers.onFooBar(data) 로 전달된다.
  *
- * client → server : createRoom {name} | joinRoom {name, code} | solo {name, color} | setColor {color}
+ * client → server : createRoom {name} | joinRoom {name, code} | solo {name, color} | setColor {color} | setMode {mode, on}
  *                   startMatch | leaveRoom | state {...} | hide {index} | test {cmd, arg} | solvePuzzle {index, answer}
  * server → client : lobby, init, round, snapshot, playerJoined, playerLeft, keyCollected, playerDied,
  *                   playerEscaped, monsterAlert, entityEvent, hideState, itemSpawned, itemPicked,
@@ -14,7 +15,7 @@ const EVENTS = [
   'lobby', 'init', 'round', 'snapshot', 'playerJoined', 'playerLeft', 'keyCollected',
   'playerDied', 'playerEscaped', 'monsterAlert', 'entityEvent', 'hideState', 'itemSpawned', 'itemPicked',
   'testResult', 'roundEnd', 'correct', 'joinError', 'paused',
-  'inventory', 'itemUsed', 'emote', 'gameComplete', 'dullTouch', 'puzzleAlarm', 'objective', 'night', 'blackout', 'balloonPopped', 'chat', 'rtc', 'gesture',
+  'inventory', 'itemUsed', 'emote', 'gameComplete', 'dullTouch', 'puzzleAlarm', 'objective', 'night', 'blackout', 'balloonPopped', 'chat', 'rtc', 'gesture', 'corpse',
 ];
 
 export class NetClient {
@@ -29,7 +30,7 @@ export class NetClient {
     if (this.socket?.connected) { fn(this.socket); return; }
     if (!this.socket) {
       const s = this.socket = io({ reconnection: false });
-      s.on('connect_error', () => this.h.onError?.('서버에 연결할 수 없습니다.'));
+      s.on('connect_error', () => this.h.onError?.(tr('서버에 연결할 수 없습니다.')));
       s.on('disconnect', reason => this.h.onDisconnect?.(reason));
       for (const ev of EVENTS) {
         const fn2 = this.h['on' + ev[0].toUpperCase() + ev.slice(1)];
@@ -45,6 +46,7 @@ export class NetClient {
   joinRoom(name, code) { this.ensure(s => s.emit('joinRoom', { name, code })); }
   solo(name, color) { this.ensure(s => s.emit('solo', { name, color })); }
   setColor(color) { this.socket?.emit('setColor', { color }); }
+  setMode(mode, on) { this.socket?.emit('setMode', { mode, on }); }
   startMatch() { this.socket?.emit('startMatch'); }
   leaveRoom() { this.socket?.emit('leaveRoom'); }
   pause(paused) { this.socket?.emit('pause', { paused }); }

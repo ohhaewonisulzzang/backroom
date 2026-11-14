@@ -1,4 +1,5 @@
-import { CONFIG, TS, T, MISSION, levelInfo, levelLabel, ITEM_TYPES, SUIT_HEX } from '../../shared/config.js';
+import { CONFIG, TS, T, MISSION, levelInfo, levelLabel, ITEM_TYPES, SUIT_HEX, defaultModes } from '../../shared/config.js';
+import { t } from '../../shared/i18n.js';
 import { generateLevel } from '../../shared/map.js';
 import { clamp } from '../../shared/utils.js';
 import { ClientPlayer, ClientMonster } from './entities.js';
@@ -27,7 +28,13 @@ const Game = {
   paused: false,              // ESC 메뉴가 열려 있음 (입력 차단)
   cine: null,                 // 시네마틱 { type: intro|awake|escape|ending, t, dur, data }
   pendingLobby: null,         // 엔딩이 끝난 뒤 보여줄 대기방
-  inv: [], flares: [], fx: [], compassT: 0, flashT: 0, emoteOpen: false, totalTime: 0,
+  modes: defaultModes(),      // 게임 모드 (방장이 대기방에서 정한 것, init/round 로 받는다)
+  inv: [],                    // 가방 (칸 번호 고정, 빈칸 null)
+  held: -1,                   // 손에 든(장착한) 칸. 숫자 키로 고르고, 마우스 왼쪽으로 쓴다, G 로 버린다
+  useDown: false,             // 사용 버튼(마우스 왼쪽 / 터치 '사용')을 누르고 있는가
+  useHold: null,              // 꾹 눌러 쓰는 아이템 진행: { slot, type, t, dur }
+  lastUseSlot: -1, effects: [],   // 지속 효과 남은 시간 (아이템 칸 위에 표시): [{ slot, type, until, dur }]
+  flares: [], fx: [], compassT: 0, flashT: 0, emoteOpen: false, totalTime: 0,
   solo: false,                // 혼자 하기 → ESC 시 서버도 실제로 멈춤
   serverPaused: false,
   myId: null, roomName: '', round: 0, roundPhase: 'playing',
@@ -37,7 +44,7 @@ const Game = {
   night: null, toxicT: 0, loudT: 0,   // Level 94 밤 단계 / 초록 물에 서 있던 시간(화면 연출) / 큰 엔티티 발소리 타이머
   local: null, remotes: new Map(), monster: null, monsters: [], danger: 0, killerType: null,
   lockerShake: [], nearLocker: -1, levelIndex: 0,
-  gore: [], hallu: [], halluT: 0, deathSeed: 1,
+  corpses: [], gore: [], hallu: [], halluT: 0, deathSeed: 1,
   horde: null,                // Level ! 괴물 떼 { x, tx(서버 값), speed }   // 핏자국·살점 / 정신력 환각 (가짜 스마일러)
   nearPuzzle: -1, puzzleOpen: -1,   // 퍼즐 단말기: 가까운 것 / 열려 있는 것 (열쇠 번호)
   nearStation: -1, valveOpen: -1,   // 밸브/크랭크: 가까운 것 / 열려 있는 것 (장치 번호)
@@ -119,8 +126,9 @@ const Game = {
     this.round = d.round;
     this.roundPhase = d.phase;
     this.levelIndex = d.level ?? 0;
+    this.modes = { ...defaultModes(), ...(d.modes || {}) };
     const fresh = discoverLevel(this.levelIndex);         // 괴물 도감: 이 레벨의 괴물을 채운다
-    if (fresh.length) UI.notify?.(`괴물 도감에 추가: ${fresh.join(', ')}`);
+    if (fresh.length) UI.notify?.(t('괴물 도감에 추가: {names}', { names: fresh.map(n => t(n)).join(', ') }));
     this.level = generateLevel(d.seed, this.levelIndex);   // 서버와 같은 seed + 레벨 → 같은 맵/열쇠/출구/조명
     this.map = this.level.map;
     this.explored = new Uint8Array(this.map.w * this.map.h);
@@ -131,6 +139,7 @@ const Game = {
     this.night = d.night || null; this.toxicT = 0;
     this.blackout = d.blackout || null; this.blackoutK = this.blackout === 'dark' ? 1 : 0;   // 정전 레벨: 단계 / 화면 어둠 정도(0~1)
     this.popped = new Set(d.popped || []);
+    this.corpses = (d.corpses || []).map(c => ({ ...c }));
 
     this.remotes = new Map();
     let me = null;
@@ -146,7 +155,7 @@ const Game = {
     this.monsters = (d.monsters || []).map(s => { const m = new ClientMonster(); m.reset(s); return m; });
     this.items = (d.items || []).map(it => ({ ...it }));
     this.flares = (d.flares || []).map(f => ({ ...f, until: this.time + Math.max(0, (f.until - Date.now()) / 1000), dur: 30 }));
-    this.fx = []; this.compassT = 0; this.flashT = 0; this.emoteOpen = false; this.nightVisionT = 0;
+    this.fx = []; this.compassT = 0; this.flashT = 0; this.emoteOpen = false; this.nightVisionT = 0; this.useHold = null; this.effects = [];
     this.noteOpen = false; this.noteRead = false; this.nearNote = false;
     if (this.local) { this.local.adrenalineT = 0; this.local.boostT = 0; }
     this.gore = []; this.hallu = []; this.halluT = 0;
@@ -262,6 +271,18 @@ const Game = {
     this.flares = this.flares.filter(f => f.until > this.time);
     if (this.compassT > 0) this.compassT -= dt;
     if (this.nightVisionT > 0) this.nightVisionT -= dt;
+    if (this.modes.noFlashlight && this.local) this.local.flashlight = false;   // '손전등 금지' 모드
+    if (this.local) this.local.held = this.held;                                  // 손에 든 칸 → 서버로 (다른 사람에게 보인다)
+    this.effects = this.effects.filter(e => e.until > this.time);
+    // 꾹 눌러 쓰는 아이템: 누르고 있는 동안 원이 차고, 다 차면 사용. 손을 떼거나 칸을 바꾸면 취소
+    const h = this.useHold;
+    if (h) {
+      const it = this.inv[h.slot];
+      const ok = it && it.type === h.type && this.held === h.slot && this.useDown && this.local?.alive && !this.paused &&
+        this.roundPhase === 'playing' && this.puzzleOpen < 0 && this.valveOpen < 0 && !this.chatOpen && !this.emoteOpen;
+      if (!ok) this.useHold = null;
+      else if ((h.t += dt) >= h.dur) { this.useHold = null; this.lastUseSlot = h.slot; net.useItem(h.slot); }
+    }
     // 정전 어둠: 경고 중엔 지직거리며 깜빡, 정전이면 빠르게 꺼지고, 불이 들어오면 서서히 밝아진다
     if (this.blackout) {
       const want = this.blackout === 'dark' ? 1 : this.blackout === 'warn' ? (Math.random() < 0.25 ? 0.85 : 0) : 0;
@@ -570,7 +591,14 @@ const Game = {
 };
 
 // ------------------------------------------------------------ network handlers
-const nameOf = id => Game.playerById(id)?.name ?? '누군가';
+/** 뻐큐 이모트 모드가 꺼져 있으면 뻐큐는 못 쓴다 */
+const gestureOk = g => g !== 'finger' || Game.modes.finger;
+/** 내가 쓴 지속형 아이템의 남은 시간을 그 아이템이 있던 칸 위에 띄운다 (같은 종류는 새로 갱신) */
+const addEffect = (type, dur) => {
+  Game.effects = Game.effects.filter(e => e.type !== type);
+  Game.effects.push({ slot: Game.lastUseSlot, type, until: Game.time + dur, dur });
+};
+const nameOf = id => Game.playerById(id)?.name ?? t('누군가');
 
 /** 메인 메뉴로 돌아가기 */
 function toMenu(error = '', screen = 'main') {
@@ -578,7 +606,7 @@ function toMenu(error = '', screen = 'main') {
   if (Game.chatOpen) Game.closeChat();
   Game.phase = 'menu';
   Game.paused = false; Game.serverPaused = false; Game.solo = false;
-  Game.cine = null; Game.pendingLobby = null; Game.inv = []; Game.emoteOpen = false;
+  Game.cine = null; Game.pendingLobby = null; Game.inv = []; Game.held = -1; Game.useHold = null; Game.useDown = false; Game.effects = []; Game.emoteOpen = false;
   Game.local = null; Game.map = null; Game.lobby = null; Game.remotes = new Map(); Game.monsters = [];
   Game.initMenu();
   UI.showMenu({ error, screen });
@@ -664,21 +692,21 @@ const handlers = {
     const near = view ? clamp(1 - Math.hypot(x - view.x, y - view.y) / (TS * 12), 0, 1) : 0;
     if (near > 0 || by === Game.myId) Sound.pop(by === Game.myId ? 1 : near);
     Game.fx.push({ kind: 'pop', x, y, t: 0, dur: 0.7 });
-    if (item && by === Game.myId) { Sound.unlock(); UI.notify?.(`풍선 속에서 ${ITEM_TYPES[item]?.name ?? '아이템'} 이(가) 떨어졌다!`); }
+    if (item && by === Game.myId) { Sound.unlock(); UI.notify?.(t('풍선 속에서 {item} 이(가) 떨어졌다!', { item: t(ITEM_TYPES[item]?.name ?? '아이템') })); }
   },
   /** Level P-1: 정전 예고(깜빡임) / 정전 / 불 들어옴 */
   onBlackout({ phase }) {
     Game.blackout = phase;
-    if (phase === 'warn') { Sound.flickerTick(1); Sound.flickerTick(0.8); UI.notify?.('불이 깜빡인다 — 빨간 비상등 아래로 뛰어라!'); }
+    if (phase === 'warn') { Sound.flickerTick(1); Sound.flickerTick(0.8); UI.notify?.(t('불이 깜빡인다 — 빨간 비상등 아래로 뛰어라!')); }
     else if (phase === 'dark') { Sound.thud(1.2); Sound.staticBurst(0.5, 0.6); Game.shake = Math.max(Game.shake, 5); }
-    else { Sound.tone?.(120, 240, 0.6, 0.08, 'sawtooth'); UI.notify?.('불이 들어왔다'); }
+    else { Sound.tone?.(120, 240, 0.6, 0.08, 'sawtooth'); UI.notify?.(t('불이 들어왔다')); }
   },
   /** Level 94: 밤 예고 / 밤 / 낮 */
   onNight({ phase }) {
     Game.night = phase;
-    if (phase === 'warn') { Sound.bell(1); UI.notify?.('밤이 온다 — 옷장(사물함)에 숨어라!'); }
+    if (phase === 'warn') { Sound.bell(1); UI.notify?.(t('밤이 온다 — 옷장(사물함)에 숨어라!')); }
     else if (phase === 'night') { Sound.introSting(); Game.shake = Math.max(Game.shake, 6); }
-    else UI.notify?.('날이 밝았다');
+    else UI.notify?.(t('날이 밝았다'));
   },
   /** 미션 진행 (부품 줍기/배달/떨어뜨림, 장치 완료, 생존 시간 끝) */
   onObjective({ kind, by, obj, unlocked }) {
@@ -686,7 +714,7 @@ const handlers = {
     const mine = by === Game.myId;
     if (kind === 'pick') Sound.pickup(mine ? 1 : 0.4);
     else if (kind === 'deliver' || kind === 'activate') Sound.puzzleOk();
-    if (unlocked) { Game.exitUnlocked = true; Sound.unlock(); UI.notify?.('출구가 열렸다!'); }
+    if (unlocked) { Game.exitUnlocked = true; Sound.unlock(); UI.notify?.(t('출구가 열렸다!')); }
   },
   onPlayerDied({ id, entityType, x, y }) {
     const who = Game.playerById(id);
@@ -726,11 +754,11 @@ const handlers = {
     switch (e.kind) {
       case 'voice':
         if (m) m.bubble = { text: e.text, t: 2.5 };
-        if (near > 0) Sound.voice(e.text, near);
+        if (near > 0) Sound.voice(t(e.text), near);
         break;
       case 'emote':       // 스킨 스틸러가 플레이어처럼 감정 표현 + 동작을 한다
         if (m) { m.bubble = { text: e.text, t: 2.6 }; if (GESTURES[e.g]) m.gesture = { g: e.g, t: 0 }; }
-        if (near > 0) { Sound.speak(e.text, near); if (e.g?.startsWith('dance')) Sound.danceTune(near, e.g === 'dance2'); }
+        if (near > 0) { Sound.speak(t(e.text), near); if (e.g?.startsWith('dance')) Sound.danceTune(near, e.g === 'dance2'); }
         break;
       case 'reveal':
         if (m) { m.revealed = true; m.gesture = null; }
@@ -757,7 +785,7 @@ const handlers = {
         if (near > 0) Sound.warp(Math.max(0.3, near));
         break;
       case 'mimic':       // 엔티티가 보이스 챗에서 녹음한 목소리를 흉내 낸다
-        if (near > 0 && view) Voice.playMimic(near, clamp((e.x - view.x) / (TS * 6), -1, 1));
+        if (near > 0 && view && Game.modes.mimic) Voice.playMimic(near, clamp((e.x - view.x) / (TS * 6), -1, 1));
         break;
       case 'roar':        // 레벨 5의 야수: 돌진 직전 포효
         if (near > 0) { Sound.roar(Math.max(0.3, near)); Game.shake = Math.max(Game.shake, 6 * near); }
@@ -788,7 +816,7 @@ const handlers = {
   },
   onRoundEnd(d) {
     Game.roundPhase = 'ended';
-    d = { ...d, nextLevelName: d.nextLevel !== undefined ? `${levelLabel(d.nextLevel)} — ${levelInfo(d.nextLevel).name}` : null };
+    d = { ...d, nextLevelName: d.nextLevel !== undefined ? `${t(levelLabel(d.nextLevel))} — ${t(levelInfo(d.nextLevel).name)}` : null };
     if (Game.deathT > 0) Game.pendingRoundEnd = d;
     else UI.showRoundEnd(d);
   },
@@ -813,6 +841,7 @@ const handlers = {
     if (near > 0) Sound.locker(near);
   },
   onItemSpawned(it) { Game.items.push({ ...it }); },
+  onCorpse(c) { Game.corpses.push({ ...c }); },
   onItemPicked({ id, type, by }) {
     Game.items = Game.items.filter(it => it.id !== id);
     if (by !== Game.myId) return;
@@ -828,10 +857,10 @@ const handlers = {
         if (mine) { const p = Game.local; p.sanity = Math.min(CONFIG.SANITY.MAX, (p.sanity ?? 100) + ITEM_TYPES.almondWater.sanity); Game.hallu = []; Sound.drink(); }
         break;
       case 'staminaDrink':     // 스태미나 가득 + 잠시 지치지 않음
-        if (mine) { const p = Game.local; p.stamina = CONFIG.PLAYER.STAMINA; p.exhausted = false; p.boostT = ITEM_TYPES.staminaDrink.boost; Sound.drink(); }
+        if (mine) { const p = Game.local; p.stamina = CONFIG.PLAYER.STAMINA; p.exhausted = false; p.boostT = ITEM_TYPES.staminaDrink.boost; Sound.drink(); addEffect('staminaDrink', ITEM_TYPES.staminaDrink.boost); }
         break;
       case 'compass':
-        if (mine) { Game.compassT = ITEM_TYPES.compass.dur; Sound.click(); }
+        if (mine) { Game.compassT = ITEM_TYPES.compass.dur; Sound.click(); addEffect('compass', ITEM_TYPES.compass.dur); }
         break;
       case 'camera':
         Game.fx.push({ kind: 'flash', x: fx.x, y: fx.y, angle: fx.angle, t: 0, dur: 0.45 });
@@ -850,10 +879,10 @@ const handlers = {
         }
         break;
       case 'nightVision':      // 어둠 속이 초록빛으로 보인다
-        if (mine) { Game.nightVisionT = ITEM_TYPES.nightVision.dur; Sound.click(); }
+        if (mine) { Game.nightVisionT = ITEM_TYPES.nightVision.dur; Sound.click(); addEffect('nightVision', ITEM_TYPES.nightVision.dur); }
         break;
       case 'adrenaline':       // 잠깐 빨라지고 지치지 않는다
-        if (mine) { const p = Game.local; p.adrenalineT = ITEM_TYPES.adrenaline.dur; p.boostT = Math.max(p.boostT || 0, ITEM_TYPES.adrenaline.dur); p.stamina = CONFIG.PLAYER.STAMINA; p.exhausted = false; Sound.drink(); }
+        if (mine) { const p = Game.local; p.adrenalineT = ITEM_TYPES.adrenaline.dur; p.boostT = Math.max(p.boostT || 0, ITEM_TYPES.adrenaline.dur); p.stamina = CONFIG.PLAYER.STAMINA; p.exhausted = false; Sound.drink(); addEffect('adrenaline', ITEM_TYPES.adrenaline.dur); }
         break;
       case 'flare':
         if (fx.flare) Game.flares.push({ id: fx.flare.id, x: fx.flare.x, y: fx.flare.y, until: Game.time + fx.flare.dur, dur: fx.flare.dur });
@@ -867,22 +896,22 @@ const handlers = {
     Game.local.sanity = sanity;
     Game.dullFlash = 1; Game.shake = Math.max(Game.shake, 9);
     Sound.death('duller');
-    Game.msg('덜러에게 닿았다 — 정신력을 빼앗겼다', 2);
+    Game.msg(t('덜러에게 닿았다 — 정신력을 빼앗겼다'), 2);
   },
   onEmote({ id, i }) {
     const p = Game.playerById(id);
     const text = CONFIG.EMOTE.LINES[i];
     if (!p || !text) return;
-    p.bubble = { text, t: 2.6 };
+    p.bubble = { text: t(text), t: 2.6 };
     const view = Game.viewTarget();
     const near = view ? clamp(1 - Math.hypot(p.x - view.x, p.y - view.y) / (TS * 12), 0, 1) : 0;
-    if (near > 0) Sound.speak(text, near);
+    if (near > 0) Sound.speak(t(text), near);
   },
   onGesture({ id, g }) {
     const p = Game.playerById(id);
     if (!p || !GESTURES[g]) return;
     p.gesture = { g, t: 0 };
-    if (g.startsWith('dance')) {
+    if (g.startsWith('dance') || g === 'twerk') {
       const view = Game.viewTarget();
       const near = view ? clamp(1 - Math.hypot(p.x - view.x, p.y - view.y) / (TS * 12), 0, 1) : 0;
       if (near > 0) Sound.danceTune(near, g === 'dance2');
@@ -907,16 +936,16 @@ const handlers = {
     Game.local.x = x;
     Game.local.y = y;
   },
-  onJoinError({ message }) {
-    toMenu(message, 'multi');
+  onJoinError({ message, vars }) {
+    toMenu(t(message, vars), 'multi');
   },
   onError(message) {
     net.disconnect();
-    toMenu(message, 'main');
+    toMenu(t(message), 'main');
   },
   onDisconnect() {
     net.disconnect();
-    toMenu('서버와의 연결이 끊어졌다.', 'main');
+    toMenu(t('서버와의 연결이 끊어졌다.'), 'main');
   },
 };
 
@@ -934,12 +963,31 @@ export function startGame({ canvas, ui }) {
 
   Input.init();
   const canAct = () => Game.phase === 'game' && !Game.paused && Game.local?.alive && Game.roundPhase === 'playing' && Game.puzzleOpen < 0 && Game.valveOpen < 0 && !Game.chatOpen;
-  const useSlot = i => { if (i < CONFIG.INVENTORY_SIZE && Game.inv[i]) net.useItem(i); };
+  /** 숫자 키: 그 칸을 손에 든다 (같은 키를 다시 누르면 내려놓는다) */
+  const selectSlot = i => {
+    if (i < 0 || i >= CONFIG.INVENTORY_SIZE) return;
+    Game.held = Game.held === i ? -1 : i;
+    Game.useHold = null;
+    Sound.click();
+  };
+  /** 사용 버튼 누름: 클릭형은 바로 쓰고, 꾹 눌러 쓰는 아이템은 원이 다 찰 때까지 누르고 있어야 한다 */
+  const useStart = () => {
+    Game.useDown = true;
+    if (!canAct() || Game.emoteOpen || Game.held < 0) return;
+    const it = Game.inv[Game.held];
+    if (!it) return;
+    const def = ITEM_TYPES[it.type];
+    if (def?.hold) Game.useHold = { slot: Game.held, type: it.type, t: 0, dur: def.hold };
+    else { Game.lastUseSlot = Game.held; net.useItem(Game.held); }
+  };
+  const useEnd = () => { Game.useDown = false; Game.useHold = null; };
+  Input.onMouseDown(useStart);
+  Input.onMouseUp(useEnd);
   const dropSlot = i => {
     if (i >= CONFIG.INVENTORY_SIZE || !Game.inv[i] || Game.local.hidden) return;
     net.dropItem(i);
     Sound.click();
-    Game.msg(`${ITEM_TYPES[Game.inv[i].type]?.name ?? '아이템'} 을(를) 버렸다`, 1.5);
+    Game.msg(t('{item} 을(를) 버렸다', { item: t(ITEM_TYPES[Game.inv[i].type]?.name ?? '아이템') }), 1.5);
   };
   Input.onPress('Escape', () => {
     if (Game.phase !== 'game') return;
@@ -951,10 +999,10 @@ export function startGame({ canvas, ui }) {
   });
   Input.onAction('chat', () => { if (!Game.paused) Game.openChat(); });
   Input.onAction('mic', () => {
-    if (!Voice.enabled) { UI.notify?.('보이스 챗이 꺼져 있다 — 설정 → 보이스 챗에서 켜라'); return; }
+    if (!Voice.enabled) { UI.notify?.(t('보이스 챗이 꺼져 있다 — 설정 → 보이스 챗에서 켜라')); return; }
     const on = Voice.toggleMic();
     Sound.click();
-    UI.notify?.(on ? '마이크 켜짐' : '마이크 꺼짐');
+    UI.notify?.(on ? t('마이크 켜짐') : t('마이크 꺼짐'));
   });
   Input.onAction('emote', () => {
     if (Game.phase === 'game' && !Game.paused && Game.local?.alive) { Game.emoteOpen = !Game.emoteOpen; Sound.click(); }
@@ -963,20 +1011,21 @@ export function startGame({ canvas, ui }) {
   for (let n = 1; n <= 6; n++) {
     Input.onPress(`Digit${n}`, () => { if (Game.emoteOpen && canAct()) { net.emote(n - 1); Game.emoteOpen = false; } });
   }
-  // 동작: 7 뻐큐 · 8 가리키기 · 9 춤 1 · 0 춤 2
-  [['Digit7', 'finger'], ['Digit8', 'point'], ['Digit9', 'dance1'], ['Digit0', 'dance2']].forEach(([code, g]) => {
-    Input.onPress(code, () => { if (Game.emoteOpen && canAct()) { if (!Game.local.hidden) net.gesture(g); Game.emoteOpen = false; } });
+  // 동작: 7 뻐큐 · 8 가리키기 · 9 춤 1 · 0 춤 2 · - 트월킹
+  [['Digit7', 'finger'], ['Digit8', 'point'], ['Digit9', 'dance1'], ['Digit0', 'dance2'], ['Minus', 'twerk']].forEach(([code, g]) => {
+    Input.onPress(code, () => { if (Game.emoteOpen && canAct()) { if (!Game.local.hidden && gestureOk(g)) net.gesture(g); Game.emoteOpen = false; } });
   });
   for (let n = 1; n <= 4; n++) {
-    Input.onAction(`slot${n}`, () => {
-      if (!canAct() || Game.emoteOpen) return;
-      if (Input.held('drop')) dropSlot(n - 1);                                        // 버리기 키를 누른 채 → 버리기
-      else useSlot(n - 1);                                                            // 아이템 사용
-    });
+    Input.onAction(`slot${n}`, () => { if (canAct() && !Game.emoteOpen) selectSlot(n - 1); });   // 아이템 손에 들기
   }
+  // 버리기: 손에 든 아이템을 발밑에 버린다
+  Input.onAction('drop', () => { if (canAct() && !Game.emoteOpen && Game.held >= 0 && Game.inv[Game.held]) dropSlot(Game.held); });
   Input.onAction('flashlight', () => {
     if (Game.paused) return;
-    if (Game.phase === 'game' && Game.local?.alive && !Game.local.hidden) { Game.local.flashlight = !Game.local.flashlight; Sound.click(); }
+    if (Game.phase === 'game' && Game.local?.alive && !Game.local.hidden) {
+      if (Game.modes.noFlashlight) { UI.notify?.(t('손전등 금지 모드다')); return; }
+      Game.local.flashlight = !Game.local.flashlight; Sound.click();
+    }
   });
   Input.onPress('Backquote', () => { if (Game.phase === 'game' && Game.testMode) UI.toggleTest?.(); });
   Input.onAction('interact', () => {
@@ -1024,24 +1073,25 @@ export function startGame({ canvas, ui }) {
       if (Game.phase !== 'menu') return;
       Sound.init();
       Game.phase = 'connecting';
-      UI.showInfo({ title: 'NOCLIPPING', sub: '현실 밖으로 미끄러지는 중...' });
+      UI.showInfo({ title: 'NOCLIPPING', sub: t('현실 밖으로 미끄러지는 중...') });
       net.solo(name, color);
     },
     createRoom(name) {
       if (Game.phase !== 'menu') return;
       Sound.init();
       Game.phase = 'connecting';
-      UI.showInfo({ title: 'CONNECTING', sub: '방을 만드는 중...' });
+      UI.showInfo({ title: 'CONNECTING', sub: t('방을 만드는 중...') });
       net.createRoom(name);
     },
     joinRoom(name, code) {
       if (Game.phase !== 'menu') return;
       Sound.init();
       Game.phase = 'connecting';
-      UI.showInfo({ title: 'CONNECTING', sub: `방 ${code} 에 들어가는 중...` });
+      UI.showInfo({ title: 'CONNECTING', sub: t('방 {code} 에 들어가는 중...', { code }) });
       net.joinRoom(name, code);
     },
     setColor(color) { if (Game.phase === 'lobby') net.setColor(color); },
+    setMode(mode, on) { if (Game.phase === 'lobby') net.setMode(mode, on); },
     /** ESC 메뉴 열림/닫힘. 혼자 하기면 서버도 일시정지 */
     setPaused(on) {
       if (Game.phase !== 'game') return;
@@ -1062,12 +1112,16 @@ export function startGame({ canvas, ui }) {
     input: Input,
     get skipKey() { return keyLabel(Input.binds.skip); },
     resetTouch() { Input.resetTouch(); },
-    useItem(i) { if (canAct()) useSlot(i); },
+    /** 터치: 칸을 누르면 손에 들기, '사용' 버튼을 누르고 있는 동안 사용 */
+    selectSlot(i) { if (canAct()) selectSlot(i); },
+    useStart() { useStart(); },
+    useEnd() { useEnd(); },
+    get heldItem() { return Game.held >= 0 ? Game.inv[Game.held] || null : null; },
     dropItem(i) { if (canAct()) dropSlot(i); },
     emote(i) { if (canAct()) net.emote(i); },
-    gesture(g) { if (canAct() && !Game.local.hidden) net.gesture(g); },
-    get gestures() { return Object.entries(GESTURES).map(([g, d]) => [g, d.name]); },
-    get emoteLines() { return CONFIG.EMOTE.LINES; },
+    gesture(g) { if (canAct() && !Game.local.hidden && gestureOk(g)) net.gesture(g); },
+    get gestures() { return Object.entries(GESTURES).filter(([g]) => gestureOk(g)).map(([g, d]) => [g, t(d.name)]); },
+    get emoteLines() { return CONFIG.EMOTE.LINES.map(l => t(l)); },
     /** 퍼즐 패널(React) → 정답 제출 / 닫기 / 효과음 */
     solvePuzzle(index, answer) { if (Game.puzzleOpen === index) net.solvePuzzle(index, answer); },
     closePuzzle() { Game.closePuzzle(); },

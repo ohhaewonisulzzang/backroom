@@ -1,7 +1,8 @@
 import { humanPreview } from './sprites.js';
 import { Sound } from './sound.js';
 import { SUIT_HEX } from '../../shared/config.js';
-import { drawScene, makeStoryCast } from './story.js';
+import { drawScene, makeStoryCast, lineText, castName } from './story.js';
+import { t as tr } from '../../shared/i18n.js';
 
 /**
  * 엔딩 시네마틱 (Level 3999 탈출). 약 38초, 4 장면:
@@ -50,7 +51,7 @@ export function makeEndingData(stats, myId, fallbackColor, players) {
     { t: 0.4, sfx: 'camBeep' },
     { t: 1.2, who: cast.me, pitch: 1.05, text: '...여기, 그 폐건물이잖아?' },
     { t: 3.6, who: solo ? null : buddy, pitch: 1.25, text: solo ? '' : '돌아왔어... 진짜로 돌아왔어!' },
-    { t: 6.0, who: holder, pitch: 0.9, text: solo ? `${cast.me.name}?! 너 어디 있었던 거야?` : '...카메라, 아직 녹화 중이었네.' },
+    { t: 6.0, who: holder, pitch: 0.9, text: solo ? '{name}?! 너 어디 있었던 거야?' : '...카메라, 아직 녹화 중이었네.', vars: solo ? { name: cast.me.name } : undefined },
   ].filter(e => e.sfx || e.text);
   return {
     me, players: list, cast, script, date: `${M[now.getMonth()]} ${String(now.getDate()).padStart(2, '0')} ${now.getFullYear()}`,
@@ -67,7 +68,7 @@ export function playEndingEvents(cine, prevT) {
   for (const e of d.script) {                                         // B 장면 대사
     const x = ENDING.A + e.t;
     if (!at(x)) continue;
-    if (e.text) Sound.say(e.text, e.pitch, 0.75);
+    if (e.text) Sound.say(lineText(e), e.pitch, 0.75);
     if (e.sfx === 'camBeep') Sound.camBeep();
   }
   if (at(ENDING.B - 0.9)) { Sound.flickerTick(1); Sound.tone(60, 60, 0.5, 0.1, 'sawtooth'); }   // ...형광등?
@@ -185,16 +186,16 @@ function drawReport(r, lt, d) {
     ctx.font = font; ctx.fillStyle = col; ctx.fillText(text.slice(0, n), x, y);
   };
   const big = `${Math.round(fs * 1.5)}px VT323, monospace`, mid = `${fs}px VT323, monospace`, small = `${Math.round(fs * 0.75)}px VT323, monospace`;
-  type('생존 보고서  —  SURVIVAL REPORT', x0 + 24, y0 + 18, 0.3, '#e6c24e', big);
-  type(`플레이 시간   ${fmtTime(d.playTime)}`, x0 + 24, y0 + 18 + fs * 2.4, 1.2, '#cfc6a6', mid);
-  type(`총 사망 횟수  ${d.deaths}번`, x0 + 24, y0 + 18 + fs * 3.6, 1.7, d.deaths ? '#e0604a' : '#cfc6a6', mid);
+  type(tr('생존 보고서  —  SURVIVAL REPORT'), x0 + 24, y0 + 18, 0.3, '#e6c24e', big);
+  type(tr('플레이 시간   {time}', { time: fmtTime(d.playTime) }), x0 + 24, y0 + 18 + fs * 2.4, 1.2, '#cfc6a6', mid);
+  type(tr('총 사망 횟수  {n}번', { n: d.deaths }), x0 + 24, y0 + 18 + fs * 3.6, 1.7, d.deaths ? '#e0604a' : '#cfc6a6', mid);
   ctx.fillStyle = 'rgba(138,122,58,0.5)'; if (lt > 2.1) ctx.fillRect(x0 + 24, y0 + fs * 5.6, pw - 48, 1);
   d.players.forEach((p, k) => {
     const start = 2.4 + k * 1.1, y = y0 + fs * 6.2 + k * rowH;
     if (lt < start) return;
     ctx.fillStyle = SUIT_HEX[p.color] || '#e7b92e'; ctx.fillRect(x0 + 24, y + fs * 0.25, fs * 0.6, fs * 0.6);
-    type(`${p.name}: ${p.line}.`, x0 + 24 + fs, y, start, p.id === d.me.id ? '#fff3c4' : '#e6dcb0', mid);
-    type(`사망 ${p.deaths}  ·  열쇠 ${p.keys}  ·  퍼즐 ${p.puzzles}  ·  배달 ${p.delivered}  ·  장치 ${p.activated}  ·  탈출 ${p.escapes}`, x0 + 24 + fs, y + fs * 1.15, start + 0.3, '#8a7f5a', small);
+    type(`${castName(p)}: ${tr(p.line)}.`, x0 + 24 + fs, y, start, p.id === d.me.id ? '#fff3c4' : '#e6dcb0', mid);
+    type(tr('사망 {deaths}  ·  열쇠 {keys}  ·  퍼즐 {puzzles}  ·  배달 {delivered}  ·  장치 {activated}  ·  탈출 {escapes}', p), x0 + 24 + fs, y + fs * 1.15, start + 0.3, '#8a7f5a', small);
   });
   // 결과 도장
   const stampT = 2.4 + (nRows + 2) * 1.1 + 0.4;
@@ -205,7 +206,7 @@ function drawReport(r, lt, d) {
     ctx.globalAlpha = a * u;
     ctx.strokeStyle = '#d23a2a'; ctx.lineWidth = 4; ctx.strokeRect(-fs * 4.6, -fs * 1.1, fs * 9.2, fs * 2.2);
     ctx.font = `${Math.round(fs * 1.6)}px VT323, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#d23a2a';
-    ctx.fillText('탈출 성공', 0, 0);
+    ctx.fillText(tr('탈출 성공'), 0, 0);
     ctx.restore();
   }
   ctx.globalAlpha = 1;

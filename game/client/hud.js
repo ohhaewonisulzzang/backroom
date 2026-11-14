@@ -1,6 +1,8 @@
-import { CONFIG, TS, T, SUIT_HEX, MISSION, MISSION_TEXT, levelLabel, levelInfo, missionKind, missionGoal } from '../../shared/config.js';
+import { CONFIG, TS, T, SUIT_HEX, MISSION, MISSION_TEXT, levelLabel, levelInfo, missionKind, missionGoal, ITEM_TYPES } from '../../shared/config.js';
+import { Input, keyLabel } from './input.js';
 import { itemIcon } from './sprites.js';
 import { BESTIARY, typesInLevel } from './bestiary.js';
+import { t as tr, getLang } from '../../shared/i18n.js';
 
 const fmtTime = t => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
@@ -110,13 +112,13 @@ export class Hud {
       ctx.textAlign = 'center'; ctx.font = '30px VT323, monospace';
       const safe = game.level?.isSafe?.(Math.floor(p.x / TS), Math.floor(p.y / TS));
       ctx.fillStyle = game.blackout === 'dark' ? `rgba(255,70,50,${0.7 + Math.sin(game.time * 8) * 0.3})` : 'rgba(255,230,140,0.95)';
-      ctx.fillText(game.blackout === 'dark' ? (safe ? '정전 — 비상등 밑에서 버텨라' : '정전! 빛으로 가라!') : '불이 깜빡인다 — 빨간 비상등 아래로!', W / 2, 64);
+      ctx.fillText(game.blackout === 'dark' ? tr(safe ? '정전 — 비상등 밑에서 버텨라' : '정전! 빛으로 가라!') : tr('불이 깜빡인다 — 빨간 비상등 아래로!'), W / 2, 64);
       ctx.textAlign = 'left';
     }
     if (game.night === 'warn' || game.night === 'night') {
       ctx.textAlign = 'center'; ctx.font = '30px VT323, monospace';
       ctx.fillStyle = game.night === 'night' ? `rgba(255,80,60,${0.7 + Math.sin(game.time * 6) * 0.3})` : 'rgba(255,220,120,0.95)';
-      ctx.fillText(game.night === 'night' ? (p.hidden ? '밤 — 숨어 있어라...' : '밤이다! 숨어라!') : '종이 울린다 — 밤이 온다. 옷장에 숨어라', W / 2, 64);
+      ctx.fillText(game.night === 'night' ? tr(p.hidden ? '밤 — 숨어 있어라...' : '밤이다! 숨어라!') : tr('종이 울린다 — 밤이 온다. 옷장에 숨어라'), W / 2, 64);
       ctx.textAlign = 'left';
     }
     for (let i = 0; i < (game.horde || game.obj ? 0 : game.keys.length); i++) {
@@ -143,6 +145,22 @@ export class Hud {
       const brainCol = low && blink ? ['#e0508a', '#ff9ac0', '#a02860'] : ['#e89ab8', '#ffd0e0', '#b0607e'];
       drawPixelGauge(ctx, BRAIN, 20, 79, 3, san, { fill: brainCol[0], hi: brainCol[1], fold: brainCol[2], line: '#140810', empty: '#2e1a26' },
         low ? Math.sin(game.time * 20) * 0.03 : 0);
+      // 지속 효과 (야간 투시경·나침반·아드레날린·스테미너 드링크): 뇌 오른쪽에 아이템 모양 + 남은 초
+      let ex = 72;
+      for (const e of game.effects || []) {
+        const left = Math.max(0, e.until - game.time), ic = itemIcon(e.type), k = 2, ew = ic.width * k, eh = ic.height * k;
+        const warn = left < 3 && blink;                                   // 끝나기 직전엔 숫자만 살짝 깜빡
+        ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(ex - 3, 80, ew + 44, 30);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(ic, ex, Math.round(95 - eh / 2), ew, eh);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(ex - 3, 108, ew + 44, 2);
+        ctx.fillStyle = e.type === 'nightVision' ? '#7dff8e' : '#fff3c4'; ctx.fillRect(ex - 3, 108, Math.round((ew + 44) * left / e.dur), 2);
+        ctx.font = '20px VT323, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = warn ? '#ff8a6a' : e.type === 'nightVision' ? '#7dff8e' : '#fff3c4';
+        ctx.fillText(tr('{n}초', { n: Math.ceil(left) }), ex + ew + 5, 95);
+        ex += ew + 54;
+      }
+      ctx.textBaseline = 'top';
     }
     if (game.testMode && (game.test.god || game.test.fullbright)) {
       ctx.font = '16px VT323, monospace'; ctx.fillStyle = '#c87ad0';
@@ -177,7 +195,7 @@ export class Hud {
       }
     }
 
-    this.drawInventory(ctx, game, W, H);
+    this.drawInventory(ctx, game, W, H, dt);
     this.drawMic(ctx, game, H);
     if (game.compassT > 0 && p.alive) this.drawCompass(ctx, game, W, H);
     if (game.emoteOpen) this.drawEmoteWheel(ctx, game, W, H);
@@ -199,8 +217,15 @@ export class Hud {
     ctx.globalAlpha = 1;
     ctx.strokeStyle = '#4a4222'; ctx.lineWidth = 1;
     ctx.strokeRect(mx - 0.5, my - 0.5, mw + 1, mh + 1);
-    // 내 위치만 (관전 중이면 보고 있는 사람). 동료 위치는 보이지 않는다
+    // 내 위치 (관전 중이면 보고 있는 사람). '미니맵 동료 표시' 모드면 살아 있는 동료도 방호복 색 점으로
     const me = game.viewTarget();
+    if (game.modes?.mapPlayers) {
+      for (const pl of game.allPlayers()) {
+        if (pl === me || !pl.alive) continue;
+        ctx.fillStyle = SUIT_HEX[pl.color] || '#e7b92e';
+        ctx.fillRect(mx + (pl.x / TS) * s - 1.5, my + (pl.y / TS) * s - 1.5, 3, 3);
+      }
+    }
     if (me?.alive) {
       ctx.fillStyle = '#fff3c4';
       ctx.fillRect(mx + (me.x / TS) * s - 1.5, my + (me.y / TS) * s - 1.5, 3, 3);
@@ -216,6 +241,18 @@ export class Hud {
       ctx.font = font;
       const out = [];
       let cur = '';
+      if (getLang() === 'en') {         // 영어: 단어 단위 (한 줄보다 긴 단어만 글자 단위)
+        const max = () => tw - (out.length ? indent : 0);
+        for (const word of text.split(/\s+/).filter(Boolean)) {
+          const next = cur ? cur + ' ' + word : word;
+          if (ctx.measureText(next).width <= max()) { cur = next; continue; }
+          if (cur) out.push(cur);
+          cur = '';
+          for (const ch of word) { if (cur && ctx.measureText(cur + ch).width > max()) { out.push(cur); cur = ch; } else cur += ch; }
+        }
+        if (cur) out.push(cur);
+        return out;
+      }
       for (const ch of text) { if (ctx.measureText(cur + ch).width > tw - (out.length ? indent : 0)) { out.push(cur); cur = ch.trim() ? ch : ''; } else cur += ch; }
       if (cur) out.push(cur);
       return out;
@@ -229,10 +266,10 @@ export class Hud {
       .map(b => (over[b.type] ? { ...b, counter: over[b.type] } : b));
     if (tips.length) {
       rows.push({ gap: 10 });
-      rows.push({ text: '살아남는 법', font: '22px VT323, monospace', col: '#8a1a10', h: 27 });
+      rows.push({ text: tr('살아남는 법'), font: '22px VT323, monospace', col: '#8a1a10', h: 27 });
       for (const b of tips) {
-        const ls = wrap(`${b.name} — ${b.counter}`, F2, 14);
-        ls.forEach((l, i) => rows.push({ text: l, font: F2, col: '#3a2c1a', h: 23, x: i ? 14 : 0, name: i ? null : b.name }));
+        const bn = tr(b.name), ls = wrap(`${bn} — ${tr(b.counter)}`, F2, 14);
+        ls.forEach((l, i) => rows.push({ text: l, font: F2, col: '#3a2c1a', h: 23, x: i ? 14 : 0, name: i ? null : bn }));
       }
     }
     const bodyH = rows.reduce((t, r) => t + (r.gap ?? r.h), 0);
@@ -244,7 +281,7 @@ export class Hud {
     ctx.fillStyle = 'rgba(120,30,20,0.35)'; ctx.beginPath(); ctx.arc(x + pw - 46, y + ph - 30, 12, 0, Math.PI * 2); ctx.fill();               // 얼룩
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.font = '26px VT323, monospace'; ctx.fillStyle = '#4a3a22';
-    ctx.fillText(`${levelLabel(game.levelIndex ?? 0)} — ${info.name}`, x + 24, y + 18);
+    ctx.fillText(`${tr(levelLabel(game.levelIndex ?? 0))} — ${tr(info.name)}`, x + 24, y + 18);
     let yy = y + 58;
     for (const r of rows) {
       if (r.gap) { ctx.fillStyle = 'rgba(120,100,60,0.35)'; ctx.fillRect(x + 24, yy + r.gap / 2 - 1, pw - 48, 1); yy += r.gap; continue; }
@@ -257,7 +294,7 @@ export class Hud {
       yy += r.h;
     }
     ctx.font = '16px VT323, monospace'; ctx.fillStyle = '#7a6a4a'; ctx.textAlign = 'right';
-    ctx.fillText('E 로 닫기', x + pw - 18, y + ph - 22);
+    ctx.fillText(tr('E 로 닫기'), x + pw - 18, y + ph - 22);
     ctx.restore();
   }
 
@@ -268,20 +305,20 @@ export class Hud {
     if (!o && game.level?.mission?.type === 'noclip') {          // 끝없는 도시: 목표 = 맨 위 노클립 존
       const e = game.level.exitIdx, ey = (e / game.map.w) | 0, py = Math.floor((game.local?.y ?? 0) / TS);
       ctx.font = '20px VT323, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = '#9fd8ff';
-      ctx.fillText(`노클립 존까지 ${Math.max(0, py - ey)}칸 ↑`, 20, 50);
+      ctx.fillText(tr('노클립 존까지 {n}칸 ↑', { n: Math.max(0, py - ey) }), 20, 50);
       return;
     }
     if (!o) return;
-    const M = game.level.mission, TXT = MISSION_TEXT[missionKind(M)] || {};
+    const M = game.level.mission, TXT = MISSION_TEXT[missionKind(M)] || {}, unit = tr(TXT.unit);
     let text;
-    if (o.type === 'survive') text = game.exitUnlocked ? `${TXT.unit} — 출구가 열렸다` : `${TXT.unit}까지 ${fmtTime(Math.ceil(o.left))}${game.local?.hidden ? '  (숨어만 있으면 시간이 멈춘다)' : ''}`;
+    if (o.type === 'survive') text = game.exitUnlocked ? tr('{unit} — 출구가 열렸다', { unit }) : tr('{unit}까지 {time}', { unit, time: fmtTime(Math.ceil(o.left)) }) + (game.local?.hidden ? tr('  (숨어만 있으면 시간이 멈춘다)') : '');
     else {
-      text = `${TXT.unit} ${o.done}/${o.total}`;
+      text = `${unit} ${o.done}/${o.total}`;
       if (o.type === 'deliver') {
         const held = o.parts.filter(pt => pt.s === 1 && pt.c === game.myId).length;
-        if (held) text += `  (들고 있음 ${held}/${MISSION.CARRY})`;
+        if (held) text += tr('  (들고 있음 {held}/{max})', { held, max: MISSION.CARRY });
       }
-      if (game.exitUnlocked) text += '  — 출구가 열렸다';
+      if (game.exitUnlocked) text += tr('  — 출구가 열렸다');
     }
     ctx.font = '20px VT323, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillStyle = game.exitUnlocked ? '#6edc78' : o.type === 'survive' && o.left < 15 && Math.floor(game.time * 4) % 2 ? '#ff6a4a' : '#e6c24e';
@@ -320,21 +357,61 @@ export class Hud {
     ctx.textAlign = 'left';
   }
 
-  /** 인벤토리: 아래 가운데 4칸. 숫자 = 사용 키, 점 = 남은 횟수 */
-  drawInventory(ctx, game, W, H) {
+  /**
+   * 인벤토리: 아래 가운데 4칸 (칸 번호 고정). 숫자 = 손에 드는 키, 점 = 남은 횟수.
+   * 손에 든 칸은 밝은 테두리로 살짝 올라오고, 그 위에 사용법 안내.
+   * 칸 위: 꾹 눌러 쓰는 중이면 흰 원이 차오른다. (지속 효과 남은 초는 정신력 옆에)
+   */
+  drawInventory(ctx, game, W, H, dt = 0.016) {
     const n = CONFIG.INVENTORY_SIZE, size = 46, gap = 6, x0 = Math.round(W / 2 - (n * size + (n - 1) * gap) / 2), y0 = H - size - 18;
+    // 손에 든 칸은 부드럽게 6px 떠오르고, 내려놓으면 부드럽게 내려간다
+    if (!this.slotLift) this.slotLift = Array(n).fill(0);
+    for (let i = 0; i < n; i++) this.slotLift[i] += ((game.held === i ? 6 : 0) - this.slotLift[i]) * Math.min(1, dt * 16);
+    const liftOf = i => Math.round(this.slotLift[i]);
     ctx.imageSmoothingEnabled = false;
     for (let i = 0; i < n; i++) {
-      const x = x0 + i * (size + gap), it = game.inv[i];
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y0, size, size);
-      ctx.strokeStyle = it ? '#8a7a3a' : '#3a3420'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y0 + 0.5, size - 1, size - 1);
+      const it = game.inv[i], held = game.held === i;
+      const x = x0 + i * (size + gap), y = y0 - liftOf(i);
+      ctx.fillStyle = held ? 'rgba(40,34,14,0.85)' : 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, size, size);
+      ctx.strokeStyle = held ? '#fff3c4' : it ? '#8a7a3a' : '#3a3420'; ctx.lineWidth = held ? 2 : 1;
+      if (held) ctx.strokeRect(x + 1, y + 1, size - 2, size - 2); else ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+      ctx.lineWidth = 1;
       ctx.font = '14px VT323, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillStyle = it ? '#b9a552' : '#4a4222'; ctx.fillText(String(i + 1), x + 3, y0 + 1);
+      ctx.fillStyle = held ? '#fff3c4' : it ? '#b9a552' : '#4a4222'; ctx.fillText(String(i + 1), x + 3, y + 1);
       if (!it) continue;
       const ic = itemIcon(it.type), k = 2;
-      ctx.drawImage(ic, Math.round(x + size / 2 - (ic.width * k) / 2), Math.round(y0 + size / 2 - (ic.height * k) / 2 + 2), ic.width * k, ic.height * k);
-      for (let u = 0; u < it.uses && it.uses > 1; u++) { ctx.fillStyle = '#d8c46a'; ctx.fillRect(x + size - 7 - u * 5, y0 + size - 6, 3, 3); }
+      ctx.drawImage(ic, Math.round(x + size / 2 - (ic.width * k) / 2), Math.round(y + size / 2 - (ic.height * k) / 2 + 2), ic.width * k, ic.height * k);
+      for (let u = 0; u < it.uses && it.uses > 1; u++) { ctx.fillStyle = '#d8c46a'; ctx.fillRect(x + size - 7 - u * 5, y + size - 6, 3, 3); }
     }
+    // 칸 위 표시: 꾹 누르는 진행 원
+    const above = i => ({ cx: x0 + i * (size + gap) + size / 2, top: y0 - liftOf(i) - 6 });
+    const stack = {};
+    const h = game.useHold;
+    if (h && h.slot >= 0 && h.slot < n) {
+      const { cx, top } = above(h.slot), r = 13, cy = top - (stack[h.slot] || 0) - r - 2, f = Math.min(1, h.t / h.dur);
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r - 1, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.closePath(); ctx.fill();
+      ctx.lineWidth = 1;
+    }
+    // 손에 든 아이템: 이름 + 사용법 (꾹 눌러야 하는 아이템은 그렇다고 알려 준다).
+    // 들었을 때 1.5초만 보이고 0.5초 동안 서서히 사라진다 (다시 들거나 다른 아이템을 들면 또 보인다)
+    const it = game.held >= 0 ? game.inv[game.held] : null;
+    const hintKey = it ? `${game.held}:${it.type}` : '';
+    if (hintKey !== this.hintKey) { this.hintKey = hintKey; this.hintAt = game.time; }
+    const hintA = it ? Math.max(0, Math.min(1, 1 - (game.time - this.hintAt - 1.5) / 0.5)) : 0;
+    if (it && !h && hintA > 0) {
+      ctx.globalAlpha = hintA;
+      const def = ITEM_TYPES[it.type] || {}, drop = keyLabel(Input.binds.drop);
+      const how = def.hold ? tr('좌클릭 꾹 눌러 사용') : tr('좌클릭으로 사용');
+      const line = `${tr(def.name ?? '아이템')} · ${how} · ${tr('{key} 버리기', { key: drop })}`;
+      ctx.font = '17px VT323, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      const w = ctx.measureText(line).width + 16, ly = y0 - 14;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(W / 2 - w / 2, ly - 15, w, 20);
+      ctx.fillStyle = def.hold ? '#ffffff' : '#e8d890'; ctx.fillText(line, W / 2, ly);
+      ctx.globalAlpha = 1;
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   }
 
   /** 나침반: 플레이어 위에 가장 가까운 열쇠(다 모았으면 출구) 방향 화살표 */
@@ -365,14 +442,16 @@ export class Hud {
 
   /** 감정 표현 고르기 (, 키 → 숫자 1~6) */
   drawEmoteWheel(ctx, game, W, H) {
-    const lines = CONFIG.EMOTE.LINES, acts = [['7', '뻐큐'], ['8', '가리키기'], ['9', '춤 1 (들썩)'], ['0', '춤 2 (빙글)']];
-    const rowH = 26, colW = 210, h = Math.max(lines.length, acts.length) * rowH + 40, w = colW * 2 + 24;
+    const lines = CONFIG.EMOTE.LINES.map(l => tr(l)), acts = [['7', '뻐큐'], ['8', '가리키기'], ['9', '춤 1 (들썩)'], ['0', '춤 2 (빙글)'], ['-', '트월킹']].filter(([k]) => k !== '7' || game.modes?.finger).map(([k, l]) => [k, tr(l)]);
+    ctx.font = '20px VT323, monospace';
+    const longest = Math.max(0, ...lines.map(l => ctx.measureText(l).width), ...acts.map(([, l]) => ctx.measureText(l).width));
+    const rowH = 26, colW = Math.max(210, Math.ceil(longest) + 52), h = Math.max(lines.length, acts.length) * rowH + 40, w = colW * 2 + 24;
     const x = Math.round(W / 2 - w / 2), y = H - 90 - h;
     ctx.fillStyle = 'rgba(8,6,2,0.88)'; ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = '#8a7a3a'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.font = '16px VT323, monospace'; ctx.fillStyle = '#8a7a3a';
-    ctx.fillText('대사', x + 12, y + 8); ctx.fillText('동작', x + colW + 24, y + 8);
+    ctx.fillText(tr('대사'), x + 12, y + 8); ctx.fillText(tr('동작'), x + colW + 24, y + 8);
     ctx.font = '20px VT323, monospace';
     lines.forEach((l, i) => {
       ctx.fillStyle = '#8a7a3a'; ctx.fillText(String(i + 1), x + 12, y + 30 + i * rowH);

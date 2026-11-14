@@ -292,7 +292,7 @@ export const Sound = {
     try {
       if (!('speechSynthesis' in window)) return;
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'ko-KR'; u.pitch = pitch; u.rate = 1.1; u.volume = v * this.volume;
+      u.lang = /[가-힣]/.test(text) ? 'ko-KR' : 'en-US'; u.pitch = pitch; u.rate = 1.1; u.volume = v * this.volume;
       speechSynthesis.cancel();
       speechSynthesis.speak(u);
     } catch { /* 음성합성 미지원 */ }

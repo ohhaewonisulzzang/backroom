@@ -22,6 +22,7 @@ export class ClientPlayer extends PlayerState {
     this.flashlight = s.flashlight; this.sprinting = s.sprinting; this.crouching = !!s.crouching; this.status = s.status;
     this.hidden = !!s.hidden; this.lockerId = s.lockerId ?? -1;
     if (s.vc !== undefined) this.vc = s.vc;
+    this.hold = s.hold || null; this.nv = !!s.nv;   // 손에 든 아이템, 야간 투시경 착용
   }
 
   interpolate(dt) {

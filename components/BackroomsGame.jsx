@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import PuzzlePanel from './PuzzlePanel.jsx';
 import ValvePanel from './ValvePanel.jsx';
 import ChatBox from './ChatBox.jsx';
 import { VoiceSettings, KeySettings } from './SettingsPanels.jsx';
 import { keyLabel } from '../game/client/input.js';
-import { LEVELS } from '../shared/config.js';
+import { LEVELS, MODES, defaultModes } from '../shared/config.js';
+import { t, getLang, setLang, onLangChange, LANGS } from '../shared/i18n.js';
 
 const store = {
   get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
@@ -33,6 +35,8 @@ export default function BackroomsGame() {
   const [testOpen, setTestOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
   const [settings, setSettings] = useState(loadSettings);
+  const [, setLangState] = useState(getLang);       // 언어가 바뀌면 화면 전체를 다시 그린다
+  useEffect(() => onLangChange(setLangState), []);
   const [puzzle, setPuzzle] = useState(null);       // 열린 퍼즐 단말기 { index, puzzle, wrongAt }
   const [valve, setValve] = useState(null);         // 열린 밸브/크랭크 { index, kind, turns }
   const [toast, setToast] = useState(null);         // 퍼즐 결과 한 줄 알림
@@ -42,6 +46,15 @@ export default function BackroomsGame() {
   // 게임을 시작할 때(혼자 플레이 / 멀티 플레이를 누를 때) 한 번 나오는 주의 화면. 닫으면 원래 하려던 걸 이어서 한다
   const [warning, setWarning] = useState(null);     // null | () => void (닫은 뒤 할 일)
   const warnedRef = useRef(false);
+  // 게임이 처음 시작될 때 한 번: 전체화면 권장 (이미 전체화면이거나 지원하지 않으면 안 띄운다)
+  // 게임 중(대기방·라운드 결과 포함) 전체화면이 아니면 '전체화면을 권장합니다' 를 계속 띄운다
+  const [fsOn, setFsOn] = useState(isFullscreen);
+  useEffect(() => {
+    const on = () => setFsOn(isFullscreen());
+    document.addEventListener('fullscreenchange', on);
+    return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
+  const fsTip = canFullscreen() && !fsOn && ['hidden', 'lobby', 'roundEnd'].includes(overlay.kind) && !pauseOpen;
   const withWarning = fn => { if (warnedRef.current) fn(); else setWarning(() => fn); };
 
   useEffect(() => {
@@ -64,7 +77,7 @@ export default function BackroomsGame() {
       closePuzzle: result => {
         setPuzzle(null);
         if (result) {
-          setToast(result.solved ? '잠금 해제 — 열쇠를 얻었다' : `${result.by} 이(가) 먼저 풀었다`);
+          setToast(result.solved ? t('잠금 해제 — 열쇠를 얻었다') : t('{by} 이(가) 먼저 풀었다', { by: result.by }));
           setTimeout(() => setToast(null), 2200);
         }
       },
@@ -75,6 +88,7 @@ export default function BackroomsGame() {
     import('../game/client/engine.js').then(({ startGame }) => {
       if (disposed) return;
       engineRef.current = startGame({ canvas: canvasRef.current, ui });
+      if (process.env.NODE_ENV !== 'production') window.__backrooms = engineRef.current;   // 개발 중 브라우저 자동 확인용
       engineRef.current.applySettings(loadSettings());
     });
     return () => {
@@ -131,14 +145,59 @@ export default function BackroomsGame() {
           progress={() => engine()?.valveProgress(valve.index) ?? 0}
           onClose={() => engine()?.closeValve()} />
       )}
-      {toast && <div className="pz-toast">{toast}</div>}
+      {toast && <div className="pz-toast">{t(toast)}</div>}
       {['hidden', 'lobby', 'roundEnd'].includes(overlay.kind) && !pauseOpen && (
         <ChatBox messages={chat} open={chatOpen} colorHex={colorHex}
           onSend={t => engine()?.sendChat(t)} onClose={() => engine()?.closeChat()} />
       )}
       {isTouch && overlay.kind === 'hidden' && !pauseOpen && <TouchControls engine={engine} />}
+      {fsTip && <FullscreenTip />}
       {testOpen && <TestPanel onCmd={(c, a) => engine()?.test(c, a)} onClose={() => setTestOpen(false)} />}
       {warning && <WarningScreen onClose={() => { const next = warning; warnedRef.current = true; setWarning(null); unlock(); next(); }} />}
+    </div>
+  );
+}
+
+// ================================================================ 전체화면
+const canFullscreen = () => typeof document !== 'undefined' && !!document.fullscreenEnabled;
+const isFullscreen = () => typeof document !== 'undefined' && !!document.fullscreenElement;
+/** 전체화면 켜기/끄기 (클릭 같은 사용자 동작 안에서 불러야 브라우저가 허락한다) */
+async function toggleFullscreen(on = !isFullscreen()) {
+  try {
+    if (on && !isFullscreen()) {
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+      // ESC 를 눌러도 바로 꺼지지 않게: ESC 키를 게임이 받는다 (크롬·엣지는 ESC 를 꾹 눌러야 전체화면이 꺼진다)
+      try { await navigator.keyboard?.lock?.(['Escape']); } catch { /* 지원하지 않는 브라우저 */ }
+    } else if (!on && isFullscreen()) {
+      navigator.keyboard?.unlock?.();
+      await document.exitFullscreen();
+    }
+  } catch { /* 거부됨 */ }
+}
+
+/** 설정 → 일반: 전체화면 켜기/끄기 */
+function FullscreenSetting() {
+  const [fs, setFs] = useState(isFullscreen);
+  useEffect(() => {
+    const on = () => setFs(isFullscreen());
+    document.addEventListener('fullscreenchange', on);
+    return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
+  return (
+    <div className="lang-pick">
+      <span>{t('화면')}</span>
+      <button type="button" className={`color-btn${fs ? ' on' : ''}`} onClick={() => toggleFullscreen()}>⛶ {fs ? t('전체화면 끄기') : t('전체화면')}</button>
+    </div>
+  );
+}
+
+/** 게임 중 위쪽 알림: 전체화면이 아닌 동안 계속 떠 있다 */
+function FullscreenTip() {
+  const go = () => toggleFullscreen(true);
+  return (
+    <div className="fs-tip" role="status" onPointerDown={e => e.stopPropagation()}>
+      <span>{t('전체화면을 권장합니다')}</span>
+      <button type="button" onClick={go}>⛶ {t('전체화면')}</button>
     </div>
   );
 }
@@ -161,16 +220,24 @@ function WarningScreen({ onClose }) {
   return (
     <div className="warning-screen" onPointerDown={e => { e.stopPropagation(); if (ready) onClose(); }}>
       <div className="warning-box">
-        <h1>⚠ 주의</h1>
-        <p>이 게임에는 다음 요소가 포함되어 있습니다.</p>
+        <h1>⚠ {t('주의')}</h1>
+        <p>{t('이 게임에는 다음 요소가 포함되어 있습니다.')}</p>
         <ul>
-          <li><b>갑자기 튀어나오는 점프스케어</b>와 큰 소리</li>
-          <li><b>강한 섬광</b>, 빠르게 <b>깜빡이는 빛</b>, 화면 흔들림</li>
-          <li>피와 잔인한 표현</li>
+          <li><b>{t('갑자기 튀어나오는 점프스케어')}</b>{t('와 큰 소리')}</li>
+          <li><b>{t('강한 섬광')}</b>{t(', 빠르게 ')}<b>{t('깜빡이는 빛')}</b>{t(', 화면 흔들림')}</li>
+          <li>{t('피와 잔인한 표현')}</li>
         </ul>
-        <p className="warn-dim">빛에 민감하거나 광과민성 발작을 겪은 적이 있다면 플레이를 삼가세요.<br />
-          설정에서 사망 점프스케어 · 잔인한 연출 · 화면 흔들림 · 메뉴 깜짝 등장을 끌 수 있습니다.</p>
-        <p className={`warn-go${ready ? ' on' : ''}`}>{ready ? '아무 키나 누르거나 클릭해서 계속' : '...'}</p>
+        <p className="warn-dim">{t('빛에 민감하거나 광과민성 발작을 겪은 적이 있다면 플레이를 삼가세요.')}<br />
+          {t('설정에서 사망 점프스케어 · 잔인한 연출 · 화면 흔들림 · 메뉴 깜짝 등장을 끌 수 있습니다.')}</p>
+        {canFullscreen() && !isFullscreen() && (
+          <div className="warn-fs">
+            <span>{t('전체화면을 권장합니다')}</span>
+            <button type="button" disabled={!ready}
+              onPointerDown={e => e.stopPropagation()}
+              onClick={async e => { e.stopPropagation(); await toggleFullscreen(true); onClose(); }}>⛶ {t('전체화면으로 시작')}</button>
+          </div>
+        )}
+        <p className={`warn-go${ready ? ' on' : ''}`}>{ready ? t('아무 키나 누르거나 클릭해서 계속') : '...'}</p>
       </div>
     </div>
   );
@@ -247,7 +314,7 @@ function TouchControls({ engine }) {
       {label}
     </button>
   );
-  // 인벤토리 칸: 짧게 누르면 사용, 길게(0.5초) 누르면 버리기
+  // 인벤토리 칸: 짧게 누르면 손에 들기, 길게(0.5초) 누르면 버리기. 사용은 '사용' 버튼을 누르고 있는 동안
   const cancelHold = () => { clearTimeout(hold.current?.timer); hold.current = null; };
   const slotDown = (e, i) => {
     stop(e);
@@ -257,7 +324,7 @@ function TouchControls({ engine }) {
   const slotUp = i => {
     if (hold.current?.i !== i) return;
     cancelHold();
-    engine()?.useItem(i);
+    engine()?.selectSlot(i);
   };
   return (
     <div className="touch-ui">
@@ -268,31 +335,34 @@ function TouchControls({ engine }) {
         onChange={(x, y, len) => { const t = T(); if (!t) return; t.active = true; if (len > 0.2) t.aim = Math.atan2(y, x); }}
         onEnd={() => { const t = T(); if (t) t.aim = null; }} />
       <div className="touch-top">
-        <Btn action="chat" label="채팅" />
-        {engine()?.voice?.enabled && <Btn action="mic" label="마이크" />}
-        <Btn action="skip" label="관전" />
+        <Btn action="chat" label={t('채팅')} />
+        {engine()?.voice?.enabled && <Btn action="mic" label={t('마이크')} />}
+        <Btn action="skip" label={t('관전')} />
         <Btn code="Escape" label="Ⅱ" />
       </div>
       <div className="touch-actions">
         <Btn action="interact" label="E" className="big" />
-        <Btn action="flashlight" label="손전등" />
-        <Btn label={crouch ? '웅크림' : '웅크리기'} className={crouch ? 'on' : ''}
+        <Btn action="flashlight" label={t('손전등')} />
+        <Btn label={crouch ? t('웅크림') : t('웅크리기')} className={crouch ? 'on' : ''}
           onTap={() => { const v = !crouch; setCrouch(v); const t = T(); if (t) t.crouch = v; }} />
-        <Btn label="말하기" className={talk ? 'on' : ''} onTap={() => setTalk(v => !v)} />
+        <Btn label={t('말하기')} className={talk ? 'on' : ''} onTap={() => setTalk(v => !v)} />
       </div>
       {talk && (
         <div className="touch-talk" onPointerDown={stop}>
           {(engine()?.emoteLines || []).map((l, i) => (
-            <button key={i} className="touch-btn" onClick={() => { engine()?.emote(i); setTalk(false); }}>{l}</button>
+            <button key={i} className="touch-btn" onClick={() => { engine()?.emote(i); setTalk(false); }}>{t(l)}</button>
           ))}
           {(engine()?.gestures || []).map(([g, n]) => (
-            <button key={g} className="touch-btn on" onClick={() => { engine()?.gesture(g); setTalk(false); }}>{n}</button>
+            <button key={g} className="touch-btn on" onClick={() => { engine()?.gesture(g); setTalk(false); }}>{t(n)}</button>
           ))}
         </div>
       )}
+      <button className="touch-btn touch-use" aria-label={t('사용')}
+        onPointerDown={e => { stop(e); engine()?.useStart(); }} onPointerUp={() => engine()?.useEnd()}
+        onPointerCancel={() => engine()?.useEnd()} onPointerLeave={() => engine()?.useEnd()}>{t('사용')}</button>
       <div className="touch-slots">
         {[0, 1, 2, 3].map(i => (
-          <button key={i} aria-label={`아이템 ${i + 1}`}
+          <button key={i} aria-label={t('아이템 {n}', { n: i + 1 })}
             onPointerDown={e => slotDown(e, i)} onPointerUp={() => slotUp(i)}
             onPointerCancel={cancelHold} onPointerLeave={() => { if (hold.current?.i === i) cancelHold(); }} />
         ))}
@@ -329,37 +399,37 @@ function MainMenu({ screen, error, nav, engine, settings, onSettings, withWarnin
 
       {screen === 'main' && (
         <nav className="menu-list">
-          <Btn onClick={() => nav('settings')}>설정</Btn>
-          <Btn big onClick={() => nav('play')}>▶ 플레이</Btn>
-          <Btn onClick={() => nav('controls')}>조작법</Btn>
-          <Btn onClick={() => nav('bestiary')}>괴물 도감</Btn>
-          <Btn onClick={() => nav('credits')}>크레딧</Btn>
+          <Btn onClick={() => nav('settings')}>{t('설정')}</Btn>
+          <Btn big onClick={() => nav('play')}>{t('▶ 플레이')}</Btn>
+          <Btn onClick={() => nav('controls')}>{t('조작법')}</Btn>
+          <Btn onClick={() => nav('bestiary')}>{t('괴물 도감')}</Btn>
+          <Btn onClick={() => nav('credits')}>{t('크레딧')}</Btn>
         </nav>
       )}
 
       {screen === 'play' && (
         <nav className="menu-list">
-          <Btn big onClick={() => withWarning(() => engine()?.solo(saveName(), 'default'))}>혼자 플레이</Btn>
-          <Btn big onClick={() => withWarning(() => nav('multi'))}>멀티 플레이</Btn>
-          <Btn onClick={() => nav('main')}>← 뒤로</Btn>
+          <Btn big onClick={() => withWarning(() => engine()?.solo(saveName(), 'default'))}>{t('혼자 플레이')}</Btn>
+          <Btn big onClick={() => withWarning(() => nav('multi'))}>{t('멀티 플레이')}</Btn>
+          <Btn onClick={() => nav('main')}>{t('← 뒤로')}</Btn>
         </nav>
       )}
 
       {screen === 'multi' && (
         <form className="menu-form" autoComplete="off" onSubmit={e => { e.preventDefault(); if (code.trim()) engine()?.joinRoom(saveName(), code.trim().toUpperCase()); }}>
-          <label>이름<input value={name} onChange={e => setName(e.target.value)} maxLength={12} placeholder="Wanderer" autoFocus /></label>
-          <label>방 코드<input value={code} onChange={e => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="예: K7QX" className="code-input" /></label>
-          <button type="submit" className="menu-btn big" disabled={!code.trim()}>참가하기</button>
-          <button type="button" className="menu-btn" onClick={() => nav('create')}>+ 방 만들기</button>
-          <button type="button" className="menu-btn" onClick={() => nav('play')}>← 뒤로</button>
+          <label>{t('이름')}<input value={name} onChange={e => setName(e.target.value)} maxLength={12} placeholder="Wanderer" autoFocus /></label>
+          <label>{t('방 코드')}<input value={code} onChange={e => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder={t('예: K7QX')} className="code-input" /></label>
+          <button type="submit" className="menu-btn big" disabled={!code.trim()}>{t('참가하기')}</button>
+          <button type="button" className="menu-btn" onClick={() => nav('create')}>{t('+ 방 만들기')}</button>
+          <button type="button" className="menu-btn" onClick={() => nav('play')}>{t('← 뒤로')}</button>
         </form>
       )}
 
       {screen === 'create' && (
         <form className="menu-form" autoComplete="off" onSubmit={e => { e.preventDefault(); engine()?.createRoom(saveName()); }}>
-          <label>이름<input value={name} onChange={e => setName(e.target.value)} maxLength={12} placeholder="Wanderer" autoFocus /></label>
-          <button type="submit" className="menu-btn big">만들기</button>
-          <button type="button" className="menu-btn" onClick={() => nav('multi')}>← 뒤로</button>
+          <label>{t('이름')}<input value={name} onChange={e => setName(e.target.value)} maxLength={12} placeholder="Wanderer" autoFocus /></label>
+          <button type="submit" className="menu-btn big">{t('만들기')}</button>
+          <button type="button" className="menu-btn" onClick={() => nav('multi')}>{t('← 뒤로')}</button>
         </form>
       )}
 
@@ -371,16 +441,16 @@ function MainMenu({ screen, error, nav, engine, settings, onSettings, withWarnin
 
       {screen === 'credits' && (
         <div className="menu-text">
-          <p>기획 · 디렉션 <b>박영진</b><br />개발 <b>Claude Code</b> (Anthropic)</p>
-          <p className="dim">세계관: The Backrooms — 2019년 인터넷 커뮤니티에서 시작된 창작 괴담<br />
-            영감: Escape the Backrooms (Fancy Games)<br />
-            폰트: VT323 (Google Fonts, SIL OFL)<br />
-            모든 그래픽과 사운드는 코드로 직접 생성했다.</p>
-          <button className="menu-btn" onClick={() => nav('main')}>← 뒤로</button>
+          <p>{t('기획 · 디렉션')} <b>Eddy</b><br />{t('개발')} <b>Claude Code</b> (Anthropic)</p>
+          <p className="dim">{t('세계관: The Backrooms — 2019년 인터넷 커뮤니티에서 시작된 창작 괴담')}<br />
+            {t('영감: Escape the Backrooms (Fancy Games)')}<br />
+            {t('폰트: VT323 (Google Fonts, SIL OFL)')}<br />
+            {t('모든 그래픽과 사운드는 코드로 직접 생성했다.')}</p>
+          <button className="menu-btn" onClick={() => nav('main')}>{t('← 뒤로')}</button>
         </div>
       )}
 
-      {error && <div className="error">{error}</div>}
+      {error && <div className="error">{t(error)}</div>}
     </div>
   );
 }
@@ -391,40 +461,49 @@ function SettingsForm({ settings, onSettings, onBack, engine }) {
     <div className="menu-form settings-form">
       <div className="tabs">
         {[['general', '일반'], ['voice', '보이스 챗'], ['keys', '키 설정']].map(([k, n]) => (
-          <button key={k} type="button" className={`tab${tab === k ? ' on' : ''}`} onClick={() => setTab(k)}>{n}</button>
+          <button key={k} type="button" className={`tab${tab === k ? ' on' : ''}`} onClick={() => setTab(k)}>{t(n)}</button>
         ))}
       </div>
       {tab === 'general' && (
         <>
-          <label>볼륨 {Math.round(settings.volume * 100)}%
+          <div className="lang-pick">
+            <span>언어 / Language</span>
+            <div>
+              {LANGS.map(([k, n]) => (
+                <button key={k} type="button" className={`color-btn${getLang() === k ? ' on' : ''}`} onClick={() => setLang(k)}>{n}</button>
+              ))}
+            </div>
+          </div>
+          {canFullscreen() && <FullscreenSetting />}
+          <label>{t('볼륨')} {Math.round(settings.volume * 100)}%
             <input type="range" min="0" max="1" step="0.05" value={settings.volume} onChange={e => onSettings({ volume: Number(e.target.value) })} />
           </label>
-          <label className="check"><input type="checkbox" checked={settings.shake !== false} onChange={e => onSettings({ shake: e.target.checked })} /> 화면 흔들림</label>
-          <label className="check"><input type="checkbox" checked={settings.menuScares !== false} onChange={e => onSettings({ menuScares: e.target.checked })} /> 메인 화면 점프스케어</label>
-          <label className="check"><input type="checkbox" checked={settings.deathScares !== false} onChange={e => onSettings({ deathScares: e.target.checked })} /> 사망 점프스케어</label>
-          <label className="check"><input type="checkbox" checked={settings.gore !== false} onChange={e => onSettings({ gore: e.target.checked })} /> 잔인한 연출</label>
+          <label className="check"><input type="checkbox" checked={settings.shake !== false} onChange={e => onSettings({ shake: e.target.checked })} /> {t('화면 흔들림')}</label>
+          <label className="check"><input type="checkbox" checked={settings.menuScares !== false} onChange={e => onSettings({ menuScares: e.target.checked })} /> {t('메인 화면 점프스케어')}</label>
+          <label className="check"><input type="checkbox" checked={settings.deathScares !== false} onChange={e => onSettings({ deathScares: e.target.checked })} /> {t('사망 점프스케어')}</label>
+          <label className="check"><input type="checkbox" checked={settings.gore !== false} onChange={e => onSettings({ gore: e.target.checked })} /> {t('잔인한 연출')}</label>
         </>
       )}
       {tab === 'voice' && <VoiceSettings engine={engine} />}
       {tab === 'keys' && <KeySettings engine={engine} />}
-      <button className="menu-btn" onClick={onBack}>← 뒤로</button>
+      <button className="menu-btn" onClick={onBack}>{t('← 뒤로')}</button>
     </div>
   );
 }
 
 function ControlsText({ onBack, engine }) {
-  const K = a => keyLabel(engine?.()?.input?.binds?.[a]);
+  const K = a => t(keyLabel(engine?.()?.input?.binds?.[a]));
   return (
     <div className="menu-text">
       <div className="ctrl-grid">
-        {[[`${K('up')}${K('left')}${K('down')}${K('right')}`, '이동'], ['마우스', '조준'], [K('sprint'), '달리기'], [K('crouch'), '웅크리기'],
-          [K('flashlight'), '손전등'], [K('interact'), '상호작용'], [`${K('slot1')}~${K('slot4')}`, '아이템'], [`${K('drop')}+아이템`, '버리기'],
+        {[[`${K('up')}${K('left')}${K('down')}${K('right')}`, '이동'], [t('마우스'), '조준'], [K('sprint'), '달리기'], [K('crouch'), '웅크리기'],
+          [K('flashlight'), '손전등'], [K('interact'), '상호작용'], [`${K('slot1')}~${K('slot4')}`, '아이템'], [`${K('drop')}+${t('아이템')}`, '버리기'],
           [K('emote'), '감정 표현'], [K('chat'), '채팅'], [K('mic'), '마이크'], [K('skip'), '관전'], ['ESC', '메뉴']].map(([k, a]) => (
-          <div key={a} className="ctrl-row"><b>{k}</b><span>{a}</span></div>
+          <div key={a} className="ctrl-row"><b>{k}</b><span>{t(a)}</span></div>
         ))}
       </div>
-      <p className="dim">미션을 끝내면 출구가 열린다.</p>
-      <button className="menu-btn" onClick={onBack}>← 뒤로</button>
+      <p className="dim">{t('미션을 끝내면 출구가 열린다.')}</p>
+      <button className="menu-btn" onClick={onBack}>{t('← 뒤로')}</button>
     </div>
   );
 }
@@ -462,11 +541,11 @@ function Bestiary({ onBack }) {
   const entry = mod.BESTIARY.find(b => b.type === sel);
   return (
     <div className="bestiary">
-      <p className="dim">발견 {mod.BESTIARY.filter(b => seen.has(b.type)).length} / {mod.BESTIARY.length} — 괴물이 사는 레벨에 들어가면 채워진다</p>
+      <p className="dim">{t('발견 {n} / {total} — 괴물이 사는 레벨에 들어가면 채워진다', { n: mod.BESTIARY.filter(b => seen.has(b.type)).length, total: mod.BESTIARY.length })}</p>
       <div className="bestiary-grid">
         {mod.BESTIARY.map(b => (
           <button key={b.type} className={`bestiary-slot${sel === b.type ? ' on' : ''}`} disabled={!seen.has(b.type)} onClick={() => setSel(b.type)}>
-            {seen.has(b.type) ? b.name : '???'}
+            {seen.has(b.type) ? t(b.name) : '???'}
           </button>
         ))}
       </div>
@@ -474,15 +553,15 @@ function Bestiary({ onBack }) {
         <div className="bestiary-card">
           <MonsterPreview type={entry.type} />
           <div>
-            <h3>{entry.name}</h3>
-            <p className="dim">{mod.levelsOf(entry.type).join(' · ')}</p>
-            <p><b>생김새</b> {entry.look}</p>
-            <p><b>행동</b> {entry.behavior}</p>
-            <p><b>대처법</b> {entry.counter}</p>
+            <h3>{t(entry.name)}</h3>
+            <p className="dim">{mod.levelsOf(entry.type).map(l => t(l)).join(' · ')}</p>
+            <p><b>{t('생김새')}</b> {t(entry.look)}</p>
+            <p><b>{t('행동')}</b> {t(entry.behavior)}</p>
+            <p><b>{t('대처법')}</b> {t(entry.counter)}</p>
           </div>
         </div>
-      ) : <p className="dim">아직 아무것도 만나지 않았다.</p>}
-      <button className="menu-btn" onClick={onBack}>← 뒤로</button>
+      ) : <p className="dim">{t('아직 아무것도 만나지 않았다.')}</p>}
+      <button className="menu-btn" onClick={onBack}>{t('← 뒤로')}</button>
     </div>
   );
 }
@@ -494,16 +573,16 @@ function PauseMenu({ solo, settings, onSettings, onResume, onLeave, engine }) {
     <div className="menu-col pause">
       <div className="logo">
         <h1 className="small">{solo ? 'PAUSED' : 'MENU'}</h1>
-        <h2>{solo ? '시간이 멈췄다' : '멀티플레이 중에는 게임이 멈추지 않는다'}</h2>
+        <h2>{solo ? t('시간이 멈췄다') : t('멀티플레이 중에는 게임이 멈추지 않는다')}</h2>
       </div>
       {screen === 'main' && (
         <nav className="menu-list">
-          <button className="menu-btn big" onClick={onResume}>▶ 계속하기</button>
-          <button className="menu-btn" onClick={() => setScreen('settings')}>설정</button>
-          <button className="menu-btn" onClick={() => setScreen('controls')}>조작법</button>
-          <button className="menu-btn" onClick={() => setScreen('bestiary')}>괴물 도감</button>
-          <button className="menu-btn" onClick={() => setScreen('confirm')}>메인 메뉴로 나가기</button>
-          <p className="dim">ESC 로 닫기</p>
+          <button className="menu-btn big" onClick={onResume}>{t('▶ 계속하기')}</button>
+          <button className="menu-btn" onClick={() => setScreen('settings')}>{t('설정')}</button>
+          <button className="menu-btn" onClick={() => setScreen('controls')}>{t('조작법')}</button>
+          <button className="menu-btn" onClick={() => setScreen('bestiary')}>{t('괴물 도감')}</button>
+          <button className="menu-btn" onClick={() => setScreen('confirm')}>{t('메인 메뉴로 나가기')}</button>
+          <p className="dim">{t('ESC 로 닫기')}</p>
         </nav>
       )}
       {screen === 'settings' && <SettingsForm settings={settings} onSettings={onSettings} onBack={() => setScreen('main')} engine={engine} />}
@@ -511,9 +590,9 @@ function PauseMenu({ solo, settings, onSettings, onResume, onLeave, engine }) {
       {screen === 'bestiary' && <Bestiary onBack={() => setScreen('main')} />}
       {screen === 'confirm' && (
         <nav className="menu-list">
-          <p>정말 나갈까? {solo ? '지금까지의 진행이 사라진다.' : '동료들은 남아서 계속 플레이한다.'}</p>
-          <button className="menu-btn big danger-btn" onClick={onLeave}>나가기</button>
-          <button className="menu-btn" onClick={() => setScreen('main')}>← 취소</button>
+          <p>{t('정말 나갈까?')} {solo ? t('지금까지의 진행이 사라진다.') : t('동료들은 남아서 계속 플레이한다.')}</p>
+          <button className="menu-btn big danger-btn" onClick={onLeave}>{t('나가기')}</button>
+          <button className="menu-btn" onClick={() => setScreen('main')}>{t('← 취소')}</button>
         </nav>
       )}
     </div>
@@ -539,6 +618,7 @@ function PlayerPreview({ color }) {
 
 function LobbyPanel({ state, engine }) {
   const { code, hostId, max = 4, players = [], myId } = state;
+  const modes = { ...defaultModes(), ...(state.modes || {}) };
   const me = players.find(p => p.id === myId);
   const isHost = myId === hostId;
   const [copied, setCopied] = useState(false);
@@ -549,11 +629,11 @@ function LobbyPanel({ state, engine }) {
 
   return (
     <div className="menu-col lobby">
-      <div className="logo"><h2>대기방</h2></div>
+      <div className="logo"><h2>{t('대기방')}</h2></div>
       <div className="room-code">
-        <span className="dim">방 코드</span>
+        <span className="dim">{t('방 코드')}</span>
         <strong>{code}</strong>
-        <button className="menu-btn small" onClick={copy}>{copied ? '복사됨' : '복사'}</button>
+        <button className="menu-btn small" onClick={copy}>{copied ? t('복사됨') : t('복사')}</button>
       </div>
       <ul className="player-slots">
         {slots.map((p, i) => (
@@ -561,32 +641,91 @@ function LobbyPanel({ state, engine }) {
             {p ? (
               <>
                 <PlayerPreview color={p.color} />
-                <span className="pname">{p.name}{p.id === myId ? ' (나)' : ''}</span>
-                {p.id === hostId && <span className="badge">방장</span>}
+                <span className="pname">{p.name}{p.id === myId ? ` (${t('나')})` : ''}</span>
+                {p.id === hostId && <span className="badge">{t('방장')}</span>}
                 <span className="swatch" style={{ background: colorHex(p.color) }} />
               </>
-            ) : <span className="dim">빈 자리</span>}
+            ) : <span className="dim">{t('빈 자리')}</span>}
           </li>
         ))}
       </ul>
       <div className="color-pick">
-        <span className="dim">방호복 색</span>
+        <span className="dim">{t('방호복 색')}</span>
         <div>
           {COLORS.map(([key, label, hex]) => {
             const taken = players.some(p => p.id !== myId && p.color === key);
             return (
               <button key={key} className={`color-btn${me?.color === key ? ' on' : ''}`} disabled={taken}
-                onClick={() => engine()?.setColor(key)} title={taken ? '다른 사람이 사용 중' : label}>
-                <span style={{ background: hex }} />{label}
+                onClick={() => engine()?.setColor(key)} title={taken ? t('다른 사람이 사용 중') : t(label)}>
+                <span style={{ background: hex }} />{t(label)}
               </button>
             );
           })}
         </div>
       </div>
+      {isHost && <ModeSection modes={modes} engine={engine} />}
       {isHost
-        ? <button className="menu-btn big" onClick={() => engine()?.startMatch()}>▶ 게임 시작 ({players.length}/{max})</button>
-        : <p className="dim">방장이 시작하기를 기다리는 중... ({players.length}/{max})</p>}
-      <button className="menu-btn" onClick={() => engine()?.leaveRoom()}>나가기</button>
+        ? <button className="menu-btn big" onClick={() => engine()?.startMatch()}>{t('▶ 게임 시작')} ({players.length}/{max})</button>
+        : <p className="dim">{t('방장이 시작하기를 기다리는 중...')} ({players.length}/{max})</p>}
+      <button className="menu-btn" onClick={() => engine()?.leaveRoom()}>{t('나가기')}</button>
+    </div>
+  );
+}
+
+/** 대기방 게임 모드 (방장에게만 보인다): 추가된 모드 목록 + [모드 추가] 창 (검색) */
+function ModeSection({ modes, engine }) {
+  const [open, setOpen] = useState(false);
+  const added = MODES.filter(m => modes[m.id]);
+  const set = (id, on) => engine()?.setMode(id, on);
+  return (
+    <div className="mode-section">
+      <div className="mode-head">
+        <span className="dim">{t('게임 모드')}</span>
+        <button className="color-btn" onClick={() => setOpen(true)}>{t('+ 모드 추가')}</button>
+      </div>
+      {added.length
+        ? <ul className="mode-list">
+            {added.map(m => (
+              <li key={m.id} title={t(m.desc)}>
+                <span>{t(m.name)}</span>
+                <button className="mode-x" onClick={() => set(m.id, false)} aria-label={t('{name} 빼기', { name: t(m.name) })}>×</button>
+              </li>
+            ))}
+          </ul>
+        : <p className="dim mode-empty">{t('추가된 모드 없음')}</p>}
+      {open && createPortal(<ModeDialog modes={modes} onSet={set} onClose={() => setOpen(false)} />, document.body)}   {/* 대기방 패널의 transform 밖에서 화면 가운데에 뜨게 */}
+    </div>
+  );
+}
+
+function ModeDialog({ modes, onSet, onClose }) {
+  const [q, setQ] = useState('');
+  const key = q.trim().toLowerCase().replace(/\s+/g, '');
+  const list = MODES.filter(m => !key || t(m.name).toLowerCase().replace(/\s+/g, '').includes(key));
+  return (
+    <div className="mode-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="mode-dialog" role="dialog" aria-label={t('모드 추가')}>
+        <div className="mode-head">
+          <strong>{t('모드 추가')}</strong>
+          <button className="mode-x" onClick={onClose} aria-label={t('닫기')}>×</button>
+        </div>
+        <input className="mode-search" autoFocus placeholder={t('모드 이름 검색')} value={q}
+          onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }} />
+        <ul className="mode-options">
+          {list.map(m => (
+            <li key={m.id}>
+              <div>
+                <span className="mode-name">{t(m.name)}</span>
+                <span className="dim mode-desc">{t(m.desc)}</span>
+              </div>
+              <button className={`color-btn${modes[m.id] ? ' on' : ''}`} onClick={() => onSet(m.id, !modes[m.id])}>
+                {modes[m.id] ? t('추가됨 ✓') : t('추가')}
+              </button>
+            </li>
+          ))}
+          {!list.length && <li className="dim">{t('"{q}" 에 맞는 모드가 없음', { q })}</li>}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -595,10 +734,10 @@ function LobbyPanel({ state, engine }) {
 function InfoPanel({ title, sub = '', lines = [], danger = false, button = null }) {
   return (
     <div className="panel">
-      <h1 className={danger ? 'danger' : undefined}>{title}</h1>
-      <h2>{sub}</h2>
-      {lines.length > 0 && <p>{lines.join('\n')}</p>}
-      {button && <button onClick={button.onClick}>{button.label}</button>}
+      <h1 className={danger ? 'danger' : undefined}>{t(title)}</h1>
+      <h2>{t(sub)}</h2>
+      {lines.length > 0 && <p>{lines.map(l => t(l)).join('\n')}</p>}
+      {button && <button onClick={button.onClick}>{t(button.label)}</button>}
     </div>
   );
 }
@@ -611,14 +750,14 @@ function RoundEndPanel({ escaped = [], dead = [], endAt, nextLevelName = null, o
   }, [endAt]);
   const won = escaped.length > 0;
   const lines = [];
-  if (escaped.length) lines.push(`탈출: ${escaped.join(', ')}`);
-  if (dead.length) lines.push(`실종: ${dead.join(', ')}`);
+  if (escaped.length) lines.push(t('탈출: {names}', { names: escaped.join(', ') }));
+  if (dead.length) lines.push(t('실종: {names}', { names: dead.join(', ') }));
   return (
     <div className="panel">
       <h1 className={won ? undefined : 'danger'}>{won ? 'NOCLIP' : 'CAUGHT'}</h1>
-      <h2>{left > 0 ? `${left}초 후 ${nextLevelName ?? 'LEVEL 0'} 으로 떨어진다` : '떨어지는 중...'}</h2>
+      <h2>{left > 0 ? t('{n}초 후 {level} 으로 떨어진다', { n: left, level: t(nextLevelName ?? 'LEVEL 0') }) : t('떨어지는 중...')}</h2>
       {lines.length > 0 && <p>{lines.join('\n')}</p>}
-      <button onClick={onMenu}>메인 메뉴로</button>
+      <button onClick={onMenu}>{t('메인 메뉴로')}</button>
     </div>
   );
 }
@@ -645,41 +784,41 @@ function TestPanel({ onCmd, onClose }) {
     <div id="testPanel">
       <div className="tp-head">
         <span>TEST MODE</span>
-        <button onMouseDown={e => e.preventDefault()} onClick={onClose}>닫기 [`]</button>
+        <button onMouseDown={e => e.preventDefault()} onClick={onClose}>{t('닫기')} [`]</button>
       </div>
       <div className="tp-tabs">
         {TEST_TABS.map(([k, n]) => (
-          <button key={k} className={tab === k ? 'on' : undefined} onMouseDown={e => e.preventDefault()} onClick={() => setTab(k)}>{n}</button>
+          <button key={k} className={tab === k ? 'on' : undefined} onMouseDown={e => e.preventDefault()} onClick={() => setTab(k)}>{t(n)}</button>
         ))}
       </div>
       <div className="tp-body">
         {tab === 'level' && <div className="tp-grid">
-          <B cmd="nextLevel">다음 레벨 ▶</B>
+          <B cmd="nextLevel">{t('다음 레벨 ▶')}</B>
           {LEVEL_NAMES.map((n, i) => <B key={i} cmd="setLevel" arg={i}>{n}</B>)}
         </div>}
         {tab === 'entity' && <div className="tp-grid">
-          {ENTITY_BUTTONS.map(([t, n]) => <B key={t} cmd="spawnEntity" arg={t}>{n}</B>)}
-          <B cmd="clearEntities">전부 제거</B>
+          {ENTITY_BUTTONS.map(([k, n]) => <B key={k} cmd="spawnEntity" arg={k}>{t(n)}</B>)}
+          <B cmd="clearEntities">{t('전부 제거')}</B>
         </div>}
         {tab === 'item' && <div className="tp-grid">
-          {ITEM_BUTTONS.map(([t, n]) => <B key={t} cmd="spawnItem" arg={t}>{n}</B>)}
+          {ITEM_BUTTONS.map(([k, n]) => <B key={k} cmd="spawnItem" arg={k}>{t(n)}</B>)}
         </div>}
         {tab === 'player' && <div className="tp-grid">
-          <B cmd="addSanity" arg={30}>정신력 +30</B>
-          <B cmd="addSanity" arg={-30}>정신력 -30</B>
-          <B cmd="addSanity" arg={100}>정신력 가득</B>
-          <B cmd="god">무적 ON/OFF</B>
-          <B cmd="revive">부활</B>
-          <B cmd="fullbright">밝게 ON/OFF</B>
-          <B cmd="revealMap">미니맵 공개</B>
+          <B cmd="addSanity" arg={30}>{t('정신력')} +30</B>
+          <B cmd="addSanity" arg={-30}>{t('정신력')} -30</B>
+          <B cmd="addSanity" arg={100}>{t('정신력 가득')}</B>
+          <B cmd="god">{t('무적')} ON/OFF</B>
+          <B cmd="revive">{t('부활')}</B>
+          <B cmd="fullbright">{t('밝게')} ON/OFF</B>
+          <B cmd="revealMap">{t('미니맵 공개')}</B>
         </div>}
         {tab === 'mission' && <div className="tp-grid">
-          <B cmd="giveKey">미션 +1</B>
-          <B cmd="unlockExit">출구 열기</B>
-          <B cmd="tpKey">목표로 이동</B>
-          <B cmd="tpPuzzle">퍼즐로 이동</B>
-          <B cmd="tpExit">출구로 이동</B>
-          <B cmd="ending">엔딩 보기</B>
+          <B cmd="giveKey">{t('미션')} +1</B>
+          <B cmd="unlockExit">{t('출구 열기')}</B>
+          <B cmd="tpKey">{t('목표로 이동')}</B>
+          <B cmd="tpPuzzle">{t('퍼즐로 이동')}</B>
+          <B cmd="tpExit">{t('출구로 이동')}</B>
+          <B cmd="ending">{t('엔딩 보기')}</B>
         </div>}
       </div>
     </div>

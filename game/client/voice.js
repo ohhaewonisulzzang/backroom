@@ -8,7 +8,8 @@
  *
  * 설정은 localStorage('backrooms.voice') 에 저장된다.
  *
- * 목소리 흉내: 보이스 챗으로 들린(또는 내가 한) 말을 몇 초씩 녹음해 이 브라우저 메모리에만 둔다 (서버로 보내지 않음, 방을 나가면 지움).
+ * 목소리 흉내: 보이스 챗으로 들린 남의 말을 몇 초씩 녹음해 이 브라우저 메모리에만 둔다 (서버로 보내지 않음, 방을 나가면 지움).
+ * 내 목소리는 녹음하지 않는다 — 자기 목소리를 자기가 다시 듣는 일은 없다 (남들 브라우저에선 내 목소리가 흉내 내진다).
  * 서버가 'mimic' 이벤트를 보내면 그 엔티티 위치에서 녹음 하나를 낮고 먹먹하게 틀어 준다.
  *
  * 출력 장치: 블루투스 이어폰(갤럭시 버즈 등)의 마이크를 열면 Windows 가 이어폰을 "헤드폰(스테레오)" 에서
@@ -16,6 +17,7 @@
  * 기본(자동)으로는 마이크와 같은 기기(groupId)의 출력 장치로 효과음·목소리를 모두 옮긴다 (AudioContext.setSinkId).
  */
 import { Sound } from './sound.js';
+import { t as tr } from '../../shared/i18n.js';
 
 const STORE = 'backrooms.voice';
 export const VOICE_DEFAULTS = { enabled: false, deviceId: '', inputGain: 1, threshold: 0.05, outputVolume: 1, micOn: true,
@@ -58,7 +60,7 @@ export const Voice = {
   buf: null, level: 0, speaking: false, holdT: 0, loopback: false, error: '', duck: 0,
   peers: new Map(),        // id → { pc, gain, pan, an, buf, level, speaking, el, ice, stream }
   clips: [],               // 녹음된 목소리 (AudioBuffer, 최대 MIMIC_MAX 개)
-  recs: new Map(),         // 녹음 중: key(상대 id / 'me') → { r, quietT }
+  recs: new Map(),         // 녹음 중: key(상대 id) → { r, quietT }
   myId: null, inRoom: false,
   signal: null,            // (to, data) => 서버로 중계 요청 (engine 이 넣는다)
   onSpeaking: null,        // (bool) => 서버에 "말하는 중" 알림 (엔티티가 목소리를 듣는다)
@@ -119,7 +121,7 @@ export const Voice = {
       await this.autoOutput();
       return true;
     } catch (e) {
-      this.error = e?.name === 'NotAllowedError' ? '마이크 권한이 거부됐다.' : '마이크를 열 수 없다.';
+      this.error = tr(e?.name === 'NotAllowedError' ? '마이크 권한이 거부됐다.' : '마이크를 열 수 없다.');
       return false;
     }
   },
@@ -177,7 +179,7 @@ export const Voice = {
     const outs = await this.devices('audiooutput');
     const cur = outs.find(d => d.deviceId === (this.settings().outputId || 'default'));
     if (cur && isHandsFree(cur.label) && deviceName(cur.label) === deviceName(lbl)) return '';
-    return '블루투스 수화기 마이크를 쓰면 출력도 같은 수화기로 골라야 들린다.';
+    return tr('블루투스 수화기 마이크를 쓰면 출력도 같은 수화기로 골라야 들린다.');
   },
   /** 고른 출력 장치로 "삐" 소리 (출력 테스트) */
   testOutput() {
@@ -388,7 +390,6 @@ export const Voice = {
       this.speaking = open; this.speakSentAt = performance.now();
       this.onSpeaking?.(open);
     }
-    if (this.dest) this.recordTick('me', this.dest.stream, open, dt);   // 내 목소리도 녹음 (내 목소리를 흉내 내면 더 무섭다)
     let duck = 0;
     for (const [id, P] of this.peers) {
       const m = mix ? mix(id) : { gain: 1, pan: 0 };

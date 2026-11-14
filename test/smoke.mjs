@@ -157,6 +157,16 @@ try {
   sent.length = 0;
   off.onTest('x', { cmd: 'nextLevel' }); off.onTest('x', { cmd: 'god' });
   check(sent.length === 0 && off.levelIndex === 0, '테스트 모드 OFF 서버는 테스트 명령을 무시');
+  // 탈출구 둘레 5칸 안에는 엔티티가 생기지 않는다 (모든 레벨, 엔티티 증가 모드 포함)
+  let nearExitSpawn = [];
+  off.modes.moreEntities = true;
+  for (let lv = 0; lv < LEVELS.length; lv++) {
+    off.levelIndex = lv; off.startRound(false);
+    const L = off.level, ex = L.exitIdx % L.map.w, ey = (L.exitIdx / L.map.w) | 0;
+    if (L.mission.type === 'noclip' || L.info.layout === 'run') continue;
+    for (const m of off.monsters) if (Math.max(Math.abs(Math.floor(m.x / TS) - ex), Math.abs(Math.floor(m.y / TS) - ey)) <= 5) nearExitSpawn.push(`${LEVELS[lv].label ?? LEVELS[lv].id}:${m.type}`);
+  }
+  check(!nearExitSpawn.length, `탈출구 5칸 안에 엔티티 스폰 없음${nearExitSpawn.length ? ' — ' + nearExitSpawn.join(', ') : ''}`);
 
   // 7) 퇴장
   b.s.disconnect();
@@ -202,12 +212,21 @@ try {
   g1.s.emit('setColor', { color: freeColor });
   await host.waitFor('lobby', d => d.players.find(p => p.name === 'G1')?.color === freeColor);
   check(hostColorTaken && freeColor !== g1Color, `색 변경: 남이 쓰는 색은 거부, 빈 색(${freeColor})으로 변경됨`);
+  // 게임 모드: 기본은 모두 켜짐, 방장만 켜고 끌 수 있다
+  const modesOn = freed.modes && ['mimic', 'finger', 'hideNames'].every(k => freed.modes[k] === true) && freed.modes.mapPlayers === false && freed.modes.noFlashlight === false;
+  g1.s.emit('setMode', { mode: 'hideNames', on: false });           // 방장 아님 → 무시
+  await sleep(150);
+  const guestBlocked = !host.log.filter(e => e.ev === 'lobby').some(e => e.data.modes?.hideNames === false);
+  host.s.emit('setMode', { mode: 'finger', on: false });
+  await g1.waitFor('lobby', d => d.modes?.finger === false);
+  check(modesOn && guestBlocked, '게임 모드: 기본값(흉내·뻐큐·이름 숨김 켜짐, 새 모드 꺼짐), 방장만 바꿀 수 있음');
   g1.s.emit('startMatch');                                        // 방장 아님 → 무시
   await sleep(200);
   check(!g1.log.some(e => e.ev === 'init'), '방장이 아니면 시작 불가');
   host.s.emit('startMatch');
   const [hi, gi] = await Promise.all([host.waitFor('init'), g1.waitFor('init')]);
   check(hi.seed === gi.seed && hi.players.length === 3 && gi.id === g1.s.id, '방장 시작 → 3명 모두 같은 게임 init');
+  check(gi.modes?.finger === false && gi.modes?.hideNames === true, '게임 시작 시 방장이 정한 모드가 전달됨');
   const wcol = hi.monsters.filter(m => m.type === 'wanderer').map(m => m.color);
   check(wcol.length > 0 && wcol.every(c => ['default', 'green', 'blue', 'red'].includes(c)), `방랑자 방호복 색 랜덤: ${wcol.join(',')}`);
   host.s.disconnect();
@@ -252,7 +271,7 @@ try {
   const soloPos = [...solo.log].reverse().find(e => e.ev === 'round').data.players[0];
   await sleep(100);
   solo.s.emit('state', { x: cam.x, y: cam.y, angle: 0, flashlight: true, sprinting: false, crouching: false });
-  const inv1 = await solo.waitFor('inventory', d => d.inv.some(it => it.type === 'camera'));
+  const inv1 = await solo.waitFor('inventory', d => d.inv.some(it => it?.type === 'camera'));
   check(inv1.inv[0].type === 'camera' && inv1.inv[0].uses === 3 && Math.hypot(cam.x - soloPos.x, cam.y - soloPos.y) < 40, '아이템 줍기 → 인벤토리 1번 칸 (카메라, 3회)');
   solo.s.emit('useItem', { slot: 0 });
   const used = await solo.waitFor('itemUsed', d => d.type === 'camera');
@@ -261,14 +280,22 @@ try {
   // 12-1) 아이템 버리기: 발밑에 남은 횟수 그대로 떨어지고, 버린 사람은 제자리에서 바로 다시 줍지 않는다
   solo.s.emit('dropItem', { slot: 0 });
   const dropped = await solo.waitFor('itemSpawned', d => d.type === 'camera' && d.uses === 2);
-  const inv3 = await solo.waitFor('inventory', d => d.inv.length === 0);
+  const inv3 = await solo.waitFor('inventory', d => d.inv.every(x => !x));
   await sleep(100);
   solo.s.emit('state', { x: cam.x + 1, y: cam.y, angle: 0, flashlight: true, sprinting: false, crouching: false });
   await sleep(250);
   const last = [...solo.log].reverse().find(e => e.ev === 'inventory').data;
-  check(!!dropped && inv3.inv.length === 0 && last.inv.length === 0 && Math.hypot(dropped.x - cam.x, dropped.y - cam.y) < 20,
+  check(!!dropped && inv3.inv.every(x => !x) && last.inv.every(x => !x) && Math.hypot(dropped.x - cam.x, dropped.y - cam.y) < 20,
     '아이템 버리기 → 발밑에 남은 횟수(2) 그대로, 버린 자리에서 바로 다시 줍지 않음');
   solo.s.emit('dropItem', null);                                    // 잘못된 데이터도 서버가 버틴다
+  // 12-2) 칸 번호 고정: 1번 칸을 다 써도 2번 칸 아이템은 2번 칸에 그대로
+  const soloRoom = game.rooms.get([...solo.log].reverse().find(e => e.ev === 'init').data.room);
+  const sp = soloRoom.players.get(solo.s.id);
+  sp.inv = [{ type: 'flare', uses: 1 }, { type: 'compass', uses: 1 }, null, null];
+  solo.s.emit('useItem', { slot: 0 });
+  const fixed = await solo.waitFor('inventory', d => !d.inv[0] && d.inv[1]?.type === 'compass');
+  check(fixed.inv.length === 4 && fixed.inv[1].type === 'compass', '아이템을 다 써도 뒤 칸이 앞으로 당겨지지 않음 (칸 고정)');
+  sp.inv = [null, null, null, null];
   solo.s.emit('emote', { i: 1 });
   const em = await solo.waitFor('emote', d => d.i === 1);
   solo.s.emit('emote', { i: 2 });                                  // 쿨다운 안이라 무시
@@ -347,8 +374,8 @@ try {
   const aw = await sn.waitFor('itemSpawned', d => d.type === 'almondWater');
   await sleep(100);
   sn.s.emit('state', { x: aw.x, y: aw.y, angle: 0, flashlight: true, sprinting: false });
-  await sn.waitFor('inventory', d => d.inv.some(it => it.type === 'almondWater'));
-  const slot = [...sn.log].reverse().find(e => e.ev === 'inventory').data.inv.findIndex(it => it.type === 'almondWater');
+  await sn.waitFor('inventory', d => d.inv.some(it => it?.type === 'almondWater'));
+  const slot = [...sn.log].reverse().find(e => e.ev === 'inventory').data.inv.findIndex(it => it?.type === 'almondWater');
   const afterMark = async (mark, ev, pred, ms = 4000) => {      // mark 이후에 온 이벤트만
     for (let w = 0; w < ms; w += 50) { const e = sn.log.slice(mark).find(e => e.ev === ev && pred(e.data)); if (e) return e.data; await sleep(50); }
     throw new Error('timeout ' + ev);
@@ -522,7 +549,7 @@ try {
   const room = game.rooms.get(lob.code), talker = room.players.get(c2.s.id);
   c2.s.emit('speaking', { on: true });
   await sleep(150);
-  check(talker.voiceUntil > Date.now(), '보이스 챗으로 말하면 서버가 "목소리 소리"로 처리 (귀 밝은 엔티티가 듣는다)');
+  check(!(talker.voiceUntil > Date.now()), '보이스 챗으로 말해도 엔티티를 부르는 소리로 치지 않음');
   c2.s.emit('voiceState', { vc: 2 });
   const muted = await c1.waitFor('snapshot', d => d.players.some(p => p.id === c2.s.id && p.vc === 2));
   c2.s.emit('voiceState', { vc: 'hack' });                             // 이상한 값은 무시
@@ -534,6 +561,25 @@ try {
   c2.s.emit('gesture', { g: 'nope' });
   await sleep(200);
   check(gst.g === 'finger' && c1.log.filter(e => e.ev === 'gesture').length === 1, '이모트 동작(뻐큐) → 모두에게 전달, 연타·이상한 값은 무시');
+  await sleep(1000);
+  c2.s.emit('gesture', { g: 'twerk' });
+  const tw = await c1.waitFor('gesture', d => d.g === 'twerk');
+  check(tw.id === c2.s.id, '트월킹 이모트 → 모두에게 전달');
+  // 멀티플레이 시체: 죽은 자리에 시체 + 가방 아이템이 시체 위에 떨어진다
+  talker.inv = [{ type: 'almondWater', uses: 1 }, { type: 'flare', uses: 1 }, null, null];
+  talker.status = 'dead';
+  room.emit('playerDied', { id: talker.id, entityType: 'howler', x: Math.round(talker.x), y: Math.round(talker.y) });
+  const corpse = await c1.waitFor('corpse', d => d.pid === talker.id);
+  await sleep(100);
+  const corpseDrops = c1.log.filter(e => e.ev === 'itemSpawned' && e.data.corpseOf === talker.id).map(e => e.data);
+  check(Math.abs(corpse.x - talker.x) < 1 && talker.inv.every(x => !x) && corpseDrops.length === 2 && corpseDrops.every(d => Math.hypot(d.x - corpse.x, d.y - corpse.y) < 16),
+    '멀티에서 죽으면 시체가 남고, 가방 아이템 2개가 시체 위에 떨어짐');
+  // 전멸 → 시체 위에 남은 아이템은 주인 가방으로 돌아간다
+  const chatter = room.players.get(c1.s.id);
+  chatter.status = 'dead';
+  room.emit('playerDied', { id: chatter.id, entityType: 'howler', x: Math.round(chatter.x), y: Math.round(chatter.y) });
+  room.checkRoundEnd();
+  check(room.phase === 'ended' && talker.inv.filter(Boolean).length === 2 && room.corpses.length === 2, '전멸하면 시체 위에 남은 아이템은 주인에게 돌아감');
   c1.s.disconnect(); c2.s.disconnect();
 
   // 20) Level 94: 밤 주기 — 예고(warn) → 밤(night) 이벤트, 라운드 상태에 night 포함

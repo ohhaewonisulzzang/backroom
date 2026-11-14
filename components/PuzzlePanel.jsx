@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { t } from '../shared/i18n.js';
 import { PUZZLE_NAMES, PUZZLE_HINTS, lightsToggle, slideMove, arcadePos, quickJudge } from '../shared/puzzles.js';
 
 /**
@@ -20,13 +21,13 @@ export default function PuzzlePanel({ puzzle, wrongAt, onSubmit, onClose, sfx })
   return (
     <div className={`puzzle-panel${shake ? ' wrong' : ''}`} onPointerDown={e => e.stopPropagation()}>
       <div className="pz-head">
-        <span>{puzzle.type === 'arcade' || puzzle.type === 'quick' ? 'ARCADE' : 'TERMINAL'} · {PUZZLE_NAMES[puzzle.type]}</span>
-        <button onMouseDown={e => e.preventDefault()} onClick={onClose}>닫기 [E]</button>
+        <span>{puzzle.type === 'arcade' || puzzle.type === 'quick' ? 'ARCADE' : 'TERMINAL'} · {t(PUZZLE_NAMES[puzzle.type])}</span>
+        <button onMouseDown={e => e.preventDefault()} onClick={onClose}>{t('닫기')} [E]</button>
       </div>
-      <p className="pz-hint">{PUZZLE_HINTS[puzzle.type]}</p>
+      <p className="pz-hint">{t(PUZZLE_HINTS[puzzle.type])}</p>
       <Body puzzle={puzzle} onSubmit={onSubmit} sfx={sfx} wrongAt={wrongAt} onClose={onClose} />
-      {shake && <div className="pz-alarm">ERROR — 경보가 울린다!</div>}
-      <p className="pz-foot">푸는 동안에도 시간은 흐른다. 주위를 살펴라.</p>
+      {shake && <div className="pz-alarm">{t('ERROR — 경보가 울린다!')}</div>}
+      <p className="pz-foot">{t('푸는 동안에도 시간은 흐른다. 주위를 살펴라.')}</p>
     </div>
   );
 }
@@ -94,8 +95,8 @@ function OneStroke({ puzzle, onSubmit, sfx }) {
         })}
       </svg>
       <div className="pz-row">
-        <span className="pz-dim">{used.size} / {all.size} 선{stuck ? ' — 막혔다!' : ''}</span>
-        <Btn onClick={reset}>처음부터</Btn>
+        <span className="pz-dim">{used.size} / {all.size} {t('선')}{stuck ? ` — ${t('막혔다!')}` : ''}</span>
+        <Btn onClick={reset}>{t('처음부터')}</Btn>
       </div>
     </>
   );
@@ -120,7 +121,7 @@ function LightsOut({ puzzle, onSubmit, sfx }) {
       <div className="pz-grid" style={{ gridTemplateColumns: `repeat(${puzzle.n}, 64px)` }}>
         {cells.map((v, i) => <button key={i} className={`pz-cell lamp${v ? ' on' : ''}`} onMouseDown={e => e.preventDefault()} onClick={() => press(i)} />)}
       </div>
-      <div className="pz-row"><span className="pz-dim">누른 횟수 {clicks.length}</span><Btn onClick={reset}>처음부터</Btn></div>
+      <div className="pz-row"><span className="pz-dim">{t('누른 횟수 {n}', { n: clicks.length })}</span><Btn onClick={reset}>{t('처음부터')}</Btn></div>
     </>
   );
 }
@@ -138,7 +139,7 @@ function Sequence({ puzzle, onSubmit, wrongAt, onClose }) {
         <input ref={input} value={v} inputMode="numeric" maxLength={6} placeholder="?"
           onChange={e => setV(e.target.value.replace(/[^0-9-]/g, ''))}
           onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }} />
-        <button type="submit" className="pz-btn">입력</button>
+        <button type="submit" className="pz-btn">{t('입력')}</button>
       </div>
     </form>
   );
@@ -182,8 +183,8 @@ function Memory({ puzzle, onSubmit, sfx, wrongAt }) {
         ))}
       </div>
       <div className="pz-row">
-        <span className="pz-dim">{mode === 'show' ? '잘 봐라...' : mode === 'input' ? `입력 ${input.length} / ${seq.length}` : '...'}</span>
-        <Btn onClick={play}>다시 보기</Btn>
+        <span className="pz-dim">{mode === 'show' ? t('잘 봐라...') : mode === 'input' ? t('입력 {n} / {total}', { n: input.length, total: seq.length }) : '...'}</span>
+        <Btn onClick={play}>{t('다시 보기')}</Btn>
       </div>
     </>
   );
@@ -211,7 +212,7 @@ function Slide({ puzzle, onSubmit, sfx }) {
             onMouseDown={e => e.preventDefault()} onClick={() => press(i)}>{v || ''}</button>
         ))}
       </div>
-      <div className="pz-row"><span className="pz-dim">이동 {moves.length}</span><Btn onClick={reset}>처음부터</Btn></div>
+      <div className="pz-row"><span className="pz-dim">{t('이동 {n}', { n: moves.length })}</span><Btn onClick={reset}>{t('처음부터')}</Btn></div>
     </>
   );
 }
@@ -277,8 +278,8 @@ function Arcade({ puzzle, onSubmit, sfx }) {
         {flash === 'miss' && <text x={W / 2} y="62" textAnchor="middle" fill="#ff5a4a" fontSize="30" fontFamily="VT323, monospace">MISS</text>}
       </svg>
       <div className="pz-row">
-        <span className="pz-dim">풍선 {Math.min(hits.current.length, stages.length)} / {stages.length}</span>
-        <Btn onClick={fire}>쏘기 [Space]</Btn>
+        <span className="pz-dim">{t('풍선 {n} / {total}', { n: Math.min(hits.current.length, stages.length), total: stages.length })}</span>
+        <Btn onClick={fire}>{t('쏘기')} [Space]</Btn>
       </div>
     </>
   );
@@ -319,10 +320,10 @@ function Quick({ puzzle, onSubmit, sfx }) {
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
   });
-  const t = (performance.now() - start.current) / 1000, go = t >= puzzle.delay && !lock.current;
+  const el = (performance.now() - start.current) / 1000, go = el >= puzzle.delay && !lock.current;
   const R = result.current;
   const bg = R === 'ok' ? '#0e3a18' : R ? '#3a0610' : go ? '#0e5a24' : '#3a0a10';
-  const label = R === 'ok' ? 'CLEAR!' : R === 'early' ? '너무 빨라!' : R === 'late' ? '너무 늦어!' : go ? 'NOW!' : 'WAIT...';
+  const label = R === 'ok' ? 'CLEAR!' : R === 'early' ? t('너무 빨라!') : R === 'late' ? t('너무 늦어!') : go ? 'NOW!' : 'WAIT...';
   return (
     <>
       <svg className="pz-svg arcade-svg" viewBox={`0 0 ${W} ${H}`} onPointerDown={e => { e.preventDefault(); fire(); }}>
@@ -332,8 +333,8 @@ function Quick({ puzzle, onSubmit, sfx }) {
         <text x={W / 2} y={H - 22} textAnchor="middle" fill="#fff3c4" fontSize="34" fontFamily="VT323, monospace">{label}</text>
       </svg>
       <div className="pz-row">
-        <span className="pz-dim">초록불이 켜지면 바로!</span>
-        <Btn onClick={fire}>쏘기 [Space]</Btn>
+        <span className="pz-dim">{t('초록불이 켜지면 바로!')}</span>
+        <Btn onClick={fire}>{t('쏘기')} [Space]</Btn>
       </div>
     </>
   );

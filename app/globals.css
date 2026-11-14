@@ -26,7 +26,7 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 }
 
 
-.panel { text-align: center; max-width: 640px; padding: 24px 16px; }
+.panel { text-align: center; max-width: 640px; padding: 24px 16px; max-height: min(620px, calc(100vh - 32px)); overflow-y: auto; overflow-x: hidden; box-sizing: border-box; }
 .panel h1 {
   font-size: clamp(48px, 10vw, 96px); margin: 0; letter-spacing: 6px; font-weight: normal;
   color: var(--yellow);
@@ -88,11 +88,11 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 .menu-col {
   position: fixed; left: clamp(16px, 6vw, 96px); top: 50%; transform: translateY(-50%);
   z-index: 10; width: min(380px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px); overflow-y: auto; box-sizing: border-box;   /* 내용이 길어도 화면 밖으로 안 나가게 */
+  max-height: min(680px, calc(100vh - 32px)); overflow-y: auto; box-sizing: border-box;   /* 정해진 높이를 넘으면 세로 스크롤 */
   display: flex; flex-direction: column; gap: 14px;
 }
 .menu-col:has(.bestiary) { width: min(640px, calc(100vw - 32px)); }
-.menu-col.pause:has(.bestiary) { max-height: calc(100vh - 32px); overflow-y: auto; }   /* 게임 중 ESC → 괴물 도감 */
+.menu-col.pause:has(.bestiary) { max-height: min(680px, calc(100vh - 32px)); overflow-y: auto; }   /* 게임 중 ESC → 괴물 도감 */
 .menu-col .logo h1 {
   font-size: clamp(52px, 8vw, 88px); margin: 0; letter-spacing: 6px; font-weight: normal; color: var(--yellow);
   text-shadow: 0 0 14px rgba(216,196,106,.45), 3px 0 0 rgba(120,20,10,.5);
@@ -146,6 +146,35 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 .color-btn span { width: 14px; height: 14px; border: 1px solid #000; display: inline-block; }
 .color-btn.on { border-color: var(--yellow); color: var(--yellow); }
 .color-btn:disabled { opacity: .3; cursor: not-allowed; }
+.lang-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 20px; }
+.lang-pick > div { display: flex; gap: 6px; }
+
+/* 게임 모드 (대기방, 방장만) */
+.mode-section { display: flex; flex-direction: column; gap: 6px; font-size: 18px; }
+.mode-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mode-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.mode-list li { display: flex; align-items: center; gap: 4px; border: 1px solid var(--yellow-dim); color: var(--yellow); padding: 1px 2px 1px 8px; }
+.mode-empty { font-size: 18px !important; }
+.mode-x { font-family: inherit; font-size: 20px; line-height: 1; background: none; border: none; color: var(--muted); cursor: pointer; padding: 0 5px; }
+.mode-x:hover { color: var(--danger); }
+.mode-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+.mode-dialog {
+  width: min(420px, 100%); max-height: min(520px, calc(100vh - 32px)); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px;
+  background: rgba(8, 6, 2, 0.96); border: 1px solid var(--yellow-dim); font-size: 20px; color: var(--text);
+}
+.mode-dialog strong { color: var(--yellow); font-weight: normal; font-size: 24px; letter-spacing: 2px; }
+.mode-search {
+  font-family: inherit; font-size: 20px; background: rgba(0,0,0,.6); color: var(--yellow);
+  border: 1px solid var(--line); padding: 4px 8px; outline: none;
+}
+.mode-search:focus { border-color: var(--yellow-dim); }
+.mode-options { list-style: none; margin: 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.mode-options li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--line); }
+.mode-options li > div { display: flex; flex-direction: column; min-width: 0; }
+.mode-name { color: var(--yellow); }
+.mode-desc { font-size: 16px; }
+.mode-options .color-btn { flex-shrink: 0; }
 .lobby p { font-size: 20px; margin: 0; }
 
 /* ---------- ESC 메뉴 ---------- */
@@ -158,7 +187,7 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 /* ---------- 퍼즐 단말기 (게임은 계속 진행되므로 화면 오른쪽에, 플레이어가 보이게) ---------- */
 .puzzle-panel {
   position: fixed; right: clamp(12px, 4vw, 64px); top: 50%; transform: translateY(-50%);
-  z-index: 15; width: min(400px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  z-index: 15; width: min(400px, calc(100vw - 24px)); max-height: min(640px, calc(100vh - 24px)); overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
   background: rgba(8, 10, 6, 0.9); border: 2px solid #5a6a3a;
   box-shadow: 0 0 24px rgba(120, 230, 140, 0.15), inset 0 0 40px rgba(0, 0, 0, 0.6);
   padding: 12px 16px 14px; color: var(--text); font-size: 20px;
@@ -245,6 +274,8 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
   display: flex; flex-direction: column; gap: 6px; background: rgba(8,6,2,.85); border: 1px solid var(--line); padding: 8px;
 }
 /* hud.js drawInventory 와 같은 자리 (아래 가운데, 46px 칸 4개, 간격 6px, 바닥에서 18px) */
+/* 사용 버튼: 아이템 칸 오른쪽. 누르고 있는 동안 사용 (꾹 눌러 쓰는 아이템은 원이 다 찰 때까지) */
+.touch-use { position: absolute; left: calc(50% + 120px); bottom: 18px; min-width: 64px; min-height: 46px; }
 .touch-slots { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: grid; grid-template-columns: repeat(4, 46px); gap: 6px; pointer-events: none; }
 .touch-slots button { pointer-events: auto; touch-action: none; width: 46px; height: 46px; padding: 0; background: transparent; border: none; -webkit-tap-highlight-color: transparent; }
 
@@ -263,10 +294,7 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 
 /* ---------- 설정 탭 / 보이스 / 키 설정 ---------- */
 /* 설정/조작법/도감: 넓은 어두운 판 + 작은 로고. 스크롤은 바깥 한 겹만, 가로 스크롤 없음 */
-.menu-col { overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #4a4222 transparent; }
-.menu-col::-webkit-scrollbar { width: 6px; height: 0; }
-.menu-col::-webkit-scrollbar-thumb { background: #4a4222; }
-.menu-col::-webkit-scrollbar-track { background: transparent; }
+.menu-col { overflow-x: hidden; }
 .menu-col:has(.settings-form), .menu-col:has(.menu-text) {
   width: min(560px, calc(100vw - 32px)); background: rgba(8, 6, 2, 0.86); border: 1px solid var(--line); padding: 16px 20px;
 }
@@ -383,6 +411,52 @@ canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; tou
 .warning-box ul { margin: 0 0 16px; padding-left: 22px; }
 .warning-box li { margin: 4px 0; }
 .warning-box b { color: var(--yellow); font-weight: normal; }
+.warn-fs { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 12px; padding: 8px 12px; border: 1px solid var(--yellow-dim); background: rgba(216,196,106,.06); }
+.warn-fs button { font-family: inherit; font-size: 22px; cursor: pointer; color: var(--yellow); background: transparent; border: 1px solid var(--yellow); padding: 3px 14px; }
+.warn-fs button:hover:not(:disabled) { background: rgba(216,196,106,.15); }
+.warn-fs button:disabled { opacity: .35; cursor: default; }
 .warn-dim { color: var(--muted); font-size: 19px; }
 .warn-go { margin-top: 22px !important; text-align: center; color: var(--yellow-dim); }
 .warn-go.on { color: var(--yellow); animation: flick 2s infinite steps(1); }
+
+/* ---------- 스크롤바: 정해진 크기를 넘는 패널은 세로로만 스크롤. 얇고 어둡게, 잡을 때만 밝아진다 ---------- */
+* { scrollbar-width: thin; scrollbar-color: rgba(216,196,106,.22) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 0; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: rgba(216,196,106,.2); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background-color: rgba(216,196,106,.45); }
+*::-webkit-scrollbar-thumb:active { background-color: rgba(216,196,106,.6); }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------- 체크박스: 각진 픽셀 상자 + 노란 체크 ---------- */
+input[type=checkbox] {
+  appearance: none; -webkit-appearance: none; margin: 0; flex-shrink: 0; cursor: pointer;
+  width: 18px; height: 18px; display: inline-grid; place-content: center; vertical-align: middle;
+  background: rgba(0,0,0,.65); border: 1px solid var(--yellow-dim);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.6);
+  transition: border-color .12s, background-color .12s;
+}
+input[type=checkbox]::before {
+  content: ''; width: 12px; height: 12px; background: var(--yellow); transform: scale(0); transition: transform .1s steps(2);
+  clip-path: polygon(14% 50%, 0 64%, 38% 100%, 100% 22%, 86% 8%, 38% 72%);   /* 체크 모양 */
+}
+input[type=checkbox]:checked { border-color: var(--yellow); background: rgba(216,196,106,.14); }
+input[type=checkbox]:checked::before { transform: scale(1); }
+input[type=checkbox]:hover:not(:disabled) { border-color: var(--yellow); }
+input[type=checkbox]:focus-visible { outline: 1px dashed var(--yellow); outline-offset: 2px; }
+input[type=checkbox]:disabled { opacity: .4; cursor: not-allowed; }
+label.check { cursor: pointer; user-select: none; }
+label.check:hover { color: var(--yellow); }
+
+/* ---------- 전체화면 권장 (게임 시작 때 한 번) ---------- */
+.fs-tip {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 25;
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 14px; font-size: 19px; color: var(--text);
+  background: rgba(8,6,2,.9); border: 1px solid var(--yellow-dim); box-shadow: 0 0 18px rgba(0,0,0,.6);
+  animation: fsin .3s steps(3);
+}
+.fs-tip button { font-family: inherit; font-size: 18px; cursor: pointer; background: transparent; color: var(--yellow); border: 1px solid var(--yellow-dim); padding: 2px 10px; }
+.fs-tip button:hover { background: rgba(216,196,106,.12); border-color: var(--yellow); }
+.fs-tip .fs-x { border: none; color: var(--muted); padding: 0 6px; font-size: 20px; }
+.fs-tip .fs-x:hover { color: var(--yellow); background: none; }
+@keyframes fsin { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }

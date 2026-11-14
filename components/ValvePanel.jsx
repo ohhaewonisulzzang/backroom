@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { t } from '../shared/i18n.js';
 
 /**
  * 밸브 / 크랭크 돌리기 창. 핸들을 마우스(손가락)로 잡고 시계 방향으로 빙빙 돌린다.
@@ -61,10 +62,10 @@ export default function ValvePanel({ kind = 'valve', turns = 3, onTurn, progress
   return (
     <div className="puzzle-panel valve-panel" onPointerDown={e => e.stopPropagation()}>
       <div className="pz-head">
-        <span>{L.title}</span>
-        <button onMouseDown={e => e.preventDefault()} onClick={onClose}>닫기 [E]</button>
+        <span>{t(L.title)}</span>
+        <button onMouseDown={e => e.preventDefault()} onClick={onClose}>{t('닫기')} [E]</button>
       </div>
-      <p className="pz-hint">{L.hint} ({turns}바퀴)</p>
+      <p className="pz-hint">{t(L.hint)} {t('({n}바퀴)', { n: turns })}</p>
       <svg ref={svg} className="pz-svg valve-svg" viewBox={`0 0 ${SIZE} ${SIZE}`}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onLostPointerCapture={up}>
         {/* 진행 링 */}
@@ -94,7 +95,7 @@ export default function ValvePanel({ kind = 'valve', turns = 3, onTurn, progress
         </g>
         <text x={C} y={SIZE - 4} textAnchor="middle" fill="#9fe0a0" fontSize="20" fontFamily="VT323, monospace">↻ {pct}%</text>
       </svg>
-      <p className="pz-foot">돌리는 소리가 난다. 주위를 살펴라.</p>
+      <p className="pz-foot">{t('돌리는 소리가 난다. 주위를 살펴라.')}</p>
     </div>
   );
 }

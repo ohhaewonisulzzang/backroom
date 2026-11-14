@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LEVELS, ITEM_TYPES, levelLabel, missionGoal, missionOf, T } from '../shared/config.js';
 import { BESTIARY, typesInLevel, levelsOf } from '../game/client/bestiary.js';
+import { t, getLang, setLang, onLangChange, LANGS } from '../shared/i18n.js';
 
 /**
  * 휴대폰 전용 안내 사이트. 게임은 컴퓨터/태블릿에서만 되므로, 휴대폰에서는 게임 소개를 둘러볼 수 있게 한다.
@@ -98,6 +99,8 @@ export default function MobileGuide() {
   const [mon, setMon] = useState(null);
   const [copied, setCopied] = useState(false);
   const [active, setActive] = useState('notice');
+  const [lang, setLangState] = useState(getLang);
+  useEffect(() => onLangChange(setLangState), []);   // 언어가 바뀌면 다시 그린다
   const L = LEVELS[lv];
   const levelMonsters = useMemo(() => typesInLevel(lv).map(t => BESTIARY.find(b => b.type === t)).filter(Boolean), [lv]);
 
@@ -111,7 +114,7 @@ export default function MobileGuide() {
   const share = async () => {
     const url = window.location.href.split('#')[0];
     try {
-      if (navigator.share) await navigator.share({ title: 'BACKROOMS', text: '컴퓨터나 태블릿으로 접속해서 같이 하자', url });
+      if (navigator.share) await navigator.share({ title: 'BACKROOMS', text: t('컴퓨터나 태블릿으로 접속해서 같이 하자'), url });
       else { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); }
     } catch { /* 공유 취소 */ }
   };
@@ -120,78 +123,87 @@ export default function MobileGuide() {
   return (
     <div className="guide">
       <nav className="g-tabs">
-        {SECTIONS.map(([id, name]) => <button key={id} className={active === id ? 'on' : ''} onClick={() => go(id)}>{name}</button>)}
+        {SECTIONS.map(([id, name]) => <button key={id} className={active === id ? 'on' : ''} onClick={() => go(id)}>{t(name)}</button>)}
       </nav>
 
       <header className="g-hero" id="notice">
+        <div className="g-lang" style={{ position: 'absolute', top: 10, right: 12, zIndex: 2, display: 'flex', alignItems: 'center', gap: 4, fontSize: 18 }}>
+          {LANGS.map(([id, name], i) => (
+            <span key={id} style={{ display: 'contents' }}>
+              {i > 0 && <span style={{ color: 'var(--muted)' }}>|</span>}
+              <button onClick={() => setLang(id)} aria-pressed={lang === id}
+                style={{ background: 'none', border: 'none', padding: '2px 4px', fontSize: 18, cursor: 'pointer', color: lang === id ? 'var(--yellow)' : 'var(--muted)', textDecoration: lang === id ? 'underline' : 'none' }}>{name}</button>
+            </span>
+          ))}
+        </div>
         <div className="g-lamp" />
         <h1>BACKROOMS</h1>
-        <p className="g-sub">현실에서 노클립하면, 끝없이 이어지는 노란 방에 떨어진다.</p>
+        <p className="g-sub">{t('현실에서 노클립하면, 끝없이 이어지는 노란 방에 떨어진다.')}</p>
         <div className="g-notice">
-          <b>휴대폰에서는 플레이할 수 없습니다</b>
-          <p>컴퓨터나 태블릿으로 접속하세요.<br />이 페이지에서는 게임을 미리 둘러볼 수 있어요.</p>
-          <button className="g-btn" onClick={share}>{copied ? '링크 복사됨!' : '링크 보내기 / 복사'}</button>
+          <b>{t('휴대폰에서는 플레이할 수 없습니다')}</b>
+          <p>{t('컴퓨터나 태블릿으로 접속하세요.')}<br />{t('이 페이지에서는 게임을 미리 둘러볼 수 있어요.')}</p>
+          <button className="g-btn" onClick={share}>{copied ? t('링크 복사됨!') : t('링크 보내기 / 복사')}</button>
         </div>
-        <button className="g-down" onClick={() => go('story')}>▼ 둘러보기</button>
+        <button className="g-down" onClick={() => go('story')}>▼ {t('둘러보기')}</button>
       </header>
 
       <section id="story" className="g-sec">
-        <h2>이야기</h2>
-        <p>친구들과 폐건물 탐험 영상을 찍던 날. 벽이 노랗게 물들고, 바닥이 꺼졌다.</p>
-        <p>눈을 뜨자 젖은 카펫 냄새와 형광등 윙윙거리는 소리. 끝없이 이어지는 노란 방 — <b>백룸</b>이다.</p>
-        <p>레벨을 하나씩 빠져나가 현실로 돌아가야 한다. 이곳엔 우리만 있는 게 아니다.</p>
+        <h2>{t('이야기')}</h2>
+        <p>{t('친구들과 폐건물 탐험 영상을 찍던 날. 벽이 노랗게 물들고, 바닥이 꺼졌다.')}</p>
+        <p>{t('눈을 뜨자 젖은 카펫 냄새와 형광등 윙윙거리는 소리. 끝없이 이어지는 노란 방 —')} <b>{t('백룸')}</b>{t('이다.')}</p>
+        <p>{t('레벨을 하나씩 빠져나가 현실로 돌아가야 한다. 이곳엔 우리만 있는 게 아니다.')}</p>
       </section>
 
       <section id="how" className="g-sec">
-        <h2>게임 방법</h2>
+        <h2>{t('게임 방법')}</h2>
         <div className="g-cards">
-          {HOW.map(([t, d]) => <details key={t} className="g-card"><summary>{t}</summary><p>{d}</p></details>)}
+          {HOW.map(([h, d]) => <details key={h} className="g-card"><summary>{t(h)}</summary><p>{t(d)}</p></details>)}
         </div>
       </section>
 
       <section id="levels" className="g-sec">
-        <h2>레벨 탐험 <span>{LEVELS.length}개</span></h2>
+        <h2>{t('레벨 탐험')} <span>{t('{n}개', { n: LEVELS.length })}</span></h2>
         <div className="g-chips">
-          {LEVELS.map((x, i) => <button key={i} className={i === lv ? 'on' : ''} onClick={() => setLv(i)}>{x.label ?? x.id}</button>)}
+          {LEVELS.map((x, i) => <button key={i} className={i === lv ? 'on' : ''} onClick={() => setLv(i)}>{t(String(x.label ?? x.id))}</button>)}
         </div>
         <div className="g-level">
           <div className="g-level-head">
-            <small>{levelLabel(lv)}</small>
-            <h3>{L.name}</h3>
+            <small>{t(levelLabel(lv))}</small>
+            <h3>{t(L.name)}</h3>
           </div>
-          <p className="g-goal">{missionGoal(missionOf(lv))}</p>
+          <p className="g-goal">{t(missionGoal(missionOf(lv)))}</p>
           <LevelMap index={lv} />
-          <p className="g-legend"><i style={{ background: '#fff' }} />시작 <i style={{ background: '#ff4a3a' }} />출구 <i style={{ background: '#ffd84a' }} />열쇠 <i style={{ background: '#7ae88a' }} />퍼즐 <i style={{ background: '#4ab0ff' }} />장치 <i style={{ background: '#ff9a4a' }} />부품</p>
+          <p className="g-legend"><i style={{ background: '#fff' }} />{t('시작')} <i style={{ background: '#ff4a3a' }} />{t('출구')} <i style={{ background: '#ffd84a' }} />{t('열쇠')} <i style={{ background: '#7ae88a' }} />{t('퍼즐')} <i style={{ background: '#4ab0ff' }} />{t('장치')} <i style={{ background: '#ff9a4a' }} />{t('부품')}</p>
           {levelMonsters.length > 0 && (
             <div className="g-level-mons">
               {levelMonsters.map(b => (
                 <button key={b.type} onClick={() => { setMon(b.type); go('monsters'); }}>
-                  <MonsterCanvas type={b.type} size={64} /><span>{b.name}</span>
+                  <MonsterCanvas type={b.type} size={64} /><span>{t(b.name)}</span>
                 </button>
               ))}
             </div>
           )}
           <div className="g-nav">
-            <button className="g-btn" disabled={lv === 0} onClick={() => setLv(lv - 1)}>◀ 이전</button>
-            <button className="g-btn" disabled={lv === LEVELS.length - 1} onClick={() => setLv(lv + 1)}>다음 ▶</button>
+            <button className="g-btn" disabled={lv === 0} onClick={() => setLv(lv - 1)}>◀ {t('이전')}</button>
+            <button className="g-btn" disabled={lv === LEVELS.length - 1} onClick={() => setLv(lv + 1)}>{t('다음')} ▶</button>
           </div>
         </div>
       </section>
 
       <section id="monsters" className="g-sec">
-        <h2>괴물 도감 <span>{BESTIARY.length}종</span></h2>
-        <p className="g-dim">눌러서 자세히 보기</p>
+        <h2>{t('괴물 도감')} <span>{t('{n}종', { n: BESTIARY.length })}</span></h2>
+        <p className="g-dim">{t('눌러서 자세히 보기')}</p>
         <div className="g-grid">
           {BESTIARY.map(b => (
             <button key={b.type} className={`g-mon${mon === b.type ? ' on' : ''}`} onClick={() => setMon(mon === b.type ? null : b.type)}>
               <MonsterCanvas type={b.type} size={96} />
-              <span>{b.name}</span>
+              <span>{t(b.name)}</span>
               {mon === b.type && (
                 <div className="g-mon-info">
-                  <p className="g-dim">{levelsOf(b.type).join(' · ')}</p>
-                  <p><b>생김새</b> {b.look}</p>
-                  <p><b>행동</b> {b.behavior}</p>
-                  <p><b>대처법</b> {b.counter}</p>
+                  <p className="g-dim">{levelsOf(b.type).map(x => t(x)).join(' · ')}</p>
+                  <p><b>{t('생김새')}</b> {t(b.look)}</p>
+                  <p><b>{t('행동')}</b> {t(b.behavior)}</p>
+                  <p><b>{t('대처법')}</b> {t(b.counter)}</p>
                 </div>
               )}
             </button>
@@ -200,25 +212,25 @@ export default function MobileGuide() {
       </section>
 
       <section id="items" className="g-sec">
-        <h2>아이템</h2>
+        <h2>{t('아이템')}</h2>
         <div className="g-items">
-          {Object.entries(ITEM_TYPES).map(([t, d]) => (
-            <div key={t} className="g-item"><ItemIcon type={t} /><div><b>{d.name}</b><p>{ITEM_DESC[t] || ''}</p></div></div>
+          {Object.entries(ITEM_TYPES).map(([type, d]) => (
+            <div key={type} className="g-item"><ItemIcon type={type} /><div><b>{t(d.name)}</b><p>{t(ITEM_DESC[type] || '')}</p></div></div>
           ))}
         </div>
       </section>
 
       <section id="keys" className="g-sec">
-        <h2>조작법 <span>컴퓨터</span></h2>
+        <h2>{t('조작법')} <span>{t('컴퓨터')}</span></h2>
         <table className="g-keys"><tbody>
-          {CONTROLS.map(([k, a]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{a}</td></tr>)}
+          {CONTROLS.map(([k, a]) => <tr key={k}><td><kbd>{t(k)}</kbd></td><td>{t(a)}</td></tr>)}
         </tbody></table>
-        <p className="g-dim">태블릿은 화면의 이동 스틱 · 조준 스틱 · 버튼으로 조작한다.</p>
+        <p className="g-dim">{t('태블릿은 화면의 이동 스틱 · 조준 스틱 · 버튼으로 조작한다.')}</p>
       </section>
 
       <footer className="g-foot">
-        <p>컴퓨터나 태블릿에서 만나요.</p>
-        <button className="g-btn" onClick={share}>{copied ? '링크 복사됨!' : '링크 보내기 / 복사'}</button>
+        <p>{t('컴퓨터나 태블릿에서 만나요.')}</p>
+        <button className="g-btn" onClick={share}>{copied ? t('링크 복사됨!') : t('링크 보내기 / 복사')}</button>
       </footer>
     </div>
   );

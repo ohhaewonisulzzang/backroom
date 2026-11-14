@@ -1,4 +1,4 @@
-import { CONFIG, TS, T, PLAYER_COLORS, ENTITY_TYPES, LEVELS, ITEM_TYPES, MISSION, randomSuit } from '../shared/config.js';
+import { CONFIG, TS, T, PLAYER_COLORS, ENTITY_TYPES, LEVELS, ITEM_TYPES, MISSION, randomSuit, MODES, defaultModes } from '../shared/config.js';
 import { generateLevel } from '../shared/map.js';
 import { angleDiff } from '../shared/utils.js';
 import { hasLOS } from '../shared/physics.js';
@@ -7,6 +7,11 @@ import { PlayerState } from '../shared/player.js';
 import { checkPuzzle } from '../shared/puzzles.js';
 
 const finite = v => typeof v === 'number' && Number.isFinite(v);
+/** 가방: 칸 번호가 고정된 INVENTORY_SIZE 칸 배열 (빈칸 = null). 아이템을 쓰거나 버려도 다른 칸이 당겨지지 않는다 */
+const emptyInv = () => Array(CONFIG.INVENTORY_SIZE).fill(null);
+const invFree = p => p.inv.findIndex(x => !x);
+/** 빈칸 중 가장 앞 칸에 넣는다. 가득 차면 false */
+const invAdd = (p, it) => { const i = invFree(p); if (i < 0) return false; p.inv[i] = it; return true; };
 const MIMIC_EVERY = [18, 40];   // 엔티티 목소리 흉내 간격(초, 무작위)
 
 /**
@@ -26,6 +31,7 @@ export class GameRoom {
     this.solo = solo;               // 혼자 하기 방 (코드로 참가 불가)
     this.paused = false;            // 혼자 하기에서만 일시정지 가능
     this.hostId = null;
+    this.modes = defaultModes();    // 게임 모드 (대기방에서 방장이 켜고 끈다)
     this.players = new Map();
     this.round = 0;
     this.levelIndex = 0;            // 지금 진행 중인 레벨 (탈출 → +1, 전멸 → 그대로)
@@ -51,6 +57,27 @@ export class GameRoom {
     if (event === 'playerDied') this.statOf(data.id).deaths++;
     else if (event === 'playerEscaped') this.statOf(data.id).escapes++;
     this.io.to(this.name).emit(event, data);
+    if (event === 'playerDied') this.leaveCorpse(data.id);
+  }
+
+  /**
+   * 멀티플레이에서 죽으면 그 자리에 시체가 남고, 가방에 있던 아이템이 시체 위에 흩어진다 (누구든 주울 수 있다).
+   * 혼자 하기는 죽으면 바로 라운드가 끝나므로 남기지 않는다.
+   */
+  leaveCorpse(id) {
+    const p = this.players.get(id);
+    if (this.solo || !p || this.phase !== 'playing' || !this.corpses) return;
+    const c = { id: ++this.corpseSeq, pid: p.id, name: p.name, color: p.color, x: Math.round(p.x), y: Math.round(p.y), angle: +(p.angle || 0).toFixed(2) };
+    this.corpses.push(c);
+    this.emit('corpse', c);
+    const inv = p.inv.filter(Boolean); p.inv = emptyInv();
+    inv.forEach((it, k) => {
+      const a = (k / Math.max(1, inv.length)) * Math.PI * 2 + 0.4, r = inv.length > 1 ? 9 : 0;
+      const drop = { id: ++this.itemSeq, type: it.type, uses: it.uses, x: Math.round(c.x + Math.cos(a) * r), y: Math.round(c.y + 2 + Math.sin(a) * r * 0.6), corpseOf: p.id };
+      this.items.push(drop);
+      this.emit('itemSpawned', { ...drop });
+    });
+    if (inv.length) this.sendInventory(p);
   }
 
   // ---------------------------------------------------------------- 엔딩 성적표 (처음 Level 0 부터 끝까지의 기록)
@@ -98,7 +125,7 @@ export class GameRoom {
 
   lobbyPayload() {
     return {
-      code: this.name, hostId: this.hostId, max: CONFIG.NET.MAX_PLAYERS,
+      code: this.name, hostId: this.hostId, max: CONFIG.NET.MAX_PLAYERS, modes: { ...this.modes },
       players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color })),
     };
   }
@@ -110,6 +137,13 @@ export class GameRoom {
     if (!p || this.phase !== 'lobby' || !PLAYER_COLORS.includes(color)) return;
     if ([...this.players.values()].some(o => o !== p && o.color === color)) return;
     p.color = color;
+    this.emitLobby();
+  }
+
+  /** 대기방에서 방장만 게임 모드를 켜고 끈다 */
+  setMode(id, { mode, on } = {}) {
+    if (this.phase !== 'lobby' || id !== this.hostId || !MODES.some(m => m.id === mode)) return;
+    this.modes[mode] = !!on;
     this.emitLobby();
   }
 
@@ -135,7 +169,7 @@ export class GameRoom {
     if (this.phase === 'waiting') { this.startRound(false, { story: this.levelIndex === 0 }); story = this.story; }
     else if (this.phase === 'playing') this.spawnPlayer(p, this.players.size - 1);
     else p.status = 'waiting';
-    p.inv = [];
+    p.inv = emptyInv();
 
     socket.emit('init', { ...this.roundPayload(), id: p.id, room: this.name, testMode: this.testMode, story });
     socket.to(this.name).emit('playerJoined', p.serialize());
@@ -163,7 +197,7 @@ export class GameRoom {
     p.angle = Math.PI / 4;
     p.status = 'alive'; p.flashlight = true; p.sprinting = false;
     p.hidden = false; p.lockerId = -1; p.hideToggleAt = 0;
-    p.noise = 0; p.voiceUntil = 0; p.alarmUntil = 0; p.workUntil = 0; p.emoteAt = 0;
+    p.noise = 0; p.voiceUntil = 0; p.alarmUntil = 0; p.workUntil = 0; p.emoteAt = 0; p.nvUntil = 0;
     p.sanity = CONFIG.SANITY.MAX;
     p.lastUpdate = Date.now();
   }
@@ -199,7 +233,8 @@ export class GameRoom {
     this.monsters = this.spawnEntities();
     this.items = this.spawnItems();
     this.flares = [];
-    if (this.levelIndex === 0) for (const p of this.players.values()) p.inv = [];   // 처음부터면 빈손
+    this.corpses = []; this.corpseSeq = this.corpseSeq || 0;
+    for (const p of this.players.values()) if (this.levelIndex === 0 || !Array.isArray(p.inv) || p.inv.length !== CONFIG.INVENTORY_SIZE) p.inv = emptyInv();   // 처음부터면 빈손
     this.story = story;
     this.monsterGrace = CONFIG.ENTITY.SPAWN_GRACE + (story ? CONFIG.STORY.DURATION : 0);
     let i = 0;
@@ -248,7 +283,10 @@ export class GameRoom {
   /** 종류별 엔티티 배치. 스마일러는 어두운 구역, 나머지는 시작 지점에서 먼 곳. */
   spawnEntities() {
     const { map, dist, darkCells, monsterSpawn } = this.level;
-    const far = map.floorCells.filter(i => dist[i] >= 18 && i !== this.level.exitIdx);
+    // 탈출구 둘레 5칸 안에는 엔티티를 두지 않는다 (출구 바로 앞의 창문들·데스모스에 달려들다 죽는 일 방지)
+    const ex = this.level.exitIdx % map.w, ey = (this.level.exitIdx / map.w) | 0;
+    const nearExit = i => Math.max(Math.abs((i % map.w) - ex), Math.abs(((i / map.w) | 0) - ey)) <= 5;
+    const far = map.floorCells.filter(i => dist[i] >= 18 && !nearExit(i));
     const used = [];
     const pick = pool => {
       const free = pool.filter(i => used.every(u => Math.abs((u % map.w) - (i % map.w)) + Math.abs(((u / map.w) | 0) - ((i / map.w) | 0)) > 10));
@@ -259,23 +297,25 @@ export class GameRoom {
       return { x: (i % map.w) * TS + TS / 2, y: ((i / map.w) | 0) * TS + TS / 2 };
     };
     const list = [];
-    const counts = LEVELS[this.levelIndex].entities;
+    const base = LEVELS[this.levelIndex].entities, more = this.modes.moreEntities;   // '엔티티 증가' 모드: 1.5배
+    const counts = more ? Object.fromEntries(Object.entries(base).map(([k, c]) => [k, k === 'partyPooper' ? c : Math.round(c * 1.5)])) : base;
     // 창문들: 북쪽이 벽인 바닥 (벽의 창문 바로 앞). 사물함·미션 물건 자리는 피한다
     const taken = [...this.level.lockers, ...this.level.keys, ...this.level.parts, ...this.level.stations, ...(this.level.depot ? [this.level.depot] : [])];
     const windowSpots = map.floorCells.filter(i => {
       const x = i % map.w, y = (i / map.w) | 0;
-      return dist[i] >= 8 && map.tiles[i] === T.FLOOR && map.isSolid(x, y - 1) && !taken.some(o => Math.abs(o.tx - x) + Math.abs(o.ty - y) < 2);
+      return dist[i] >= 8 && !nearExit(i) && map.tiles[i] === T.FLOOR && map.isSolid(x, y - 1) && !taken.some(o => Math.abs(o.tx - x) + Math.abs(o.ty - y) < 2);
     });
     for (const type of ENTITY_TYPES) {
       for (let n = 0; n < (counts[type] || 0); n++) {
-        const pool = type === 'smiler' && !this.level.info.blackout ? darkCells.filter(i => dist[i] >= 10)
+        const pool = type === 'smiler' && !this.level.info.blackout ? darkCells.filter(i => dist[i] >= 10 && !nearExit(i))
           : type === 'watch' || type === 'aranea' ? far.filter(i => this.level.wide[i])
           : type === 'clump' ? far.filter(i => map.tiles[i] !== T.SLOW)
           : type === 'windows' ? windowSpots
           : type === 'seaThing' ? far.filter(i => map.tiles[i] === T.SLOW)
           : type === 'crawler' ? far.filter(i => this.level.isDark(i % map.w, (i / map.w) | 0))
           : far;
-        const pos = type === 'howler' ? (n === 0 ? monsterSpawn : pick(far)) : pick(pool);
+        const atSpawn = monsterSpawn && !nearExit(Math.floor(monsterSpawn.y / TS) * map.w + Math.floor(monsterSpawn.x / TS));
+        const pos = type === 'howler' ? (n === 0 && atSpawn ? monsterSpawn : pick(far)) : pick(pool);
         if (!pos) continue;
         const m = new Monster(pos.x, pos.y, type, `${type}-${n}`);
         m.color = randomSuit();
@@ -298,7 +338,7 @@ export class GameRoom {
     const list = [];
     const over = LEVELS[this.levelIndex].items || {};
     for (const [type, def] of Object.entries(ITEM_TYPES)) {
-      for (let n = 0; n < (over[type] ?? def.perLevel) && pool.length; n++) {
+      for (let n = 0; n < (over[type] ?? def.perLevel) * (this.modes.moreItems ? 2 : 1) && pool.length; n++) {   // '아이템 풍족' 모드: 2배
         const i = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
         list.push({ id: ++this.itemSeq, type, x: (i % map.w) * TS + TS / 2, y: ((i / map.w) | 0) * TS + TS / 2 });
       }
@@ -312,6 +352,7 @@ export class GameRoom {
       level: this.levelIndex,
       seed: this.level.seed,
       phase: this.phase,
+      modes: { ...this.modes },
       players: [...this.players.values()].map(p => p.serialize()),
       keys: [...this.keysCollected],
       exitUnlocked: this.exitUnlocked,
@@ -321,6 +362,7 @@ export class GameRoom {
       blackout: this.blackout?.phase || null,
       monsters: this.monsters.map(m => m.serialize()),
       items: this.items,
+      corpses: this.corpses || [],
       flares: this.flares,
       horde: this.horde ? { x: Math.round(this.horde.x), speed: Math.round(this.horde.speed) } : null,
       restartIn: this.phase === 'ended' ? Math.max(0, (this.restartAt - Date.now()) / 1000) : 0,
@@ -338,13 +380,21 @@ export class GameRoom {
     if (escaped.length && LEVELS[this.levelIndex].final) {
       // 마지막 레벨 탈출 → 엔딩. 멀티는 대기방으로, 혼자 하기는 끝
       this.levelIndex = 0;
-      for (const p of this.players.values()) { p.inv = []; p.status = 'alive'; }
+      for (const p of this.players.values()) { p.inv = emptyInv(); p.status = 'alive'; }
       this.phase = this.solo ? 'complete' : 'lobby';
       this.emit('gameComplete', { escaped, dead: list('dead'), stats: this.statsPayload() });
       this.resetStats();
       if (!this.solo) this.emitLobby();
       this.log('GAME COMPLETE');
       return;
+    }
+    // 전멸: 시체 위에 남아 있던 아이템은 주인 가방으로 돌려준다 (같은 레벨을 다시 하니까)
+    if (!escaped.length) {
+      for (const it of this.items) {
+        const owner = it.corpseOf && this.players.get(it.corpseOf);
+        if (owner && invAdd(owner, { type: it.type, uses: it.uses })) owner._invDirty = true;
+      }
+      for (const p of this.players.values()) if (p._invDirty) { delete p._invDirty; this.sendInventory(p); }
     }
     // 한 명이라도 탈출 → 다음 레벨, 전멸 → 죽은 레벨에서 다시
     if (escaped.length) this.levelIndex = (this.levelIndex + 1) % LEVELS.length;
@@ -405,6 +455,7 @@ export class GameRoom {
       return;
     }
     p.applyInput(s);
+    if (this.modes.noFlashlight) p.flashlight = false;   // '손전등 금지' 모드
     if (moved >= 1) p.lastMoveAt = now;     // 복도 감독: 멈춰 서 있는지 판단
     // 발소리: 움직이고 있으면 들리는 반경 (웅크리면 0) — 파티고어가 듣는다
     const H = CONFIG.ENTITY.partygoer;
@@ -449,9 +500,9 @@ export class GameRoom {
         continue;
       }
       if (d >= CONFIG.PICKUP_RADIUS) continue;
-      if (p.inv.length >= CONFIG.INVENTORY_SIZE) continue;          // 가방이 가득 참
+      if (invFree(p) < 0) continue;                                 // 가방이 가득 참
       this.items.splice(i, 1);
-      p.inv.push({ type: it.type, uses: it.uses ?? ITEM_TYPES[it.type].uses });   // 버려진 아이템은 남은 횟수 그대로
+      invAdd(p, { type: it.type, uses: it.uses ?? ITEM_TYPES[it.type].uses });   // 비어 있는 가장 앞 칸, 버려진 아이템은 남은 횟수 그대로
       this.emit('itemPicked', { id: it.id, type: it.type, by: p.id });
       this.sendInventory(p);
     }
@@ -494,10 +545,14 @@ export class GameRoom {
   }
 
   /** 보이스 챗으로 말하는 중 → 목소리는 소리라서 귀 밝은 엔티티가 듣는다 (감정 표현과 같은 반경) */
+  /**
+   * 보이스 챗으로 말하는 중. 엔티티를 부르지 않는다 — 실제 목소리 크기는 게임 소리가 아니다
+   * (엔티티가 듣는 "목소리" 는 감정 표현(, 키) 대사뿐: onEmote 의 voiceUntil).
+   */
   onSpeaking(id, { on } = {}) {
     const p = this.players.get(id);
     if (!p || this.phase !== 'playing' || !p.alive) return;
-    if (on) p.voiceUntil = Math.max(p.voiceUntil || 0, Date.now() + 700);
+    p.talking = !!on;
   }
 
   /** 보이스 챗 상태 (스냅샷의 vc 로 모두에게 전달된다) */
@@ -611,15 +666,17 @@ export class GameRoom {
         fx.at = { x: Math.round(x), y: Math.round(y) };
         break;
       }
+      case 'nightVision':
+        p.nvUntil = Date.now() + def.dur * 1000;   // 다른 사람 화면에서도 얼굴에 투시경이 보인다
+        break;
       case 'staminaDrink':
       case 'compass':
-      case 'nightVision':
       case 'adrenaline':
         break;   // 효과는 본인 화면(스태미나 / 방향 표시 / 시야 / 속도)에서 처리
       default: return;
     }
     it.uses -= 1;
-    if (it.uses <= 0) p.inv.splice(slot | 0, 1);
+    if (it.uses <= 0) p.inv[slot | 0] = null;   // 칸은 비워 두고 다른 아이템은 제자리
     this.sendInventory(p);
     this.emit('itemUsed', fx);
   }
@@ -630,7 +687,7 @@ export class GameRoom {
     if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused) return;
     const i = slot | 0, it = p.inv[i];
     if (!it) return;
-    p.inv.splice(i, 1);
+    p.inv[i] = null;
     const drop = { id: ++this.itemSeq, type: it.type, uses: it.uses, x: Math.round(p.x), y: Math.round(p.y + 6), lockedFor: id };
     this.items.push(drop);
     this.sendInventory(p);
@@ -648,10 +705,11 @@ export class GameRoom {
     this.emit('emote', { id, i });
   }
 
-  /** 이모트 동작 (뻐큐 / 가리키기 / 춤). 보여 주기만 하고 게임엔 영향 없음. 1초에 한 번 */
+  /** 이모트 동작 (뻐큐 / 가리키기 / 춤 / 트월킹). 보여 주기만 하고 게임엔 영향 없음. 1초에 한 번 */
   onGesture(id, { g } = {}) {
     const p = this.players.get(id);
-    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || !['finger', 'point', 'dance1', 'dance2'].includes(g)) return;
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || !['finger', 'point', 'dance1', 'dance2', 'twerk'].includes(g)) return;
+    if (g === 'finger' && !this.modes.finger) return;   // 뻐큐 이모트 모드가 꺼져 있음
     const now = Date.now();
     if (now - (p.gestureAt || 0) < 1000) return;
     p.gestureAt = now;
@@ -661,7 +719,7 @@ export class GameRoom {
   // ---------------------------------------------------------------- test mode
   /**
    * 테스트 명령. 서버가 testMode 로 시작됐을 때만 동작한다 (npm run dev 기본 ON, 배포는 BACKROOMS_TEST=1 일 때만).
-   * cmd: nextLevel | setLevel | giveKey | unlockExit | tpKey | tpPuzzle | tpBalloon | tpPooper | tpExit | drainSanity | spawnItem | spawnEntity | clearEntities | god | revive
+   * cmd: nextLevel | setLevel | giveKey | giveItem | unlockExit | tpKey | tpPuzzle | tpBalloon | tpPooper | tpExit | drainSanity | spawnItem | spawnEntity | clearEntities | god | revive
    */
   onTest(id, { cmd, arg } = {}) {
     if (!this.testMode) return;
@@ -773,6 +831,12 @@ export class GameRoom {
         this.emit('itemSpawned', it);
         return reply(`${ITEM_TYPES[arg].name} 소환`);
       }
+      case 'giveItem': {   // 가방 빈칸에 바로 넣기
+        if (!ITEM_TYPES[arg]) return reply('알 수 없는 아이템');
+        if (!invAdd(p, { type: arg, uses: ITEM_TYPES[arg].uses })) return reply('가방이 가득 참');
+        this.sendInventory(p);
+        return reply(`${ITEM_TYPES[arg].name} 지급`);
+      }
       case 'spawnEntity': {
         if (!ENTITY_TYPES.includes(arg)) return reply('알 수 없는 엔티티');
         const { tx, ty } = tile(p), dist = this.map.bfs(tx, ty);
@@ -832,7 +896,7 @@ export class GameRoom {
       if (this.flares.length) this.flares = this.flares.filter(f => f.until > now);
       if (this.noises.length) this.noises = this.noises.filter(n => n.until > now);
       if (this.monsterGrace > 0) this.monsterGrace -= dt;
-      else for (const m of this.monsters) m.update(dt, this);
+      else for (const m of this.monsters) { m.modeMul = this.modes.fastEntities ? 1.25 : 1; m.update(dt, this); }   // '엔티티 가속' 모드
       if (this.monsterGrace <= 0) { this.updateMission(dt, now); this.updateNight(dt); this.updateBlackout(dt); this.updateMimic(dt); }
       // 안내를 마친 파티 푸퍼는 사라진다
       if (this.monsters.some(m => m.gone)) {
@@ -869,7 +933,7 @@ export class GameRoom {
           // 덜러가 가까이 있으면 색이 바래듯 정신력이 빨리 준다
           const D = CONFIG.ENTITY.duller;
           const dull = this.monsters.some(m => m.type === 'duller' && Math.hypot(m.x - p.x, m.y - p.y) < D.aura);
-          const mul = (dark ? (p.flashlight ? S.DARK_LIGHT_MUL : S.DARK_MUL) : 1) * (p.hidden ? S.HIDDEN_MUL : 1) * (dull ? D.sanityMul : 1);
+          const mul = (dark ? (p.flashlight ? S.DARK_LIGHT_MUL : S.DARK_MUL) : 1) * (p.hidden ? S.HIDDEN_MUL : 1) * (dull ? D.sanityMul : 1) * (this.modes.hardSanity ? 2 : 1);
           p.sanity = Math.max(0, p.sanity - S.DRAIN * mul * dt);
           if (p.sanity <= 0 && !p.god) {
             if (p.hidden) { this.lockerOccupant[p.lockerId] = null; p.hidden = false; p.lockerId = -1; }
@@ -964,6 +1028,7 @@ export class GameRoom {
     this.mimicT = (this.mimicT ?? MIMIC_EVERY[0]) - dt;
     if (this.mimicT > 0) return;
     this.mimicT = MIMIC_EVERY[0] + Math.random() * (MIMIC_EVERY[1] - MIMIC_EVERY[0]);
+    if (!this.modes.mimic) return;   // 목소리 흉내 모드가 꺼져 있음
     const alive = [...this.players.values()].filter(p => p.alive);
     if (!alive.length || ![...this.players.values()].some(p => p.vc)) return;   // 보이스 챗을 쓰는 사람이 없으면 녹음도 없다
     const cand = this.monsters.filter(m => m.active && m.type !== 'partyPooper' && m.holdT <= 0 &&
