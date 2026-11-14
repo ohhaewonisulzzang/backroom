@@ -296,6 +296,13 @@ try {
   const fixed = await solo.waitFor('inventory', d => !d.inv[0] && d.inv[1]?.type === 'compass');
   check(fixed.inv.length === 4 && fixed.inv[1].type === 'compass', '아이템을 다 써도 뒤 칸이 앞으로 당겨지지 않음 (칸 고정)');
   sp.inv = [null, null, null, null];
+  // 12-3) 라운드가 다시 시작되면(레벨 0 = 빈손) 화면의 가방도 같이 비워진다
+  sp.inv = [{ type: 'flare', uses: 1 }, null, null, null];
+  const markInv = solo.log.length;
+  soloRoom.levelIndex = 0; soloRoom.startRound();
+  await sleep(150);
+  const invAfter = solo.log.slice(markInv).filter(e => e.ev === 'inventory').pop()?.data;
+  check(!!invAfter && invAfter.inv.every(x => !x), '라운드 재시작(레벨 0) 때 비워진 가방이 화면에도 전달됨');
   solo.s.emit('emote', { i: 1 });
   const em = await solo.waitFor('emote', d => d.i === 1);
   solo.s.emit('emote', { i: 2 });                                  // 쿨다운 안이라 무시

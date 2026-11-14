@@ -239,6 +239,8 @@ export class GameRoom {
     this.monsterGrace = CONFIG.ENTITY.SPAWN_GRACE + (story ? CONFIG.STORY.DURATION : 0);
     let i = 0;
     for (const p of this.players.values()) this.spawnPlayer(p, i++);
+    // 가방 상태를 매 라운드 시작마다 다시 보낸다 (레벨 0 재시작처럼 서버가 가방을 비웠는데 화면엔 예전 아이템이 남아 있지 않게)
+    for (const p of this.players.values()) this.sendInventory(p);
     this.phase = 'playing';
     this.snapAcc = 0;
     if (broadcast) this.emit('round', this.roundPayload());
