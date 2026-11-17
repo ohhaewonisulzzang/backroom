@@ -15,6 +15,8 @@ const LOOK = {
   boiler:    { title: '보일러 압력 밸브', wheel: '#c8502a', dark: '#6a2410', hint: '핸들을 잡고 오른쪽(시계 방향)으로 돌려 압력을 잠가라.' },
   pump:      { title: '배수 펌프', wheel: '#2f8fa0', dark: '#145a66', hint: '핸들을 잡고 오른쪽(시계 방향)으로 돌려 물을 빼라.' },
   generator: { title: '발전기 크랭크', wheel: '#8a7a3a', dark: '#4a4020', hint: '손잡이를 잡고 오른쪽(시계 방향)으로 계속 돌려 시동을 걸어라.' },
+  well:      { title: '우물 펌프', wheel: '#7a6a4a', dark: '#3e3424', hint: '핸들을 잡고 오른쪽(시계 방향)으로 돌려 물을 길어 올려라. 소리가 땅속까지 울린다.' },
+  breaker:   { title: '차단기', wheel: '#d8b030', dark: '#6a5410', hint: '핸들을 잡고 오른쪽(시계 방향)으로 돌려 차단기를 올려라.' },
 };
 const SIZE = 260, C = SIZE / 2;
 

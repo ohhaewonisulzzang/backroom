@@ -327,7 +327,9 @@ try {
     [LV('THE SUBURBS'), 'wanderer,watch,wretch'], [LV('FIELD OF WHEAT'), 'faceling'], [LV('THE POOLROOMS'), 'clump'], [LV('SCHOOL HALLS'), 'partyPooper,partygoer,smiler'],
     [LV('MOTION'), 'animatedKing,animation'], [LV('COURTYARD OF WINDOWS'), 'aranea,windows'], [LV("KITTY'S HOUSE"), 'kitty'],
     [LV('BOILER ROOM'), 'beast'], [LV('THALASSOPHOBIA'), 'seaThing'], [LV('CAVE SYSTEM'), 'crawler,deathrat'], [LV('HARVEST NIGHT'), 'jackLantern'],
-    [LV('THE ENDLESS CITY'), 'watch'], [LV('THE PARKING GARAGE'), 'smiler'], [LV('INFINITE APARTMENTS'), 'duller,sheet'], [FINAL, 'duller,smiler']]) {
+    [LV('THE ENDLESS CITY'), 'watch'], [LV('THE PARKING GARAGE'), 'smiler'], [LV('INFINITE APARTMENTS'), 'duller,sheet'], [FINAL, 'duller,smiler'],
+    [LV('MEMORY LANE'), 'shadow,wanderer'], [LV('THE INFINITE MALL'), 'smiler,soot'], [LV('ARABIAN DESERT'), 'burrower'], [LV('SUBJECTIVE ART GALLERY'), 'gazer,wanderer'],
+    [LV('WELLBORN HOSPITAL'), 'hound,mimic'], [LV('THE WAREHOUSE'), 'mannequin'], [LV('THE HAZED RIVER'), 'drowned']]) {
     const g = raw('L' + lv); await g.ready; g.s.emit('solo', { name: 'L' + lv });
     await g.waitFor('init');
     g.s.emit('test', { cmd: 'setLevel', arg: lv });

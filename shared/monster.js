@@ -27,7 +27,12 @@ export class Monster {
     this.x = x; this.y = y; this.angle = Math.PI / 2;
     this.state = { howler: 'dormant', skinStealer: 'disguised', wanderer: 'wander', smiler: 'lurk', hound: 'patrol', partygoer: 'guard',
       deathmoth: 'cling', wretch: 'wander', scratcher: 'wander', windows: 'idle', animation: 'doll', animatedKing: 'frozen', kitty: 'frozen', partyPooper: 'idle',
-      seaThing: 'lurk', crawler: 'ceiling', camoCrawler: 'camo', sheet: 'drift' }[type] ?? 'patrol';
+      seaThing: 'lurk', crawler: 'ceiling', camoCrawler: 'camo', sheet: 'drift',
+      mimic: 'dormant', shadow: 'dormant', mannequin: 'frozen', burrower: 'burrow', gazer: 'closed', soot: 'drift', drowned: 'lurk' }[type] ?? 'patrol';
+    this.trail = [];             // 그림자: 따라 밟을 목표의 발자취 [{x,y}]
+    this.prey = null;            // 그림자: 따라가는 사람 / 미믹: 덮친 사람
+    this.watch = new Map();      // 응시자: 사람 id → 눈이 떠 있는 동안 움직인 시간
+    this.zap = null;             // 응시자: 이번 틱에 죽일 사람 (GameRoom 이 처리)
     this.freezeT = 0;            // 키티: 순간이동 직후 얼어 있는 시간
     this.losT = 0;               // 키티: 목표와 서로 보이는 상태가 이어진 시간 (갑툭튀 즉사 방지)
     this.chargeDir = 0;          // 레벨 5의 야수: 돌진 방향
@@ -54,7 +59,7 @@ export class Monster {
       y: Math.round(this.y * 10) / 10,
       angle: Math.round(this.angle * 1000) / 1000,
       state: this.state, active: this.active, revealed: this.revealed, color: this.color, stunned: this.stunT > 0,
-      ...(this.type === 'windows' && this.post ? { px: Math.round(this.post.x), py: Math.round(this.post.y) } : {}),   // 창문 위치
+      ...((this.type === 'windows' || this.type === 'mimic' || this.type === 'gazer') && this.post ? { px: Math.round(this.post.x), py: Math.round(this.post.y) } : {}),   // 창문 / 미믹(사물함) / 응시자(벽의 눈) 위치
     };
   }
 
@@ -84,6 +89,13 @@ export class Monster {
     if (this.type === 'camoCrawler' && this.state === 'camo') return false;           // 벽인 척하는 중
     if (this.type === 'deathrat' && this.state === 'stunned') return false;
     if (this.type === 'sheet' && this.state === 'scared') return false;
+    if (this.type === 'mimic' && this.state !== 'bite') return false;                 // 사물함인 척하는 동안은 무해
+    if (this.type === 'shadow' && this.state !== 'follow') return false;              // 깨어나기 전 / 발밑에서 솟아나는 중 / 흩어진 동안
+    if (this.type === 'mannequin' && this.state === 'frozen') return false;           // 굳어 있을 땐 손대지 못한다
+    if (this.type === 'burrower' && this.state !== 'bite') return false;              // 땅속에 있을 때
+    if (this.type === 'gazer') return false;                                          // 닿아서 죽이지 않는다 (눈으로 죽인다: zap)
+    if (this.type === 'soot' && this.state === 'scared') return false;
+    if (this.type === 'drowned' && this.state !== 'grab') return false;              // 물속에 있거나 손만 올라온 동안은 무해
     return true;
   }
 
@@ -132,6 +144,13 @@ export class Monster {
     if (this.type === 'seaThing') return this.updateSeaThing(dt, game);
     if (this.type === 'sheet') return this.updateSheet(dt, game);
     if (this.type === 'duller') return this.updateDuller(dt, game);
+    if (this.type === 'mimic') return this.updateMimic(dt, game);
+    if (this.type === 'shadow') return this.updateShadow(dt, game);
+    if (this.type === 'mannequin') return this.updateMannequin(dt, game);
+    if (this.type === 'burrower') return this.updateBurrower(dt, game);
+    if (this.type === 'gazer') return this.updateGazer(dt, game);
+    if (this.type === 'soot') return this.updateSoot(dt, game);
+    if (this.type === 'drowned') return this.updateDrowned(dt, game);
     if (!this.active) {
       this.timer += dt;
       if (this.type === 'howler' && this.timer >= this.cfg.delay) this.awaken(game);
@@ -741,6 +760,282 @@ export class Monster {
     this.timer -= dt;
     if (this.timer <= 0 || !this.wander) { this.timer = 3 + Math.random() * 3; this.wander = Math.random() * Math.PI * 2; }
     drift(Math.cos(this.wander), Math.sin(this.wander), C.chase * 0.5);
+  }
+
+  // ------------------------------------------------------------ Level 14 / 18 / 20 / 33 / 47 / 66 엔티티들
+  /** 움직이고 있는 사람인가 (서버: 최근 이동 시각, 테스트: p.moving) */
+  static isMoving(p, now = Date.now(), within = 300) { return p.moving ?? (now - (p.lastMoveAt || 0) < within); }
+
+  /**
+   * 미믹 (Level 14): 사물함인 척 벽에 붙어 있다(dormant).
+   *  - 그 안에 숨으려 하면 삼킨다 (GameRoom.onHide 가 처리)
+   *  - 바로 앞(lure)에 오래 서 있으면 문이 들썩이다(stir) 덮친다(bite) → 손이 닿는 거리(reach)까지만 → retract
+   */
+  updateMimic(dt, game) {
+    const C = this.cfg, map = game.map;
+    if (!this.post) this.post = { x: this.x, y: this.y };
+    if (this.state === 'bite') {
+      this.timer -= dt;
+      const p = this.prey;
+      if (p && p.alive && !p.hidden) {
+        this.moveToward(p.x, p.y, C.lunge, dt, map);
+        const ox = this.x - this.post.x, oy = this.y - this.post.y, od = Math.hypot(ox, oy);
+        if (od > C.reach) { this.x = this.post.x + (ox / od) * C.reach; this.y = this.post.y + (oy / od) * C.reach; }
+      }
+      if (this.timer <= 0) { this.state = 'retract'; this.prey = null; }
+      return;
+    }
+    if (this.state === 'retract') {
+      if (this.moveToward(this.post.x, this.post.y, C.lunge * 0.5, dt, map) || Math.hypot(this.x - this.post.x, this.y - this.post.y) < 3) {
+        this.x = this.post.x; this.y = this.post.y; this.state = 'dormant'; this.timer = 0; this.angle = Math.PI / 2;
+      }
+      return;
+    }
+    let near = null, bd = Infinity;
+    for (const p of game.allPlayers()) {
+      if (!p.alive || p.hidden) continue;
+      const d = Math.hypot(p.x - this.post.x, p.y - this.post.y);
+      if (d < C.lure && d < bd) { bd = d; near = p; }
+    }
+    if (near) this.timer += dt; else this.timer = Math.max(0, this.timer - dt * 2);
+    if (near && this.timer >= C.linger) { this.snap(game, near); return; }
+    this.state = this.timer > C.linger * 0.45 ? 'stir' : 'dormant';
+  }
+  /** 미믹이 덮친다 (오래 서 있었거나, 그 안에 숨으려 했다) */
+  snap(game, p) {
+    this.state = 'bite'; this.timer = this.cfg.biteTime; this.prey = p; this.path = [];
+    game.onEntityEvent(this, 'snap');
+    if (p) game.onMonsterAlert(p, this);
+  }
+
+  /**
+   * 그림자 (Level 18): dormant(깨어나기 전) → form(가장 가까운 사람의 발밑에서 솟아난다, 무해)
+   *  → follow(그 사람이 지나간 길 trail 을 그대로 밟아 온다) → 그 사람이 숨거나 죽으면 gone(흩어짐) → regroup 초 뒤 다시 form.
+   *  솟아나는 동안에도 발자취를 기록하므로, 처음엔 form 시간만큼 뒤처져 있다. 멈추면 따라잡힌다.
+   */
+  updateShadow(dt, game) {
+    const C = this.cfg, map = game.map;
+    if (this.state === 'dormant' || this.state === 'gone') {
+      this.timer += dt;
+      if (this.timer >= (this.state === 'dormant' ? C.wake : C.regroup)) this.formOn(game);
+      return;
+    }
+    const p = this.prey;
+    if (!p || !p.alive || p.hidden || p.status === 'escaped') {
+      game.onEntityEvent(this, 'fade');
+      this.state = 'gone'; this.timer = 0; this.prey = null; this.trail = []; this.path = [];
+      return;
+    }
+    // 발자취 기록 (step 거리마다 한 점)
+    const last = this.trail[this.trail.length - 1] || this;
+    if (Math.hypot(p.x - last.x, p.y - last.y) >= C.step) this.trail.push({ x: p.x, y: p.y });
+    if (this.trail.length > C.maxTrail) { const cut = this.trail.splice(0, this.trail.length - C.maxTrail); const c = cut[cut.length - 1]; this.x = c.x; this.y = c.y; }
+    if (this.state === 'form') {
+      this.timer -= dt;
+      if (this.timer <= 0) { this.state = 'follow'; game.onMonsterAlert(p, this); }
+      return;
+    }
+    // follow: 발자취를 한 점씩 밟는다. 다 밟았으면(따라잡았으면) 그 사람에게 곧장
+    const speed = C.follow * this.speedMul;
+    let budget = speed * (this.modeMul ?? 1) * dt;
+    while (budget > 0 && this.trail.length) {
+      const n = this.trail[0], d = Math.hypot(n.x - this.x, n.y - this.y);
+      if (d > 0) this.angle = Math.atan2(n.y - this.y, n.x - this.x);
+      if (d <= budget) { this.x = n.x; this.y = n.y; budget -= d; this.trail.shift(); }
+      else { this.x += (n.x - this.x) / d * budget; this.y += (n.y - this.y) / d * budget; budget = 0; }
+    }
+    if (!this.trail.length && budget > 0) this.moveToward(p.x, p.y, speed, dt, map);
+  }
+  /** 그림자: 숨지 않은 가장 가까운 사람의 발밑에서 솟아나기 시작 */
+  formOn(game) {
+    const { target } = this.nearestPlayer(game);
+    if (!target) return;
+    this.prey = target; this.x = target.x; this.y = target.y; this.trail = []; this.path = [];
+    this.state = 'form'; this.timer = 2.6;
+    game.onEntityEvent(this, 'form', { target: target.id });
+  }
+
+  /**
+   * 마네킹 (Level 20): sense 안에서 누군가 움직이고 있을 때만 그 사람에게 다가간다 (벽 너머도 느낀다).
+   * 모두 멈추면 frozen — 그 자리에 굳고 해치지 못한다. 가까이(2칸) 오면 확 달려든다.
+   */
+  updateMannequin(dt, game) {
+    const C = this.cfg, now = Date.now();
+    let mover = null, bd = Infinity;
+    for (const p of game.allPlayers()) {
+      if (!p.alive || p.hidden || !Monster.isMoving(p, now)) continue;
+      const d = Math.hypot(p.x - this.x, p.y - this.y);
+      if (d < C.sense && d < bd) { bd = d; mover = p; }
+    }
+    if (!mover) { if (this.state !== 'frozen') { this.state = 'frozen'; this.path = []; } return; }
+    if (this.state === 'frozen') { game.onEntityEvent(this, 'creak'); if (bd < TS * 6) game.onMonsterAlert(mover, this); }
+    this.state = 'move';
+    const close = bd < TS * 2.2 && hasLOS(game.map, this.x, this.y, mover.x, mover.y);
+    this.pursue(dt, game, mover, (close ? C.lunge : C.chase) * this.speedMul, close && bd < TS * 1.5);
+  }
+
+  /** 모래 벌레가 듣는 소리: 걷기/달리기 발소리(웅크리면 무음), 펌프 작동, 퍼즐 경보, 폭죽·풍선 같은 바닥 소리 */
+  hearSteps(game) {
+    const C = this.cfg, now = Date.now();
+    let best = null, bd = Infinity;
+    for (const p of game.allPlayers()) {
+      if (!p.alive || p.hidden) continue;
+      let r = 0;
+      if (Monster.isMoving(p, now) && !p.crouching) r = p.sprinting ? C.hearSprint : C.hearWalk;
+      if (p.workUntil > now) r = Math.max(r, MISSION.WORK_NOISE);
+      if (p.alarmUntil > now) r = Math.max(r, CONFIG.PUZZLE.ALARM);
+      const d = Math.hypot(p.x - this.x, p.y - this.y);
+      if (d < r && d < bd) { bd = d; best = { x: p.x, y: p.y, p }; }
+    }
+    for (const n of game.noises || []) {
+      const d = Math.hypot(n.x - this.x, n.y - this.y);
+      if (d < n.r && d < bd) { bd = d; best = { x: n.x, y: n.y, noise: true }; }
+    }
+    return best;
+  }
+
+  /**
+   * 모래 벌레 (Level 33): burrow(땅속을 떠돈다, 벽 무시, 무해) → 소리를 들으면 hunt(그쪽으로 판다)
+   *  → 소리 난 자리에 닿으면 rise(땅이 들썩인다) → bite(솟구쳐 문다) → sink(가라앉는다) → burrow
+   */
+  updateBurrower(dt, game) {
+    const C = this.cfg, map = game.map;
+    if (this.state === 'rise') { this.timer -= dt; if (this.timer <= 0) { this.state = 'bite'; this.timer = C.bite; game.onEntityEvent(this, 'erupt'); } return; }
+    if (this.state === 'bite') { this.timer -= dt; if (this.timer <= 0) { this.state = 'sink'; this.timer = C.sink; } return; }
+    if (this.state === 'sink') { this.timer -= dt; if (this.timer <= 0) { this.state = 'burrow'; this.lostT = 0; } return; }
+    const dig = (dx, dy, speed) => {
+      const d = Math.hypot(dx, dy) || 1, s = Math.min(d, speed * (this.modeMul ?? 1) * dt);
+      this.x = Math.max(TS * 0.5, Math.min(map.w * TS - TS * 0.5, this.x + (dx / d) * s));
+      this.y = Math.max(TS * 0.5, Math.min(map.h * TS - TS * 0.5, this.y + (dy / d) * s));
+      this.angle = Math.atan2(dy, dx);
+      return d - s;
+    };
+    const heard = this.hearSteps(game);
+    if (heard) {
+      if (this.state !== 'hunt' && heard.p) game.onMonsterAlert(heard.p, this);
+      this.state = 'hunt'; this.lastSeen = { x: heard.x, y: heard.y }; this.lostT = 0;
+    }
+    if (this.state === 'hunt') {
+      if (!heard && (this.lostT += dt) > 3) { this.state = 'burrow'; return; }
+      const left = dig(this.lastSeen.x - this.x, this.lastSeen.y - this.y, C.hunt * this.speedMul);
+      if (left < TS * 0.4 && !map.isSolid(this.tileX, this.tileY)) {
+        this.state = 'rise'; this.timer = C.rise;
+        game.onEntityEvent(this, 'rumble');
+      }
+      return;
+    }
+    this.timer -= dt;
+    if (this.timer <= 0 || this.wander === undefined) { this.timer = 2 + Math.random() * 3; this.wander = Math.random() * Math.PI * 2; }
+    dig(Math.cos(this.wander), Math.sin(this.wander), C.roam);
+    if (this.x <= TS * 0.6 || this.y <= TS * 0.6 || this.x >= map.w * TS - TS * 0.6 || this.y >= map.h * TS - TS * 0.6) this.wander += Math.PI;
+  }
+
+  /**
+   * 응시자 (Level 47): 벽의 눈. closed(감김) → warn(떠지는 중, 소리) → open(노려본다) → closed.
+   * 떠 있는 동안 시야(range, 벽 없음) 안에서 움직인 시간이 grace 를 넘은 사람을 zap 에 넣는다 (GameRoom 이 죽인다).
+   */
+  updateGazer(dt, game) {
+    const C = this.cfg, map = game.map, now = Date.now();
+    if (!this.post) this.post = { x: this.x, y: this.y };
+    this.timer -= dt;
+    if (this.state === 'closed') { if (this.timer <= 0) { this.state = 'warn'; this.timer = C.warn; game.onEntityEvent(this, 'eyeOpen'); } return; }
+    if (this.state === 'warn') { if (this.timer <= 0) { this.state = 'open'; this.timer = C.open; } return; }
+    if (this.timer <= 0) { this.state = 'closed'; this.timer = C.closed[0] + Math.random() * (C.closed[1] - C.closed[0]); this.watch.clear(); game.onEntityEvent(this, 'eyeClose'); return; }
+    let look = null, ld = Infinity;
+    for (const p of game.allPlayers()) {
+      if (!p.alive || p.hidden) { this.watch.delete(p.id); continue; }
+      const d = Math.hypot(p.x - this.post.x, p.y - this.post.y);
+      if (d > C.range || !hasLOS(map, this.post.x, this.post.y, p.x, p.y)) { this.watch.delete(p.id); continue; }
+      if (d < ld) { ld = d; look = p; }
+      if (!Monster.isMoving(p, now, 200)) { this.watch.set(p.id, Math.max(0, (this.watch.get(p.id) || 0) - dt)); continue; }
+      const w = (this.watch.get(p.id) || 0) + dt;
+      this.watch.set(p.id, w);
+      if (w >= C.grace && !this.zap) { this.zap = p; this.watch.delete(p.id); game.onEntityEvent(this, 'zap', { target: p.id }); }
+    }
+    if (look) this.angle = Math.atan2(look.y - this.post.y, look.x - this.post.x);
+  }
+
+  /**
+   * 그을음 (Level 66): 주변(aura)의 불빛을 먹는 검은 연기 (어둠 판정은 GameRoom 이 level.isDark 에 끼운다).
+   * drift → 가까운 사람(sense)에게 stalk → 손전등에 비치면 scared(물러난다)
+   */
+  updateSoot(dt, game) {
+    const C = this.cfg, map = game.map;
+    if (this.state === 'scared') {
+      this.timer -= dt;
+      if (this.fleeFrom) {
+        const dx = this.x - this.fleeFrom.x, dy = this.y - this.fleeFrom.y, d = Math.hypot(dx, dy) || 1;
+        moveEntity(this, (dx / d) * C.flee * dt, (dy / d) * C.flee * dt, CONFIG.ENTITY.RADIUS, map);
+      }
+      if (this.timer <= 0) { this.state = 'drift'; this.path = []; }
+      return;
+    }
+    const lit = this.litBy(game);
+    if (lit) { this.state = 'scared'; this.timer = C.scared; this.fleeFrom = { x: lit.p.x, y: lit.p.y }; this.path = []; game.onEntityEvent(this, 'hiss'); return; }
+    const { target, best } = this.nearestPlayer(game);
+    if (target && best < C.sense) {
+      if (this.state !== 'stalk') { game.onMonsterAlert(target, this); this.path = []; }
+      this.state = 'stalk';
+      this.pursue(dt, game, target, C.chase * this.speedMul, best < TS * 1.4 && hasLOS(map, this.x, this.y, target.x, target.y));
+      return;
+    }
+    this.state = 'drift';
+    this.patrol(dt, map, C.patrol);
+  }
+
+  /**
+   * 익사자 (Level 373): 깊은 물(DEEP)에서만 움직인다. lurk(물 밑을 떠돈다) → 보트 젓는 소리를 들으면 stalk(물길을 따라 다가온다)
+   *  → 보트가 strike 안에 오면 surface(손이 먼저 올라온다, 예고) → grab(끌어당긴다) → sink(가라앉는다) → lurk.
+   *  손전등을 비추면 바로 가라앉는다. 보트에서 내린(땅 위의) 사람은 건드리지 못한다.
+   */
+  updateDrowned(dt, game) {
+    const C = this.cfg, map = game.map, now = Date.now();
+    const water = (x, y) => map.get(x, y) === T.DEEP;
+    const lit = this.state === 'surface' || this.state === 'stalk' ? this.litBy(game) : null;
+    if (lit && lit.d > TS * 0.8) { this.state = 'sink'; this.timer = C.sinkLit; this.prey = null; this.path = []; game.onEntityEvent(this, 'sinkLit'); return; }
+    if (this.state === 'surface') {
+      this.timer -= dt;
+      if (this.prey) this.angle = Math.atan2(this.prey.y - this.y, this.prey.x - this.x);
+      if (this.timer <= 0) { this.state = 'grab'; this.timer = C.grab; game.onEntityEvent(this, 'grab'); }
+      return;
+    }
+    if (this.state === 'grab') {
+      this.timer -= dt;
+      const p = this.prey;
+      if (p && p.alive && p.boat && Math.hypot(p.x - this.x, p.y - this.y) < C.reach * 1.8) this.moveToward(p.x, p.y, C.lunge, dt, map);
+      if (this.timer <= 0) { this.state = 'sink'; this.timer = C.sink; this.prey = null; }
+      return;
+    }
+    if (this.state === 'sink') { this.timer -= dt; if (this.timer <= 0) { this.state = 'lurk'; this.path = []; } return; }
+    // 젓는 소리 듣기 (보트를 탄 사람만)
+    let heard = null, bd = Infinity;
+    for (const p of game.allPlayers()) {
+      if (!p.alive || p.hidden || !p.boat || !Monster.isMoving(p, now, 400)) continue;
+      const r = p.crouching ? C.hearQuiet : p.sprinting ? C.hearFast : C.hear;
+      const d = Math.hypot(p.x - this.x, p.y - this.y);
+      if (d < r && d < bd) { bd = d; heard = p; }
+    }
+    if (heard) {
+      if (this.state !== 'stalk') game.onMonsterAlert(heard, this);
+      this.state = 'stalk'; this.prey = heard; this.lastSeen = { x: heard.x, y: heard.y }; this.lostT = 0;
+    }
+    if (this.state === 'stalk') {
+      const p = this.prey;
+      if (!p || !p.alive || !p.boat) { this.state = 'lurk'; this.prey = null; this.path = []; return; }
+      if (!heard && (this.lostT += dt) > 3) { this.state = 'lurk'; this.prey = null; this.path = []; return; }
+      if (Math.hypot(p.x - this.x, p.y - this.y) < C.strike) {
+        this.state = 'surface'; this.timer = C.surface; this.path = [];
+        game.onEntityEvent(this, 'rise');
+        return;
+      }
+      const g = this.lastSeen, gx = Math.floor(g.x / TS), gy = Math.floor(g.y / TS);
+      if (this.repathT <= 0) { this.path = map.findPath(this.tileX, this.tileY, gx, gy, water); this.repathT = 0.3; }
+      if (this.path.length) this.followPath(C.swim * this.speedMul, dt, map);
+      else if (water(gx, gy) && Math.hypot(g.x - this.x, g.y - this.y) < TS * 1.5) this.moveToward(g.x, g.y, C.swim * this.speedMul, dt, map);
+      return;
+    }
+    if (!this.path.length) this.path = this.randomGoal(map, this.tileX, this.tileY, 3, 14, 8, water);
+    this.followPath(C.roam, dt, map);
   }
 
   // ------------------------------------------------------------ 소리로 찾는 엔티티들

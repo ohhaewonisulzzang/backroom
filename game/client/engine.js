@@ -1,4 +1,4 @@
-import { CONFIG, TS, T, MISSION, levelInfo, levelLabel, ITEM_TYPES, SUIT_HEX, defaultModes } from '../../shared/config.js';
+import { CONFIG, TS, T, MISSION, levelInfo, levelLabel, ITEM_TYPES, SUIT_HEX, defaultModes, MODE_RULES } from '../../shared/config.js';
 import { t } from '../../shared/i18n.js';
 import { generateLevel } from '../../shared/map.js';
 import { clamp } from '../../shared/utils.js';
@@ -12,6 +12,7 @@ import { NetClient } from './net.js';
 import { Renderer } from './renderer.js';
 import { makeStoryCast, storyScript, playStoryEvents } from './story.js';
 import { ENDING, makeEndingData, playEndingEvents } from './ending.js';
+import { BESTIARY } from './bestiary.js';
 import { DEATH_DURATION, addGore } from './deaths.js';
 import { discoverLevel } from './bestiary.js';
 import { GESTURES } from './sprites.js';
@@ -20,6 +21,7 @@ import { GESTURES } from './sprites.js';
 let renderer = null, net = null, UI = null;
 
 /** 클라이언트 게임 상태. 권위 있는 상태(열쇠, 사망, 괴물)는 서버 이벤트로만 바뀐다. */
+const RAINBOW = 5;   // 정신력이 50% 아래로 떨어질 때 무지개 환각이 이어지는 시간(초)
 const Game = {
   phase: 'menu',              // menu | connecting | lobby | game
   menu: null,                 // 메인 메뉴 배경 장면 (천천히 떠도는 카메라)
@@ -135,6 +137,9 @@ const Game = {
     this.keys = this.level.keys.map((k, i) => ({ ...k, collected: !!d.keys[i] }));
     this.keysCollected = this.keys.filter(k => k.collected).length;
     this.exitUnlocked = d.exitUnlocked;
+    this.photo = d.photo || null;             // 사진작가 모드: { need, taken, type }
+    this.timeLeft = d.timeLeft ?? null;       // 제한 시간 모드: 남은 초
+    this.levelTime = 0; this.battery = 100;   // 스피드런: 이번 레벨 시간 / 손전등 배터리(%)
     this.obj = d.obj || null;
     this.night = d.night || null; this.toxicT = 0;
     this.blackout = d.blackout || null; this.blackoutK = this.blackout === 'dark' ? 1 : 0;   // 정전 레벨: 단계 / 화면 어둠 정도(0~1)
@@ -158,7 +163,7 @@ const Game = {
     this.fx = []; this.compassT = 0; this.flashT = 0; this.emoteOpen = false; this.nightVisionT = 0; this.useHold = null; this.effects = [];
     this.noteOpen = false; this.noteRead = false; this.nearNote = false;
     if (this.local) { this.local.adrenalineT = 0; this.local.boostT = 0; }
-    this.gore = []; this.hallu = []; this.halluT = 0;
+    this.gore = []; this.hallu = []; this.halluT = 0; this.rainbowT = 0; this.prevSanity = undefined;
     this.horde = d.horde ? { x: d.horde.x, tx: d.horde.x, speed: d.horde.speed, roarT: 2 } : null;
     if (this.levelIndex === 0) this.totalTime = 0;
     this.closePuzzle();
@@ -296,12 +301,18 @@ const Game = {
       this.deathT -= dt;
       if (this.deathT <= 0 && this.pendingRoundEnd) { UI.showRoundEnd(this.pendingRoundEnd); this.pendingRoundEnd = null; }
     }
-    if (this.roundPhase === 'playing' && !(this.paused && this.solo)) { this.elapsed += dt; this.totalTime += dt; }   // 혼자 하기 일시정지 중엔 시간도 멈춤
+    if (this.roundPhase === 'playing' && !(this.paused && this.solo)) { this.elapsed += dt; this.totalTime += dt; this.levelTime = (this.levelTime || 0) + dt; }   // 혼자 하기 일시정지 중엔 시간도 멈춤
+    // '손전등 배터리' 모드: 켜 두면 닳고, 끄면 충전된다. 다 닳으면 저절로 꺼지고 min% 까지 차야 다시 켤 수 있다
+    if (this.modes.battery && this.local?.alive && this.roundPhase === 'playing') {
+      const B = MODE_RULES.BATTERY, L = this.local;
+      if (L.flashlight && !L.hidden) { this.battery = Math.max(0, this.battery - 100 / B.drain * dt); if (this.battery <= 0) { L.flashlight = false; Sound.click(); UI.notify?.(t('손전등 배터리가 다 닳았다')); } }
+      else this.battery = Math.min(100, this.battery + 100 / B.charge * dt);
+    }
 
     const p = this.local;
     for (let i = 0; i < this.lockerShake.length; i++) if (this.lockerShake[i] > 0) this.lockerShake[i] -= dt;
     this.nearLocker = -1;
-    if (p.alive && !p.hidden && this.roundPhase === 'playing') {
+    if (p.alive && !p.hidden && this.roundPhase === 'playing' && !this.modes.noHide) {   // '숨기 금지' 모드면 사물함 안내도 없다
       let best = CONFIG.LOCKER.USE_DIST;
       this.level.lockers.forEach((lk, i) => {
         const d = Math.hypot(lk.x - p.x, lk.y - p.y);
@@ -356,6 +367,21 @@ const Game = {
     this.nearNote = !!nt && p.alive && !p.hidden && this.roundPhase === 'playing' && Math.hypot(nt.x - p.x, nt.y - p.y) < 44;
     if (this.nearNote) this.nearLocker = -1;
     if (this.noteOpen && (!nt || !p.alive || Math.hypot(nt.x - p.x, nt.y - p.y) > 90)) this.noteOpen = false;
+    // 히든 엔딩: Level 0 의 숨겨진 마닐라 룸 문
+    const sc = this.level.secret;
+    this.nearSecret = !!sc && p.alive && !p.hidden && this.roundPhase === 'playing' && Math.hypot(sc.x - p.x, sc.y - p.y) < CONFIG.LOCKER.USE_DIST;
+    if (this.nearSecret) this.nearLocker = -1;
+    // 흐릿한 강: 강가(바로 옆이 깊은 물)면 E 로 보트 타기, 보트 위에서 바로 옆이 땅이면 E 로 내리기
+    this.nearBoat = 0;
+    if (this.level.info.layout === 'river' && p.alive && !p.hidden && this.roundPhase === 'playing') {
+      const m = this.map, tx = Math.floor(p.x / TS), ty = Math.floor(p.y / TS), R = CONFIG.RIVER.BOARD_DIST;
+      for (let y = ty - 2; y <= ty + 2 && !this.nearBoat; y++) for (let x = tx - 2; x <= tx + 2; x++) {
+        const t = m.get(x, y);
+        if (t === T.WALL || (t === T.DEEP) === !!p.boat) continue;
+        if (Math.hypot(x * TS + TS / 2 - p.x, y * TS + TS / 2 - p.y) < R) { this.nearBoat = p.boat ? 2 : 1; break; }
+      }
+      if (this.nearBoat) this.nearLocker = -1;
+    }
     // 끝없는 도시: 노클립 존 앞이면 E 로 빠진다 (가장 우선)
     this.nearNoclip = false;
     if (this.level.mission.type === 'noclip' && p.alive && !p.hidden && this.roundPhase === 'playing') {
@@ -372,7 +398,7 @@ const Game = {
     } else if (p.alive && p.hidden && this.roundPhase === 'playing') {
       net.sendState(p, dt);                        // 숨어 있는 동안은 제자리 (서버도 이동을 무시)
     } else if (p.alive && this.roundPhase === 'playing') {
-      updateLocalPlayer(p, dt, this.map, this.cam, renderer.scale, { infinite: !!this.horde });
+      updateLocalPlayer(p, dt, this.map, this.cam, renderer.scale, { infinite: !!this.horde || !!this.modes.infiniteStamina, noSprint: !!this.modes.noSprint });   // 질주 레벨 / '무한 스태미나' / '달리기 금지' 모드
       net.sendState(p, dt);
     }
     for (const rp of this.remotes.values()) rp.interpolate(dt);
@@ -392,7 +418,7 @@ const Game = {
       this.loudT = 0.4;
       const v0 = this.viewTarget();
       for (const m of this.monsters) {
-        if (!m.moving && m.type !== 'faceling' && m.type !== 'sheet') continue;
+        if (!m.moving && m.type !== 'faceling' && m.type !== 'sheet' && m.type !== 'burrower' && m.type !== 'shadow' && m.type !== 'soot') continue;
         const near = clamp(1 - Math.hypot(m.x - v0.x, m.y - v0.y) / (TS * 14), 0, 1);
         if (near <= 0) continue;
         if (m.type === 'watch' || m.type === 'clump' || m.type === 'beast') { if (Math.random() < 0.6) Sound.stomp(near * (m.type === 'watch' ? 1 : m.type === 'beast' ? (m.state === 'charge' ? 1.2 : 0.7) : 0.6)); }
@@ -401,6 +427,10 @@ const Game = {
         else if (m.type === 'sheet' && m.state === 'haunt' && Math.random() < 0.25) Sound.moan(near * 0.6);
         else if (m.type === 'aranea' && m.state === 'chase') Sound.skitter(near);
         else if (m.type === 'faceling') Sound.chainsaw(near * (m.state === 'chase' ? 1 : 0.5));
+        else if (m.type === 'burrower' && m.state === 'hunt' && Math.random() < 0.5) Sound.noise(80, 0.35, 0.18 * near);
+        else if (m.type === 'shadow' && m.state === 'follow' && Math.random() < 0.3) Sound.whisper(near * 0.5);
+        else if (m.type === 'soot' && Math.random() < 0.3) Sound.tone(55, 50, 0.5, 0.06 * near, 'sawtooth');
+        else if (m.type === 'mannequin' && m.state === 'move' && Math.random() < 0.5) Sound.creak(near * 0.6);
       }
     }
     // 괴물 떼: 서버 값 사이를 예측해서 부드럽게 (속도대로 밀고, 서버 값으로 살짝 당김)
@@ -482,30 +512,22 @@ const Game = {
   updateHallucinations(dt) {
     const p = this.local, S = CONFIG.SANITY;
     const s = p?.alive ? (p.sanity ?? S.MAX) : S.MAX;
-    const lv = Math.max(0, Math.min(1, (S.HALLUCINATE - s) / S.HALLUCINATE));
-    this.sanityLevel = lv;
-    for (const h of this.hallu) {
-      h.t += dt;
-      const dx = p.x - h.x, dy = p.y - h.y, d = Math.hypot(dx, dy) || 1;
-      const sp = 18 + lv * 70;
-      h.x += (dx / d) * sp * dt; h.y += (dy / d) * sp * dt; h.angle = Math.atan2(dy, dx); h.anim = (h.anim || 0) + dt * 3;
-      if (d < 36) { h.t = h.dur; Sound.giggle(0.35); this.shake = Math.max(this.shake, 4); }
+    const real = Math.max(0, Math.min(1, (S.HALLUCINATE - s) / S.HALLUCINATE));
+    this.sanityLevel = real;
+    this.hallu = [];                                 // 근처에 나타나는 가짜 스마일러는 없다 (스마일러는 정신력이 바닥나 죽을 때만)
+    // 정신력이 50% 아래로 떨어지는 순간: RAINBOW 초 동안 화면이 무지개색으로 미친 듯이 바뀐다 (아몬드 워터로 회복했다 다시 떨어지면 또)
+    const half = S.MAX * 0.5;
+    if (p?.alive && this.prevSanity !== undefined && this.prevSanity >= half && s < half && this.cine?.type !== 'story') {
+      this.rainbowT = RAINBOW; Sound.trip?.(RAINBOW);
     }
-    this.hallu = this.hallu.filter(h => h.t < h.dur);
-    if (lv <= 0 || !p?.alive || this.cine?.type === 'story') { if (lv <= 0) this.hallu = []; return; }
-    const want = Math.floor(lv * 14) + (s < S.SEVERE ? 10 : 0);
-    this.halluT -= dt;
-    if (this.hallu.length < want && this.halluT <= 0) {
-      this.halluT = 0.5 - lv * 0.4;
-      const m = this.map, tx = Math.floor(p.x / TS), ty = Math.floor(p.y / TS);
-      for (let k = 0; k < 20; k++) {
-        const a = Math.random() * Math.PI * 2, r = 3 + Math.random() * 6;
-        const x = Math.round(tx + Math.cos(a) * r), y = Math.round(ty + Math.sin(a) * r);
-        if (m.isSolid(x, y)) continue;
-        this.hallu.push({ type: 'smiler', state: 'chase', active: true, moving: true, x: x * TS + TS / 2, y: y * TS + TS / 2, angle: 0, t: 0, dur: 1.5 + Math.random() * 3.5 });
-        break;
-      }
-    }
+    this.prevSanity = p?.alive ? s : undefined;
+    if (this.rainbowT > 0) this.rainbowT = Math.max(0, this.rainbowT - dt);
+    if (!p?.alive) this.rainbowT = 0;
+    // '편집증' 모드: 정신력이 멀쩡해도 가끔 속삭임과 등 뒤의 가짜 발소리가 들린다
+    const para = this.modes?.paranoia && p?.alive && this.cine?.type !== 'story';
+    const lv = Math.max(real, para ? 0.22 : 0);
+    if (para && Math.random() < dt * 0.06) { const n = 2 + Math.floor(Math.random() * 4); for (let i = 0; i < n; i++) setTimeout(() => Sound.step(Math.random() < 0.3), i * (260 + Math.random() * 80)); }
+    if (lv <= 0 || !p?.alive || this.cine?.type === 'story') return;
     if (Math.random() < dt * (0.2 + lv * 0.8)) Sound.whisper(0.2 + lv * 0.5);
   },
 
@@ -646,7 +668,15 @@ const handlers = {
     Game.loadRound(d);
     UI.hide();
   },
+  /** 사진작가 모드: 누군가 이 레벨의 괴물을 찍었다 */
+  onPhoto({ by, type, photo, open }) {
+    Game.photo = photo;
+    const who = Game.playerById(by)?.name || '?';
+    UI.notify?.(t('{who} 이(가) {type} 을(를) 찍었다!', { who: by === Game.myId ? t('내가') : who, type: t(BESTIARY.find(b => b.type === type)?.name || type) }));
+    if (open) { Sound.unlock(); UI.notify?.(t('출구가 열렸다!')); } else Sound.pickup(0.8);
+  },
   onSnapshot(s) {
+    if (s.tl !== undefined) Game.timeLeft = s.tl;
     for (const ps of s.players) {
       if (ps.id === Game.myId) { Game.local.status = ps.status; Game.local.hidden = ps.hidden; if (ps.sanity !== undefined) Game.local.sanity = ps.sanity; continue; }
       let rp = Game.remotes.get(ps.id);
@@ -808,6 +838,46 @@ const handlers = {
       case 'wail':        // 시츠가 손전등에 물러난다
         if (near > 0) Sound.moan(near, true);
         break;
+      case 'snap':        // 미믹이 덮친다 (사물함 문이 쾅)
+        if (near > 0) { Sound.snapShut(Math.max(0.4, near)); Game.shake = Math.max(Game.shake, 9 * near); }
+        break;
+      case 'form':        // 그림자가 누군가의 발밑에서 솟아난다 (그 사람에게 크게)
+        if (e.target === Game.myId) { Sound.whisper(1); Sound.tone(140, 70, 1.6, 0.14, 'sine'); Game.shake = Math.max(Game.shake, 5); UI.notify?.(t('발밑에서 무언가 솟아난다 — 계속 움직여라')); }
+        else if (near > 0) Sound.whisper(near * 0.6);
+        break;
+      case 'fade':        // 그림자가 흩어진다
+        if (near > 0) Sound.whisper(near * 0.4);
+        break;
+      case 'creak':       // 마네킹이 움직이기 시작
+        if (near > 0) Sound.creak(Math.max(0.3, near));
+        break;
+      case 'rumble':      // 모래 벌레: 땅이 들썩인다 — 지금 비켜라
+        if (near > 0) { Sound.rumble(Math.max(0.3, near)); Game.shake = Math.max(Game.shake, 7 * near); }
+        break;
+      case 'erupt':       // 모래 벌레가 솟구친다
+        if (near > 0) { Sound.crunch(near); Sound.noise(700, 0.5, 0.3 * near); Game.shake = Math.max(Game.shake, 12 * near); }
+        break;
+      case 'eyeOpen':     // 응시자의 눈이 떠진다 — 멈춰라
+        if (near > 0) Sound.eyeOpen(Math.max(0.35, near));
+        break;
+      case 'eyeClose':
+        if (near > 0) Sound.noise(700, 0.25, 0.08 * near);
+        break;
+      case 'zap':         // 응시자가 움직인 사람을 노려봤다
+        if (near > 0) { Sound.tone(1600, 200, 0.6, 0.15 * near, 'sine'); Sound.noise(5000, 0.3, 0.2 * near); }
+        break;
+      case 'hiss':        // 그을음이 손전등에 물러난다
+        if (near > 0) Sound.hiss(near);
+        break;
+      case 'rise':        // 익사자: 보트 옆으로 손이 올라온다 — 손전등을 비추거나 피해라
+        if (near > 0) { Sound.splash(Math.max(0.4, near), true); Game.shake = Math.max(Game.shake, 5 * near); }
+        break;
+      case 'grab':        // 익사자가 끌어당긴다
+        if (near > 0) { Sound.splash(Math.max(0.5, near), true); Sound.tone(90, 40, 0.6, 0.2 * near, 'sawtooth'); }
+        break;
+      case 'sinkLit':     // 익사자가 손전등 빛에 가라앉는다
+        if (near > 0) { Sound.splash(near * 0.5); Sound.moan(near * 0.5); }
+        break;
       case 'poof':        // 안내를 마친 파티 푸퍼가 사라진다
         Game.fx.push({ kind: 'poof', x: e.x, y: e.y, t: 0, dur: 0.8 });
         if (near > 0) Sound.warp(near * 0.6);
@@ -827,6 +897,14 @@ const handlers = {
     if (by === Game.myId) { Sound.puzzleWrong(); Game.shake = Math.max(Game.shake, 5); UI.puzzleWrong?.(); }
     if (near > 0 || by === Game.myId) Sound.alarm(by === Game.myId ? 1 : near);
     Game.fx.push({ kind: 'alarm', x, y, t: 0, dur: CONFIG.PUZZLE.ALARM_TIME });
+  },
+  /** 보트 타기 / 내리기 (서버가 정한 자리로 옮긴다) */
+  onBoatState({ id, boat, x, y }) {
+    const p = Game.playerById(id);
+    if (p) { p.boat = boat; p.x = x; p.y = y; if (p.target) { p.target.x = x; p.target.y = y; } }
+    const view = Game.viewTarget();
+    const near = view ? clamp(1 - Math.hypot(x - view.x, y - view.y) / (TS * 8), 0, 1) : 0;
+    if (near > 0) { Sound.splash(near * 0.8); Sound.thud(near * 0.4); }
   },
   onHideState({ id, hidden, locker, x, y }) {
     const p = Game.playerById(id);
@@ -921,7 +999,7 @@ const handlers = {
     Game.deathT = 0; Game.pendingRoundEnd = null;
     Game.phase = 'ending';
     const players = [...Game.allPlayers()].map(p => ({ id: p.id, name: p.name, color: p.color }));
-    Game.startCine('ending', ENDING.DUR, makeEndingData(d.stats, Game.myId, Game.local?.color || 'default', players));
+    Game.startCine('ending', ENDING.DUR, makeEndingData(d.stats, Game.myId, Game.local?.color || 'default', players, d.ending, d.escaped));
     UI.hide();
     UI.closePanels?.();
     Sound.setDrone(0);
@@ -965,7 +1043,7 @@ export function startGame({ canvas, ui }) {
   const canAct = () => Game.phase === 'game' && !Game.paused && Game.local?.alive && Game.roundPhase === 'playing' && Game.puzzleOpen < 0 && Game.valveOpen < 0 && !Game.chatOpen;
   /** 숫자 키: 그 칸을 손에 든다 (같은 키를 다시 누르면 내려놓는다) */
   const selectSlot = i => {
-    if (i < 0 || i >= CONFIG.INVENTORY_SIZE) return;
+    if (i < 0 || i >= (Game.modes.oneItem ? 1 : CONFIG.INVENTORY_SIZE)) return;   // '단 하나' 모드: 1번 칸만
     Game.held = Game.held === i ? -1 : i;
     Game.useHold = null;
     Sound.click();
@@ -984,6 +1062,7 @@ export function startGame({ canvas, ui }) {
   Input.onMouseDown(useStart);
   Input.onMouseUp(useEnd);
   const dropSlot = i => {
+    if (Game.modes.oneItem && Game.inv[i]) { Game.msg(t('버릴 수 없다 (단 하나 모드)'), 1.5); return; }
     if (i >= CONFIG.INVENTORY_SIZE || !Game.inv[i] || Game.local.hidden) return;
     net.dropItem(i);
     Sound.click();
@@ -1024,6 +1103,7 @@ export function startGame({ canvas, ui }) {
     if (Game.paused) return;
     if (Game.phase === 'game' && Game.local?.alive && !Game.local.hidden) {
       if (Game.modes.noFlashlight) { UI.notify?.(t('손전등 금지 모드다')); return; }
+      if (Game.modes.battery && !Game.local.flashlight && Game.battery < MODE_RULES.BATTERY.min) { UI.notify?.(t('배터리가 부족하다 ({n}%)', { n: Math.floor(Game.battery) })); return; }
       Game.local.flashlight = !Game.local.flashlight; Sound.click();
     }
   });
@@ -1035,6 +1115,8 @@ export function startGame({ canvas, ui }) {
     if (Game.valveOpen >= 0) { Game.closeValve(); return; }
     if (Game.local.hidden) net.hide(null);
     else if (Game.nearNoclip) net.noclip();
+    else if (Game.nearSecret) { net.manila(); Sound.locker(1); }
+    else if (Game.nearBoat && Game.nearPuzzle < 0 && Game.nearStation < 0) net.boat();
     else if (Game.noteOpen) Game.noteOpen = false;
     else if (Game.nearNote && Game.nearPuzzle < 0 && Game.nearStation < 0) { Game.noteOpen = true; Game.noteRead = true; Sound.click(); }
     else if (Game.nearPuzzle >= 0) Game.openPuzzle(Game.nearPuzzle);

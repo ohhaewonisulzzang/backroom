@@ -15,7 +15,7 @@ const EVENTS = [
   'lobby', 'init', 'round', 'snapshot', 'playerJoined', 'playerLeft', 'keyCollected',
   'playerDied', 'playerEscaped', 'monsterAlert', 'entityEvent', 'hideState', 'itemSpawned', 'itemPicked',
   'testResult', 'roundEnd', 'correct', 'joinError', 'paused',
-  'inventory', 'itemUsed', 'emote', 'gameComplete', 'dullTouch', 'puzzleAlarm', 'objective', 'night', 'blackout', 'balloonPopped', 'chat', 'rtc', 'gesture', 'corpse',
+  'inventory', 'itemUsed', 'emote', 'gameComplete', 'boatState', 'photo', 'dullTouch', 'puzzleAlarm', 'objective', 'night', 'blackout', 'balloonPopped', 'chat', 'rtc', 'gesture', 'corpse',
 ];
 
 export class NetClient {
@@ -62,6 +62,8 @@ export class NetClient {
   interact(mid) { this.socket?.emit('interact', { mid }); }
   popBalloon(index) { this.socket?.emit('popBalloon', { index }); }
   noclip() { this.socket?.emit('noclip'); }
+  boat() { this.socket?.emit('boat'); }
+  manila() { this.socket?.emit('manila'); }
   /** 채팅 / 보이스 챗 (말하는 중 알림, 연결 정보 중계) */
   chat(text) { this.socket?.emit('chat', { text }); }
   speaking(on) { this.socket?.emit('speaking', { on }); }

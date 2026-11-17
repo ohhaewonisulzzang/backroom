@@ -21,6 +21,18 @@ export function collideCircle(e, r, map) {
   }
 }
 
+/**
+ * 사람이 지나갈 수 있는 곳으로 본 맵: 걸어 다니면 깊은 물(DEEP)이 벽, 보트를 타고 있으면 땅이 벽.
+ * (시야/엔티티는 원래 map 을 쓴다 — 물은 시야를 막지 않는다)
+ */
+export function passMap(map, boat = false) {
+  return {
+    w: map.w, h: map.h, tiles: map.tiles,
+    inBounds: (x, y) => map.inBounds(x, y), get: (x, y) => map.get(x, y),
+    isSolid: (x, y) => map.isSolid(x, y) || (map.inBounds(x, y) && (map.get(x, y) === T.DEEP) !== !!boat),
+  };
+}
+
 export function moveEntity(e, dx, dy, r, map) {
   e.x += dx; collideCircle(e, r, map);
   e.y += dy; collideCircle(e, r, map);

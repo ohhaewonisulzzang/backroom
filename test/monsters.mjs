@@ -332,5 +332,135 @@ import { hasLOS as hasLOSc } from '../shared/physics.js';
   check(m.state !== 'chase' && !level.isSafe(m.tileX, m.tileY), 'P-1: 비상등 아래로 피하면 빛 밖에서 노려보기만 한다');
 }
 
+// 미믹 (Level 130): 평소엔 무해, 바로 앞에 오래 서 있으면 덮친다 → 다시 사물함 자리로
+{
+  const g = fakeGame(LV('WELLBORN HOSPITAL')), { level } = g;
+  const lk = level.lockers[5];
+  const m = new Monster(lk.x, lk.y, 'mimic', 'mm'); m.post = { x: lk.x, y: lk.y };
+  const p = player(lk.x, lk.y + 20, -Math.PI / 2); g.players.push(p);
+  run(m, g, 0.5);
+  check(m.state !== 'bite' && !m.canKill(), '미믹: 잠깐 서 있으면 아직 사물함인 척한다');
+  run(m, g, 1.4);
+  check(m.state === 'stir', '미믹: 오래 서 있으면 문이 들썩인다 (stir)');
+  run(m, g, 0.8);
+  check(m.state === 'bite' && m.canKill() && Math.hypot(m.x - m.post.x, m.y - m.post.y) <= 1.6 * 48 + 1, '미믹: 결국 덮친다 (손이 닿는 거리까지만)');
+  p.alive = false;
+  run(m, g, 3);
+  check(m.state === 'dormant' && Math.hypot(m.x - lk.x, m.y - lk.y) < 1, '미믹: 다시 사물함 자리로 돌아가 숨는다');
+}
+
+// 스토커 (Level 18): 발밑에서 솟아난 뒤 내가 지나간 길을 그대로 밟아 온다. 계속 걸으면 못 따라잡고, 멈추면 따라잡힌다
+{
+  const g = fakeGame(LV('MEMORY LANE')), s = straight(g, 10);
+  const p = player(center(s.x), center(s.y), 0); g.players.push(p);
+  const m = new Monster(center(1), center(1), 'shadow', 'sd');
+  m.timer = 12; run(m, g, 0.1);
+  check(m.state === 'form' && !m.canKill() && Math.hypot(m.x - p.x, m.y - p.y) < 1, '스토커: 깨어나면 내 발밑에서 솟아난다 (솟아나는 동안은 무해)');
+  // 걷는 속도로 오른쪽으로 가는 동안 따라온다 — 기록한 길을 그대로 밟는다
+  const dt = 1 / 30;
+  let minGap = Infinity;
+  for (let t = 0; t < 4; t += dt) { if (p.x < center(s.x + 10)) p.x += 138 * dt; m.update(dt, g); if (m.state === 'follow') minGap = Math.min(minGap, Math.hypot(m.x - p.x, m.y - p.y)); }
+  check(m.state === 'follow' && Math.abs(m.y - p.y) < 1, `스토커: 내 발자취(같은 줄)를 따라온다`);
+  run(m, g, 6);   // 멈춰 서 있으면
+  check(Math.hypot(m.x - p.x, m.y - p.y) < 20 && m.canKill(), '스토커: 멈춰 있으면 따라잡힌다');
+  p.hidden = true; run(m, g, 0.1);
+  check(m.state === 'gone' && !m.canKill(), '스토커: 사물함에 숨으면 길을 잃고 흩어진다');
+}
+
+// 돌페이스 (Level 520): 누가 움직일 때만 다가오고, 모두 멈추면 굳는다
+{
+  const g = fakeGame(LV('THE WAREHOUSE')), s = straight(g, 6);
+  const p = player(center(s.x), center(s.y), 0, { moving: false }); g.players.push(p);
+  const m = new Monster(center(s.x + 6), center(s.y), 'mannequin', 'mq');
+  const x0 = m.x;
+  run(m, g, 1);
+  check(m.state === 'frozen' && m.x === x0 && !m.canKill(), '돌페이스: 아무도 안 움직이면 굳어 있다');
+  p.moving = true; run(m, g, 0.6);
+  check(m.state === 'move' && m.x < x0 - 20 && m.canKill(), '돌페이스: 누가 움직이면 다가온다');
+  p.moving = false; const x1 = m.x; run(m, g, 0.5);
+  check(m.state === 'frozen' && m.x === x1, '돌페이스: 다시 멈추면 그 자리에서 굳는다');
+}
+
+// 공포증 지네 (Level 46): 발소리를 듣고 와서 들썩인 뒤 솟구친다. 웅크려 걸으면 못 듣는다
+{
+  const g = fakeGame(LV('ARABIAN DESERT')), s = straight(g, 6);
+  const p = player(center(s.x), center(s.y), 0, { moving: true, crouching: true }); g.players.push(p);
+  const m = new Monster(center(s.x + 4), center(s.y), 'burrower', 'bw');
+  run(m, g, 1);
+  check(m.state === 'burrow' && !m.canKill(), '공포증 지네: 웅크려 걸으면 듣지 못한다');
+  p.crouching = false; m.x = center(s.x + 4); m.y = center(s.y);
+  run(m, g, 1.2);
+  check(['rise', 'bite'].includes(m.state) && Math.hypot(m.x - p.x, m.y - p.y) < 24, `공포증 지네: 발소리를 듣고 발밑으로 와서 들썩인다 (${m.state})`);
+  const st0 = m.state === 'rise';
+  run(m, g, 0.9);
+  check(st0 && (m.state === 'bite' || m.state === 'sink') && g.events.includes('rumble') && g.events.includes('erupt'), '공포증 지네: 들썩임(예고) 뒤에 솟구친다');
+}
+
+// 아르고스 (Level 57): 눈이 떠 있을 때 보이는 곳에서 움직이면 zap, 멈춰 있으면 무사
+{
+  const g = fakeGame(LV('SUBJECTIVE ART GALLERY')), s = straight(g, 6);
+  const p = player(center(s.x), center(s.y), 0, { moving: false }); g.players.push(p);
+  const m = new Monster(center(s.x + 6), center(s.y), 'gazer', 'gz'); m.timer = 0.1;
+  run(m, g, 0.2);
+  check(m.state === 'warn' && !m.canKill(), '아르고스: 눈이 떠지기 시작한다 (예고)');
+  run(m, g, 1.6);
+  check(m.state === 'open', '아르고스: 눈이 떠졌다');
+  run(m, g, 1);
+  check(!m.zap, '아르고스: 멈춰 있으면 무사하다');
+  p.moving = true; run(m, g, 0.5);
+  check(m.zap === p, '아르고스: 눈이 떠 있을 때 움직이면 노려본다 (zap)');
+}
+
+// 망령 (Level 33): 가까운 사람에게 다가오고, 손전등을 비추면 물러난다
+{
+  const g = fakeGame(LV('THE INFINITE MALL')), s = straight(g, 6);
+  const p = player(center(s.x), center(s.y), Math.PI); g.players.push(p);
+  const m = new Monster(center(s.x + 6), center(s.y), 'soot', 'so');
+  const d0 = Math.hypot(m.x - p.x, m.y - p.y);
+  run(m, g, 1);
+  check(m.state === 'stalk' && Math.hypot(m.x - p.x, m.y - p.y) < d0 - 40, '망령: 가까운 사람에게 다가온다');
+  p.flashlight = true; p.angle = 0; run(m, g, 0.1);
+  const d1 = Math.hypot(m.x - p.x, m.y - p.y);
+  run(m, g, 1);
+  check(m.state === 'scared' && !m.canKill() && Math.hypot(m.x - p.x, m.y - p.y) > d1, '망령: 손전등을 비추면 물러난다');
+}
+
+// 흐릿한 강 (Level 373): 시작 선착장에서 맞은편 선착장까지 물길이 늘 이어져 있다
+{
+  const i = LV('THE HAZED RIVER');
+  let ok = 0;
+  for (let seed = 1; seed <= 25; seed++) {
+    const L = generateLevel(seed * 7919, i), m = L.map, my = m.h >> 1, water = (x, y) => m.get(x, y) === T.DEEP;
+    const path = m.findPath(10, my, m.w - 11, my, water);
+    if (path.length && m.get(L.exitIdx % m.w, (L.exitIdx / m.w) | 0) === T.EXIT && m.get(2, my) === T.FLOOR) ok++;
+  }
+  check(ok === 25, `흐릿한 강: 25개 시드 모두 물길로 건널 수 있다 (${ok}/25)`);
+}
+
+// 익사자: 보트를 조용히 저으면 못 듣고, 보통으로 저으면 따라와 손을 내민 뒤 끌어당긴다. 손전등을 비추면 가라앉는다
+{
+  const g = fakeGame(LV('THE HAZED RIVER')), { map } = g, my = map.h >> 1;
+  let s = null;
+  for (const i of map.floorCells) { const x = i % map.w, y = (i / map.w) | 0; if ([0, 1, 2, 3, 4, 5].every(k => map.get(x + k, y) === T.DEEP)) { s = { x, y }; break; } }
+  const p = player(center(s.x), center(s.y), 0, { boat: true, moving: true, crouching: true }); g.players.push(p);
+  const m = new Monster(center(s.x + 5), center(s.y), 'drowned', 'dw');
+  run(m, g, 1);
+  check(m.state === 'lurk' && !m.canKill(), '익사자: 웅크려 조용히 저으면 못 듣는다');
+  p.crouching = false; m.x = center(s.x + 5); m.y = center(s.y); m.path = [];   // 조용히 젓는 동안 떠돌다 멀어졌을 수 있으니 제자리로
+  run(m, g, 2.5);
+  check(['surface', 'grab'].includes(m.state), `익사자: 보통으로 저으면 다가와 손을 내민다 (${m.state})`);
+  const surfaced = g.events.includes('rise');
+  run(m, g, 1);
+  check(surfaced && g.events.includes('grab'), '익사자: 손이 올라온 뒤(예고) 끌어당긴다');
+  // 손전등
+  const m2 = new Monster(center(s.x + 3), center(s.y), 'drowned', 'dw2'); m2.state = 'surface'; m2.timer = 1; m2.prey = p;
+  p.flashlight = true; p.angle = 0; run(m2, g, 0.1);
+  check(m2.state === 'sink' && !m2.canKill(), '익사자: 손전등을 비추면 가라앉는다');
+  // 땅 위의 사람은 무시
+  const q = player(center(2), center(my), 0, { boat: false, moving: true }); const g2 = fakeGame(LV('THE HAZED RIVER')); g2.players.push(q);
+  const m3 = new Monster(center(10), center(my), 'drowned', 'dw3'); run(m3, g2, 2);
+  check(m3.state === 'lurk', '익사자: 보트에서 내린 사람은 건드리지 않는다');
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASSED');
 process.exitCode = failed ? 1 : 0;

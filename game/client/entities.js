@@ -23,6 +23,7 @@ export class ClientPlayer extends PlayerState {
     this.hidden = !!s.hidden; this.lockerId = s.lockerId ?? -1;
     if (s.vc !== undefined) this.vc = s.vc;
     this.hold = s.hold || null; this.nv = !!s.nv;   // 손에 든 아이템, 야간 투시경 착용
+    if (s.boat !== undefined && !this.isLocal) this.boat = !!s.boat;   // 보트 (내 보트 상태는 boatState 로만 바꾼다)
   }
 
   interpolate(dt) {

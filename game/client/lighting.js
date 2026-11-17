@@ -75,7 +75,7 @@ export class LightSystem {
    * (벽 타일은 가까운 면만 보이면 보이는 것으로 처리 → 벽이 통째로 깜빡이지 않음)
    */
   updateVisibility(view, dt, explored, instant = false) {
-    const map = this.map, { w, h } = map, R = CONFIG.VIEW_RANGE;
+    const map = this.map, { w, h } = map, R = CONFIG.VIEW_RANGE * (this.viewScale || 1);   // viewScale: '짙은 안개' 모드면 0.5
     const tgt = this.visTarget;
     tgt.fill(0);
     if (view) {
@@ -137,8 +137,11 @@ export class LightSystem {
     return L;
   }
 
-  /** 어둠 레이어(라이트맵 + 깜빡임 + 손전등)를 lctx 에 그린다 */
-  drawDarkness(lctx, W, H, world, flashlights, flares = [], time = 0) {
+  /**
+   * 어둠 레이어(라이트맵 + 깜빡임 + 손전등)를 lctx 에 그린다.
+   * auras: 불빛을 먹는 엔티티(그을음) 둘레 [{x, y, r}] — 그 안은 형광등이 켜져 있어도 깜깜하다 (손전등·조명탄은 뚫는다)
+   */
+  drawDarkness(lctx, W, H, world, flashlights, flares = [], time = 0, auras = []) {
     const map = this.map;
     lctx.setTransform(1, 0, 0, 1, 0, 0);
     lctx.globalCompositeOperation = 'source-over';
@@ -160,6 +163,13 @@ export class LightSystem {
       gr.addColorStop(0, 'rgba(4,3,0,0.6)'); gr.addColorStop(1, 'rgba(4,3,0,0)');
       lctx.fillStyle = gr;
       lctx.fillRect(f.l.x - r, f.l.y - r, r * 2, r * 2);
+    }
+
+    for (const a of auras) {
+      const r = a.r * (0.95 + Math.sin(time * 3 + a.x * 0.01) * 0.05);
+      const gr = lctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, r);
+      gr.addColorStop(0, 'rgba(2,1,4,0.96)'); gr.addColorStop(0.6, 'rgba(2,1,4,0.85)'); gr.addColorStop(1, 'rgba(2,1,4,0)');
+      lctx.fillStyle = gr; lctx.fillRect(a.x - r, a.y - r, r * 2, r * 2);
     }
 
     lctx.globalCompositeOperation = 'destination-out';

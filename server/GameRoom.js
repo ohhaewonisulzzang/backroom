@@ -1,7 +1,7 @@
-import { CONFIG, TS, T, PLAYER_COLORS, ENTITY_TYPES, LEVELS, ITEM_TYPES, MISSION, randomSuit, MODES, defaultModes } from '../shared/config.js';
+import { CONFIG, TS, T, PLAYER_COLORS, ENTITY_TYPES, LEVELS, ITEM_TYPES, MISSION, randomSuit, MODES, defaultModes, MODE_RULES } from '../shared/config.js';
 import { generateLevel } from '../shared/map.js';
 import { angleDiff } from '../shared/utils.js';
-import { hasLOS } from '../shared/physics.js';
+import { hasLOS, passMap } from '../shared/physics.js';
 import { Monster } from '../shared/monster.js';
 import { PlayerState } from '../shared/player.js';
 import { checkPuzzle } from '../shared/puzzles.js';
@@ -9,10 +9,11 @@ import { checkPuzzle } from '../shared/puzzles.js';
 const finite = v => typeof v === 'number' && Number.isFinite(v);
 /** 가방: 칸 번호가 고정된 INVENTORY_SIZE 칸 배열 (빈칸 = null). 아이템을 쓰거나 버려도 다른 칸이 당겨지지 않는다 */
 const emptyInv = () => Array(CONFIG.INVENTORY_SIZE).fill(null);
-const invFree = p => p.inv.findIndex(x => !x);
+const invFree = p => p.inv.findIndex((x, i) => !x && i < (p.slots ?? CONFIG.INVENTORY_SIZE));   // p.slots: '단 하나' 모드면 1칸
 /** 빈칸 중 가장 앞 칸에 넣는다. 가득 차면 false */
 const invAdd = (p, it) => { const i = invFree(p); if (i < 0) return false; p.inv[i] = it; return true; };
 const MIMIC_EVERY = [18, 40];   // 엔티티 목소리 흉내 간격(초, 무작위)
+const ENDING_RULES = { BAD_DEATHS: 15, MAD_SANITY: 20 };   // 배드 엔딩: 총 사망 횟수 / 광기 엔딩: 탈출한 사람 모두 이 정신력 미만
 
 /**
  * 하나의 방(=하나의 레벨 인스턴스). 서버 권위로 관리하는 것:
@@ -151,6 +152,7 @@ export class GameRoom {
   startMatch(id) {
     if (this.phase !== 'lobby' || id !== this.hostId) return;
     this.resetStats();
+    this.cleared = new Set();
     this.startRound(false, { story: this.levelIndex === 0 });
     for (const p of this.players.values()) {
       this.io.to(p.id).emit('init', { ...this.roundPayload(), id: p.id, room: this.name, testMode: this.testMode, story: this.story });
@@ -196,7 +198,7 @@ export class GameRoom {
     p.x = s.x + off[0]; p.y = s.y + off[1];
     p.angle = Math.PI / 4;
     p.status = 'alive'; p.flashlight = true; p.sprinting = false;
-    p.hidden = false; p.lockerId = -1; p.hideToggleAt = 0;
+    p.hidden = false; p.lockerId = -1; p.hideToggleAt = 0; p.boat = false;
     p.noise = 0; p.voiceUntil = 0; p.alarmUntil = 0; p.workUntil = 0; p.emoteAt = 0; p.nvUntil = 0;
     p.sanity = CONFIG.SANITY.MAX;
     p.lastUpdate = Date.now();
@@ -217,7 +219,7 @@ export class GameRoom {
     // Level ! : 열쇠 없이 출구가 처음부터 열려 있고, 왼쪽에서 괴물 떼가 밀려온다
     this.run = this.level.info.layout === 'run';
     this.horde = this.run ? { x: CONFIG.RUN.START_X, speed: CONFIG.RUN.SPEED, t: 0 } : null;
-    if (this.run || this.level.mission.type === 'noclip') this.exitUnlocked = true;   // 질주 / 노클립 레벨: 출구가 처음부터 열림
+    if (this.run || this.level.mission.type === 'noclip' || this.level.mission.type === 'cross') this.exitUnlocked = true;   // 질주 / 노클립 / 강 건너기: 출구가 처음부터 열림
     this.obj = this.initMission();
     this.popped = new Set();        // Level Fun: 터진 풍선 (level.decor 번호)
     this.noises = [];               // 바닥에서 난 소리 { x, y, r, until } — 소리 듣는 엔티티가 확인하러 온다
@@ -231,6 +233,12 @@ export class GameRoom {
     }
     for (const p of this.players.values()) p.toxic = 0;
     this.monsters = this.spawnEntities();
+    // Level 66: 그을음 둘레(aura)는 불빛이 죽은 어둠 → 정신력이 빨리 줄고, 스마일러가 그 어둠을 타고 들어온다
+    if (this.monsters.some(m => m.type === 'soot')) {
+      const baseDark = this.level.isDark, R = CONFIG.ENTITY.soot.aura;
+      this.level.isDark = (x, y) => baseDark(x, y) ||
+        this.monsters.some(m => m.type === 'soot' && Math.hypot(m.x - (x * TS + TS / 2), m.y - (y * TS + TS / 2)) < R);
+    }
     this.items = this.spawnItems();
     this.flares = [];
     this.corpses = []; this.corpseSeq = this.corpseSeq || 0;
@@ -239,6 +247,7 @@ export class GameRoom {
     this.monsterGrace = CONFIG.ENTITY.SPAWN_GRACE + (story ? CONFIG.STORY.DURATION : 0);
     let i = 0;
     for (const p of this.players.values()) this.spawnPlayer(p, i++);
+    this.applyModesOnRound();
     // 가방 상태를 매 라운드 시작마다 다시 보낸다 (레벨 0 재시작처럼 서버가 가방을 비웠는데 화면엔 예전 아이템이 남아 있지 않게)
     for (const p of this.players.values()) this.sendInventory(p);
     this.phase = 'playing';
@@ -246,6 +255,27 @@ export class GameRoom {
     if (broadcast) this.emit('round', this.roundPayload());
     this.log(`round ${this.round} start level=${this.levelIndex} seed=${seed}`);
   }
+
+  /**
+   * 라운드 시작 때 모드 적용: 단 하나(가방 1칸) / 사진작가(무한 카메라 + 사진 조건) / 영구 사망(죽은 사람은 관전) /
+   * 제한 시간 / 아이템 비 타이머
+   */
+  applyModesOnRound() {
+    const M = this.modes;
+    for (const p of this.players.values()) {
+      p.slots = M.oneItem ? 1 : CONFIG.INVENTORY_SIZE;
+      if (M.oneItem) for (let i = 1; i < p.inv.length; i++) p.inv[i] = null;
+      if (M.photographer && !p.inv.some(it => it?.type === 'camera' && it.inf)) { const i = invFree(p); if (i >= 0) p.inv[i] = { type: 'camera', uses: 1, inf: true }; }
+      if (M.permaDeath && p.perma) p.status = 'dead';
+    }
+    const L = LEVELS[this.levelIndex];
+    const subjects = Object.keys(L.entities || {}).filter(t => L.entities[t] > 0 && !MODE_RULES.PHOTO_SKIP.includes(t));
+    this.photo = { need: !!M.photographer && !this.run && subjects.length > 0, taken: false, type: null };
+    this.timeLeft = MODE_RULES.TIME_LIMIT;
+    this.rainT = MODE_RULES.ITEM_RAIN;
+  }
+  /** 출구로 나갈 수 있나: 미션 완료 + (사진작가 모드면) 괴물 사진 */
+  exitOpen() { return this.exitUnlocked && (!this.photo?.need || this.photo.taken); }
 
   /** 미션 상태 초기화. keys / run 은 기존 열쇠 로직을 쓰므로 null */
   initMission() {
@@ -307,13 +337,24 @@ export class GameRoom {
       const x = i % map.w, y = (i / map.w) | 0;
       return dist[i] >= 8 && !nearExit(i) && map.tiles[i] === T.FLOOR && map.isSolid(x, y - 1) && !taken.some(o => Math.abs(o.tx - x) + Math.abs(o.ty - y) < 2);
     });
+    // 미믹: 사물함 하나를 차지한다 (시작 지점 근처 사물함은 진짜로 남겨 둔다)
+    if (counts.mimic) {
+      const free = this.level.lockers.map((lk, i) => i).filter(i => {
+        const lk = this.level.lockers[i], c = lk.ty * map.w + lk.tx;
+        return dist[c] >= 10 && !nearExit(c);
+      });
+      for (let i = free.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [free[i], free[j]] = [free[j], free[i]]; }
+      free.slice(0, counts.mimic).forEach((li, n) => list.push(this.makeMimic(li, `mimic-${n}`)));
+    }
     for (const type of ENTITY_TYPES) {
+      if (type === 'mimic') continue;
       for (let n = 0; n < (counts[type] || 0); n++) {
         const pool = type === 'smiler' && !this.level.info.blackout ? darkCells.filter(i => dist[i] >= 10 && !nearExit(i))
           : type === 'watch' || type === 'aranea' ? far.filter(i => this.level.wide[i])
           : type === 'clump' ? far.filter(i => map.tiles[i] !== T.SLOW)
-          : type === 'windows' ? windowSpots
+          : type === 'windows' || type === 'gazer' ? windowSpots
           : type === 'seaThing' ? far.filter(i => map.tiles[i] === T.SLOW)
+          : type === 'drowned' ? map.floorCells.filter(i => map.tiles[i] === T.DEEP && dist[i] >= 20)
           : type === 'crawler' ? far.filter(i => this.level.isDark(i % map.w, (i / map.w) | 0))
           : far;
         const atSpawn = monsterSpawn && !nearExit(Math.floor(monsterSpawn.y / TS) * map.w + Math.floor(monsterSpawn.x / TS));
@@ -326,17 +367,32 @@ export class GameRoom {
         if (type === 'windows') { m.y = Math.floor(m.y / TS) * TS + 10; m.post = { x: m.x, y: m.y }; m.angle = Math.PI / 2; }   // 벽의 창문 바로 앞
         if (type === 'howler') m.timer = -n * CONFIG.ENTITY.howler.extraDelay;   // 하울러는 한 마리씩 차례로 깨어난다
         if (type === 'smiler' && this.level.info.blackout) { m.state = 'vanished'; m.timer = 1e9; }   // 정전 레벨: 불이 나가야 나타난다
+        if (type === 'gazer') this.setupGazer(m);
+        if (type === 'shadow') m.timer = -n * 22;                                   // 그림자는 한 마리씩 차례로 깨어난다
         list.push(m);
       }
     }
     return list;
   }
 
+  /** 미믹: lockers[li] 자리의 사물함인 척한다 */
+  makeMimic(li, id) {
+    const lk = this.level.lockers[li], m = new Monster(lk.x, lk.y, 'mimic', id);
+    m.lockerIdx = li; m.post = { x: lk.x, y: lk.y }; m.angle = Math.PI / 2;
+    return m;
+  }
+  /** 응시자: 벽의 눈 (창문들처럼 북쪽 벽 바로 앞). 저마다 다른 때에 눈을 뜬다 */
+  setupGazer(m) {
+    const C = CONFIG.ENTITY.gazer;
+    m.y = Math.floor(m.y / TS) * TS + 10; m.post = { x: m.x, y: m.y }; m.angle = Math.PI / 2;
+    m.timer = 2 + Math.random() * (C.closed[1] + 2);
+  }
+
   /** 아이템(아몬드 워터 등) 자연 배치 */
   spawnItems() {
-    if (this.level.info.layout === 'run') return [];     // 질주 레벨은 아이템 없음
+    if (this.level.info.layout === 'run' || this.modes.noItems) return [];     // 질주 레벨 / '아이템 없음' 모드는 아이템 없음
     const { map, dist, exitIdx } = this.level;
-    const pool = map.floorCells.filter(i => dist[i] >= 6 && i !== exitIdx);
+    const pool = map.floorCells.filter(i => dist[i] >= 6 && i !== exitIdx && map.tiles[i] !== T.DEEP);   // 깊은 물 위엔 두지 않는다
     const list = [];
     const over = LEVELS[this.levelIndex].items || {};
     for (const [type, def] of Object.entries(ITEM_TYPES)) {
@@ -358,6 +414,8 @@ export class GameRoom {
       players: [...this.players.values()].map(p => p.serialize()),
       keys: [...this.keysCollected],
       exitUnlocked: this.exitUnlocked,
+      photo: this.photo || null,
+      timeLeft: this.modes.timeLimit ? Math.ceil(this.timeLeft) : null,
       obj: this.objPayload(),
       popped: [...(this.popped || [])],
       night: this.night?.phase || null,
@@ -380,14 +438,8 @@ export class GameRoom {
     const list = status => [...this.players.values()].filter(p => p.status === status).map(p => p.name);
     const escaped = list('escaped');
     if (escaped.length && LEVELS[this.levelIndex].final) {
-      // 마지막 레벨 탈출 → 엔딩. 멀티는 대기방으로, 혼자 하기는 끝
-      this.levelIndex = 0;
-      for (const p of this.players.values()) { p.inv = emptyInv(); p.status = 'alive'; }
-      this.phase = this.solo ? 'complete' : 'lobby';
-      this.emit('gameComplete', { escaped, dead: list('dead'), stats: this.statsPayload() });
-      this.resetStats();
-      if (!this.solo) this.emitLobby();
-      this.log('GAME COMPLETE');
+      // 마지막 레벨 탈출 → 엔딩 (배드 / 광기 / 노멀). 멀티는 대기방으로, 혼자 하기는 끝
+      this.completeGame(this.pickEnding(), escaped, list('dead'));
       return;
     }
     // 전멸: 시체 위에 남아 있던 아이템은 주인 가방으로 돌려준다 (같은 레벨을 다시 하니까)
@@ -398,10 +450,63 @@ export class GameRoom {
       }
       for (const p of this.players.values()) if (p._invDirty) { delete p._invDirty; this.sendInventory(p); }
     }
+    // '영구 사망' 모드: 탈출하면 죽은 사람은 다음 레벨에서도 관전, 전멸하면 Level 0 부터 (가방도 비운다)
+    if (this.modes.permaDeath) {
+      if (escaped.length) for (const p of this.players.values()) { if (p.status === 'dead') p.perma = true; }
+      else { this.levelIndex = 0; this.cleared = new Set(); for (const p of this.players.values()) { p.perma = false; p.inv = emptyInv(); } }
+    }
     // 한 명이라도 탈출 → 다음 레벨, 전멸 → 죽은 레벨에서 다시
-    if (escaped.length) this.levelIndex = (this.levelIndex + 1) % LEVELS.length;
+    if (escaped.length) this.levelIndex = this.nextLevelIndex();
     this.emit('roundEnd', { round: this.round, escaped, dead: list('dead'), restartIn: delay, nextLevel: this.levelIndex });
     this.log(`round ${this.round} end`);
+  }
+
+  /**
+   * 3999 탈출 엔딩 고르기:
+   *  bad     — 동료 중 누가 죽은 채 남겨졌거나, 이번 판 총 사망이 BAD_DEATHS 번 이상 ("끝나지 않는 복도")
+   *  madness — 탈출한 사람 모두 정신력이 MAD_SANITY 미만 ("무지개 너머")
+   *  good    — 그 밖
+   * (히든 엔딩 manila 는 Level 0 의 숨겨진 문에서 onManila 로)
+   */
+  pickEnding() {
+    if (this.forceEnding) { const e = this.forceEnding; this.forceEnding = null; return e; }
+    const all = [...this.players.values()], deaths = [...this.stats.values()].reduce((t, s) => t + (s.deaths || 0), 0);
+    if (all.some(p => p.status === 'dead') || deaths >= ENDING_RULES.BAD_DEATHS) return 'bad';
+    const out = all.filter(p => p.status === 'escaped');
+    if (out.length && out.every(p => p.sanity < ENDING_RULES.MAD_SANITY)) return 'madness';
+    return 'good';
+  }
+  /** 게임 끝 → 엔딩. 레벨 0 으로 되돌리고 멀티는 대기방으로 */
+  completeGame(ending, escaped, dead = []) {
+    this.levelIndex = 0; this.cleared = new Set();
+    for (const p of this.players.values()) { p.inv = emptyInv(); p.status = 'alive'; p.perma = false; }
+    this.phase = this.solo ? 'complete' : 'lobby';
+    this.emit('gameComplete', { escaped, dead, stats: this.statsPayload(), ending });
+    this.resetStats();
+    if (!this.solo) this.emitLobby();
+    this.log(`GAME COMPLETE (${ending})`);
+  }
+  /** 히든 엔딩: Level 0 의 숨겨진 마닐라 룸 문 앞에서 E */
+  onManila(id) {
+    const p = this.players.get(id), s = this.level?.secret;
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused || !s) return;
+    if (Math.hypot(s.x - p.x, s.y - p.y) > CONFIG.LOCKER.USE_DIST * 1.5) return;
+    p.status = 'escaped';
+    this.completeGame('manila', [p.name], [...this.players.values()].filter(q => q.status === 'dead').map(q => q.name));
+  }
+
+  /**
+   * 탈출 후 다음 레벨. 보통은 순서대로.
+   * '레벨 셔플' 모드: 아직 안 깬 레벨 중 무작위 (Level 0 → 섞인 레벨들 → 다 깨면 마지막 레벨)
+   */
+  nextLevelIndex() {
+    if (!this.modes.shuffleLevels) return (this.levelIndex + 1) % LEVELS.length;
+    this.cleared = this.cleared || new Set();
+    this.cleared.add(this.levelIndex);
+    const final = LEVELS.findIndex(L => L.final);
+    const left = LEVELS.map((L, i) => i).filter(i => i !== final && i !== 0 && !this.cleared.has(i));
+    if (!left.length) return final;
+    return left[Math.floor(Math.random() * left.length)];
   }
 
   /** ESC 메뉴: 혼자 하기 방에서만 실제로 멈춘다 (멀티는 다른 사람이 계속 플레이) */
@@ -428,10 +533,24 @@ export class GameRoom {
       this.emit('hideState', { id, hidden: false, locker, x: p.x, y: p.y });
       return;
     }
+    if (this.modes.noHide) return;   // '숨기 금지' 모드
     const idx = Number(data && data.index);
     const lk = this.level.lockers[idx];
     if (!lk || this.lockerOccupant[idx]) return;
     if (Math.hypot(lk.x - p.x, lk.y - p.y) > CONFIG.LOCKER.USE_DIST) return;
+    // 미믹: 사물함인 줄 알고 들어가려다 삼켜진다
+    const mimic = this.monsters.find(m => m.type === 'mimic' && m.lockerIdx === idx);
+    if (mimic) {
+      mimic.snap(this, p);
+      if (!p.god && this.monsterGrace <= 0) {
+        mimic.holdT = CONFIG.ENTITY.CATCH_HOLD;
+        p.status = 'dead';
+        this.emit('playerDied', { id: p.id, entityType: 'mimic', x: Math.round(p.x), y: Math.round(p.y) });
+        this.dropParts(p);
+        this.checkRoundEnd();
+      }
+      return;
+    }
     this.lockerOccupant[idx] = id;
     p.hidden = true; p.lockerId = idx; p.hideToggleAt = now;
     p.x = lk.x; p.y = lk.y; p.sprinting = false;
@@ -450,7 +569,8 @@ export class GameRoom {
     const maxStep = CONFIG.PLAYER.SPRINT * elapsed * 1.5 + 32;
     const moved = Math.hypot(s.x - p.x, s.y - p.y);
     // 도착 칸이 벽이거나, 이동 경로가 벽을 뚫고 지나가면 거부 (벽 통과 치트 방지)
-    const solid = this.map.isSolid(Math.floor(s.x / TS), Math.floor(s.y / TS)) || !hasLOS(this.map, p.x, p.y, s.x, s.y);
+    // 걸어 다니면 깊은 물이, 보트를 타고 있으면 땅이 벽이다
+    const solid = passMap(this.map, p.boat).isSolid(Math.floor(s.x / TS), Math.floor(s.y / TS)) || !hasLOS(this.map, p.x, p.y, s.x, s.y);
     p.lastUpdate = now;
     if (moved > maxStep || solid) {
       this.io.to(id).emit('correct', { x: p.x, y: p.y });
@@ -458,6 +578,7 @@ export class GameRoom {
     }
     p.applyInput(s);
     if (this.modes.noFlashlight) p.flashlight = false;   // '손전등 금지' 모드
+    if (this.modes.noSprint) p.sprinting = false;        // '달리기 금지' 모드
     if (moved >= 1) p.lastMoveAt = now;     // 복도 감독: 멈춰 서 있는지 판단
     // 발소리: 움직이고 있으면 들리는 반경 (웅크리면 0) — 파티고어가 듣는다
     const H = CONFIG.ENTITY.partygoer;
@@ -504,12 +625,12 @@ export class GameRoom {
       if (d >= CONFIG.PICKUP_RADIUS) continue;
       if (invFree(p) < 0) continue;                                 // 가방이 가득 참
       this.items.splice(i, 1);
-      invAdd(p, { type: it.type, uses: it.uses ?? ITEM_TYPES[it.type].uses });   // 비어 있는 가장 앞 칸, 버려진 아이템은 남은 횟수 그대로
+      invAdd(p, { type: it.type, uses: it.uses ?? ITEM_TYPES[it.type].uses, ...(this.modes.oneItem || it.inf ? { inf: true } : {}) });   // 비어 있는 가장 앞 칸, 버려진 아이템은 남은 횟수 그대로 ('단 하나' 모드는 무한)
       this.emit('itemPicked', { id: it.id, type: it.type, by: p.id });
       this.sendInventory(p);
     }
     // 노클립 레벨은 출구 칸을 밟는 게 아니라 노클립 존에서 E (onNoclip)
-    if (this.exitUnlocked && this.level.mission.type !== 'noclip' && this.map.get(Math.floor(p.x / TS), Math.floor(p.y / TS)) === T.EXIT) {
+    if (this.exitOpen() && this.level.mission.type !== 'noclip' && this.map.get(Math.floor(p.x / TS), Math.floor(p.y / TS)) === T.EXIT) {
       p.status = 'escaped';
       this.emit('playerEscaped', { id: p.id });
       this.checkRoundEnd();
@@ -573,10 +694,30 @@ export class GameRoom {
     else if (typeof to === 'string' && this.players.has(to)) this.io.to(to).emit('rtc', { from: socket.id, d });
   }
 
+  /**
+   * 흐릿한 강: 보트 타기 / 내리기 (E). 타기 = 바로 옆 깊은 물 칸 위로, 내리기 = 바로 옆 땅 칸 위로 옮겨 놓는다.
+   * 칸 중심이 BOARD_DIST 안에 있어야 한다. 결과는 boatState 로 모두에게 알린다.
+   */
+  onBoat(id) {
+    const p = this.players.get(id);
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused) return;
+    const map = this.map, tx = Math.floor(p.x / TS), ty = Math.floor(p.y / TS), R = CONFIG.RIVER.BOARD_DIST;
+    let best = null, bd = R;
+    for (let y = ty - 2; y <= ty + 2; y++) for (let x = tx - 2; x <= tx + 2; x++) {
+      const t = map.get(x, y);
+      if (t === T.WALL || (t === T.DEEP) === !!p.boat) continue;     // 타려면 물 칸, 내리려면 땅 칸
+      const cx = x * TS + TS / 2, cy = y * TS + TS / 2, d = Math.hypot(cx - p.x, cy - p.y);
+      if (d < bd && hasLOS(map, p.x, p.y, cx, cy)) { bd = d; best = { x: cx, y: cy }; }
+    }
+    if (!best) return;
+    p.boat = !p.boat; p.x = best.x; p.y = best.y; p.lastUpdate = Date.now();
+    this.emit('boatState', { id, boat: p.boat, x: p.x, y: p.y });
+  }
+
   /** 끝없는 도시: 노클립 존(출구 칸) 앞에서 E → 벽 속으로 빠져 다음 레벨로 */
   onNoclip(id) {
     const p = this.players.get(id);
-    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused || this.level.mission.type !== 'noclip') return;
+    if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused || this.level.mission.type !== 'noclip' || !this.exitOpen()) return;
     const e = this.level.exitIdx, w = this.map.w;
     if (Math.hypot((e % w) * TS + TS / 2 - p.x, ((e / w) | 0) * TS + TS / 2 - p.y) > CONFIG.CITY.NOCLIP_DIST * 1.5) return;
     p.status = 'escaped';
@@ -634,12 +775,22 @@ export class GameRoom {
     switch (it.type) {
       case 'camera': {
         if (p.hidden) return;
+        if (it.inf && this.modes.photographer) {                       // 사진작가 카메라: 연타 방지
+          const now = Date.now();
+          if (now - (p.camAt || 0) < MODE_RULES.PHOTO_COOLDOWN * 1000) return;
+          p.camAt = now;
+        }
         const hit = [];
         for (const m of this.monsters) {
           if (!m.active || !inCone(m, def.range, def.fov)) continue;
           if (m.type === 'smiler') { this.onEntityEvent(m, 'vanish'); m.relocate(this, this.level.darkCells, p, 10); m.state = 'vanished'; m.timer = 6; }
           else m.stun(m.type === 'howler' ? def.stun * 0.6 : def.stun);
           hit.push(m.id);
+          // 사진작가: 이 레벨의 괴물을 찍었다 → (미션도 끝났으면) 출구가 열린다
+          if (this.photo?.need && !this.photo.taken && !MODE_RULES.PHOTO_SKIP.includes(m.type)) {
+            this.photo.taken = true; this.photo.type = m.type; this.statOf(id).keys++;
+            this.emit('photo', { by: id, type: m.type, photo: this.photo, open: this.exitOpen() });
+          }
         }
         fx.hit = hit;
         break;
@@ -677,8 +828,10 @@ export class GameRoom {
         break;   // 효과는 본인 화면(스태미나 / 방향 표시 / 시야 / 속도)에서 처리
       default: return;
     }
-    it.uses -= 1;
-    if (it.uses <= 0) p.inv[slot | 0] = null;   // 칸은 비워 두고 다른 아이템은 제자리
+    if (!it.inf) {                               // 무한 아이템(사진작가 카메라 / '단 하나' 모드)은 줄지 않는다
+      it.uses -= 1;
+      if (it.uses <= 0) p.inv[slot | 0] = null;   // 칸은 비워 두고 다른 아이템은 제자리
+    }
     this.sendInventory(p);
     this.emit('itemUsed', fx);
   }
@@ -688,7 +841,7 @@ export class GameRoom {
     const p = this.players.get(id);
     if (!p || !p.alive || p.hidden || this.phase !== 'playing' || this.paused) return;
     const i = slot | 0, it = p.inv[i];
-    if (!it) return;
+    if (!it || this.modes.oneItem) return;       // '단 하나' 모드: 버릴 수 없다
     p.inv[i] = null;
     const drop = { id: ++this.itemSeq, type: it.type, uses: it.uses, x: Math.round(p.x), y: Math.round(p.y + 6), lockedFor: id };
     this.items.push(drop);
@@ -731,6 +884,7 @@ export class GameRoom {
     const tile = o => ({ tx: Math.floor(o.x / TS), ty: Math.floor(o.y / TS) });
     const teleport = (x, y) => {
       if (p.hidden) { this.lockerOccupant[p.lockerId] = null; p.hidden = false; p.lockerId = -1; }
+      if (p.boat && this.map.get(Math.floor(x / TS), Math.floor(y / TS)) !== T.DEEP) { p.boat = false; this.emit('boatState', { id, boat: false, x, y }); }
       p.x = x; p.y = y; p.lastUpdate = Date.now();
       this.io.to(id).emit('correct', { x, y });
       this.checkPickups(p);
@@ -810,6 +964,12 @@ export class GameRoom {
         teleport(m.x, m.y + 20);
         return reply('파티 푸퍼로 이동', { mid: m.id });
       }
+      case 'tpSecret': {   // 히든 엔딩 문 앞으로 (Level 0 에서만)
+        const s = this.level.secret;
+        if (!s) return reply('이 레벨엔 숨겨진 문이 없다 (Level 0 만)');
+        teleport(s.x, s.y);
+        return reply('숨겨진 문 앞');
+      }
       case 'tpExit': {
         const e = this.level.exitIdx, w = this.map.w;
         const ex = (e % w) * TS + TS / 2, ey = ((e / w) | 0) * TS + TS / 2;
@@ -850,11 +1010,28 @@ export class GameRoom {
         if (arg === 'howler') { m.active = true; m.state = 'patrol'; }
         if (arg === 'partygoer') m.faceOpen(this.map);
         if (arg === 'deathmoth' || arg === 'camoCrawler') m.clingToWall(this.map);
+        if (arg === 'mimic') {        // 가장 가까운 빈 사물함을 미믹으로
+          const used = new Set(this.monsters.filter(o => o.type === 'mimic').map(o => o.lockerIdx));
+          let li = -1, bd = Infinity;
+          this.level.lockers.forEach((lk, k) => { const d = Math.hypot(lk.x - p.x, lk.y - p.y); if (!used.has(k) && !this.lockerOccupant[k] && d > TS && d < bd) { bd = d; li = k; } });
+          if (li < 0) return reply('미믹이 될 사물함이 없다');
+          this.monsters.push(this.makeMimic(li, `mimic-t${this.entitySeq}`));
+          return reply('가장 가까운 사물함이 미믹이 됐다');
+        }
+        if (arg === 'gazer') {        // 가장 가까운 북쪽 벽 앞
+          const spot = cand.find(c => this.map.isSolid(c % this.map.w, ((c / this.map.w) | 0) - 1));
+          if (spot === undefined) return reply('벽 자리가 없다');
+          m.x = (spot % this.map.w) * TS + TS / 2; m.y = ((spot / this.map.w) | 0) * TS + TS / 2;
+          this.setupGazer(m); m.timer = 1;
+        }
+        if (arg === 'shadow') { m.state = 'gone'; m.timer = CONFIG.ENTITY.shadow.regroup - 1; }   // 1초 뒤 발밑에서 솟아난다
         this.monsters.push(m);
         return reply(`${arg} 소환 (3~5칸 거리)`);
       }
-      case 'ending': {   // 엔딩 바로 보기: 마지막 레벨에서 살아 있는 사람 모두 탈출 처리
+      case 'ending': {   // 엔딩 바로 보기: 마지막 레벨에서 살아 있는 사람 모두 탈출 처리 (arg: good | bad | madness | manila)
         if (this.phase !== 'playing') return reply('라운드가 끝난 상태');
+        if (arg === 'manila') { this.completeGame('manila', [p.name]); return reply('엔딩'); }
+        if (['good', 'bad', 'madness'].includes(arg)) this.forceEnding = arg;
         this.levelIndex = LEVELS.findIndex(L => L.final);
         for (const q of this.players.values()) if (q.alive) { q.status = 'escaped'; this.emit('playerEscaped', { id: q.id }); }
         this.checkRoundEnd();
@@ -898,7 +1075,7 @@ export class GameRoom {
       if (this.flares.length) this.flares = this.flares.filter(f => f.until > now);
       if (this.noises.length) this.noises = this.noises.filter(n => n.until > now);
       if (this.monsterGrace > 0) this.monsterGrace -= dt;
-      else for (const m of this.monsters) { m.modeMul = this.modes.fastEntities ? 1.25 : 1; m.update(dt, this); }   // '엔티티 가속' 모드
+      else for (const m of this.monsters) { m.modeMul = (this.modes.fastEntities ? 1.25 : 1) * (this.modes.slowEntities ? 0.75 : 1); m.update(dt, this); }   // '엔티티 가속' / '엔티티 감속' 모드
       if (this.monsterGrace <= 0) { this.updateMission(dt, now); this.updateNight(dt); this.updateBlackout(dt); this.updateMimic(dt); }
       // 안내를 마친 파티 푸퍼는 사라진다
       if (this.monsters.some(m => m.gone)) {
@@ -926,6 +1103,33 @@ export class GameRoom {
           this.emit('playerDied', { id: p.id, entityType: 'horde', x: Math.round(p.x), y: Math.round(p.y) });
         }
       }
+      // '제한 시간' 모드: 시간이 다 되면 아직 남아 있는 사람 모두 죽는다
+      if (this.modes.timeLimit && this.monsterGrace <= 0) {
+        this.timeLeft -= dt;
+        if (this.timeLeft <= 0) for (const p of this.players.values()) {
+          if (!p.alive || p.god) continue;
+          if (p.hidden) { this.lockerOccupant[p.lockerId] = null; p.hidden = false; p.lockerId = -1; }
+          p.status = 'dead'; someoneDied = true;
+          this.emit('playerDied', { id: p.id, entityType: 'timeout', x: Math.round(p.x), y: Math.round(p.y) });
+        }
+      }
+      // '아이템 비' 모드: 살아 있는 사람마다 근처(1~3칸)에 아이템 하나
+      if (this.modes.itemRain && this.monsterGrace <= 0 && !this.run && (this.rainT -= dt) <= 0) {
+        this.rainT = MODE_RULES.ITEM_RAIN;
+        const types = Object.keys(ITEM_TYPES);
+        for (const p of this.players.values()) {
+          if (!p.alive) continue;
+          const tx = Math.floor(p.x / TS), ty = Math.floor(p.y / TS), spots = [];
+          for (let y = ty - 3; y <= ty + 3; y++) for (let x = tx - 3; x <= tx + 3; x++) {
+            const t = this.map.get(x, y);
+            if ((t === T.FLOOR || t === T.SLOW) && (x !== tx || y !== ty) && hasLOS(this.map, p.x, p.y, x * TS + TS / 2, y * TS + TS / 2)) spots.push([x, y]);
+          }
+          if (!spots.length) continue;
+          const [x, y] = spots[Math.floor(Math.random() * spots.length)], type = types[Math.floor(Math.random() * types.length)];
+          const it = { id: ++this.itemSeq, type, x: x * TS + TS / 2, y: y * TS + TS / 2 };
+          this.items.push(it); this.emit('itemSpawned', it);
+        }
+      }
       // 정신력: 어두울수록 빨리 줄고, 0 이 되면 터진다 (질주 레벨은 제외)
       if (this.monsterGrace <= 0 && !this.run) {
         const S = CONFIG.SANITY;
@@ -936,7 +1140,7 @@ export class GameRoom {
           const D = CONFIG.ENTITY.duller;
           const dull = this.monsters.some(m => m.type === 'duller' && Math.hypot(m.x - p.x, m.y - p.y) < D.aura);
           const mul = (dark ? (p.flashlight ? S.DARK_LIGHT_MUL : S.DARK_MUL) : 1) * (p.hidden ? S.HIDDEN_MUL : 1) * (dull ? D.sanityMul : 1) * (this.modes.hardSanity ? 2 : 1);
-          p.sanity = Math.max(0, p.sanity - S.DRAIN * mul * dt);
+          p.sanity = Math.max(0, p.sanity - S.DRAIN * mul * dt * (this.modes.calm ? 0 : 1));   // '평온' 모드: 줄지 않는다
           if (p.sanity <= 0 && !p.god) {
             if (p.hidden) { this.lockerOccupant[p.lockerId] = null; p.hidden = false; p.lockerId = -1; }
             p.status = 'dead';
@@ -958,10 +1162,19 @@ export class GameRoom {
           } else if (p.god) p.toxic = Math.min(p.toxic, Z.TOXIC_KILL - 1);
         }
       }
+      // 응시자: 눈이 떠 있을 때 움직인 사람 (닿지 않고 눈으로 죽인다)
+      for (const m of this.monsters) {
+        if (m.type !== 'gazer' || !m.zap) continue;
+        const p = m.zap; m.zap = null;
+        if (!p.alive || p.god || p.hidden || this.monsterGrace > 0) continue;
+        p.status = 'dead'; someoneDied = true;
+        this.emit('playerDied', { id: p.id, entityType: 'gazer', x: Math.round(p.x), y: Math.round(p.y) });
+      }
+      const biteR = CONFIG.ENTITY.burrower.biteR, grabR = CONFIG.ENTITY.drowned.reach;
       for (const p of this.players.values()) {
         if (!p.alive || p.god || this.monsterGrace > 0) continue;
         const killer = this.monsters.find(m => m.canKill() && (!p.hidden || m.canFindHidden(p)) &&
-          Math.hypot(p.x - m.x, p.y - m.y) < reach);
+          Math.hypot(p.x - m.x, p.y - m.y) < (m.type === 'burrower' ? biteR : m.type === 'drowned' ? (p.boat ? grabR : 0) : reach));
         if (killer && killer.type === 'duller') {
           // 덜러: 죽이지 않고 지금 정신력의 30% 를 빼앗은 뒤 잠깐 멈춘다 (그 사이 도망칠 수 있다)
           const D = CONFIG.ENTITY.duller;
@@ -987,6 +1200,7 @@ export class GameRoom {
           monsters: this.monsters.map(m => m.serialize()),
           ...(this.horde ? { horde: { x: Math.round(this.horde.x), speed: Math.round(this.horde.speed) } } : {}),
           ...(this.obj && this.obj.type !== 'deliver' ? { obj: this.objPayload() } : {}),
+          ...(this.modes.timeLimit ? { tl: Math.max(0, Math.ceil(this.timeLeft)) } : {}),
         });
       }
       if (someoneDied) {

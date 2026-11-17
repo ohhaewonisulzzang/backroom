@@ -260,6 +260,7 @@ export const Sound = {
   death(type) {
     if (type === 'sanity') { this.giggle(1); this.tone(200, 2400, 1.2, 0.08, 'sine'); this.burst(1.2); return; }
     if (type === 'hydrolitis') { this.heartbeat(0.6); this.tone(60, 30, 2.5, 0.2, 'sine', 0.5); return; }
+    if (type === 'timeout') { this.alarm(1); this.thud(1.4); this.tone(120, 40, 2, 0.2, 'sawtooth', 0.5); return; }
     this.scream();
     if (type === 'howler' || type === 'scratcher') { for (let i = 0; i < (type === 'scratcher' ? 7 : 3); i++) this.slash(1, 0.6 + i * (type === 'scratcher' ? 0.12 : 0.24)); }
     else if (type === 'hound' || type === 'smiler' || type === 'skinStealer') { this.crunch(1, 0.8); this.crunch(0.8, 1.05); this.crunch(0.6, 1.3); }
@@ -280,7 +281,30 @@ export const Sound = {
     else if (type === 'jackLantern') { this.giggle(1); this.crunch(1, 0.7); }
     else if (type === 'duller') { this.tone(220, 40, 2.4, 0.15, 'sine'); this.noise(200, 2.2, 0.1); }
     else if (type === 'sheet') { this.moan(1.2, true); this.moan(1); this.tone(60, 30, 1.8, 0.2, 'sine', 0.6); }
+    else if (type === 'mimic') { this.snapShut(1); this.crunch(1, 0.4); this.crunch(1, 0.7); this.crunch(0.8, 1.0); }
+    else if (type === 'shadow') { this.whisper(1); this.tone(300, 40, 2.0, 0.15, 'sine', 0.3); this.noise(200, 1.8, 0.1, 0.4); }
+    else if (type === 'mannequin') { for (let i = 0; i < 4; i++) this.creak(0.9, 0.2 + i * 0.25); this.crunch(1, 1.2); }
+    else if (type === 'burrower') { this.rumble(1); this.crunch(1, 0.3); this.crunch(1, 0.55); this.noise(800, 1.2, 0.15, 0.5); }
+    else if (type === 'gazer') { this.tone(1800, 60, 1.4, 0.18, 'sine'); this.noise(6000, 0.4, 0.2); this.burst(0.7); }
+    else if (type === 'soot') { this.hiss(1); this.tone(70, 30, 2.0, 0.25, 'sawtooth', 0.4); }
+    else if (type === 'drowned') { this.splash(1, true); this.splash(0.8, true); this.tone(200, 50, 2.2, 0.12, 'sine', 0.5); this.noise(400, 2, 0.12, 0.6); }
   },
+  // ---- Level 14 / 18 / 20 / 33 / 47 / 66 ----
+  /** 무지개 환각: 높낮이가 미친 듯이 오르내리는 소리 + 킥킥 웃음 */
+  trip(dur = 5) {
+    for (let i = 0; i < dur * 4; i++) this.tone(300 + Math.random() * 900, 200 + Math.random() * 1200, 0.25, 0.035, i % 2 ? 'square' : 'triangle', i * 0.25);
+    this.giggle(0.5); this.tone(80, 160, dur, 0.06, 'sawtooth');
+  },
+  /** 미믹: 사물함 문이 쾅 열렸다 닫힌다 */
+  snapShut(v = 1) { this.noise(500, 0.15, 0.5 * v); this.tone(160, 60, 0.25, 0.3 * v, 'square'); this.noise(2200, 0.06, 0.25 * v, 0.08); },
+  /** 마네킹: 플라스틱 관절이 삐걱 */
+  creak(v = 1, when = 0) { this.tone(420 + Math.random() * 200, 240, 0.12, 0.07 * v, 'square', when); this.noise(1800, 0.05, 0.08 * v, when); },
+  /** 모래 벌레: 땅울림 */
+  rumble(v = 1) { this.tone(48, 32, 0.9, 0.3 * v, 'sawtooth'); this.noise(90, 0.9, 0.3 * v); },
+  /** 응시자: 젖은 눈꺼풀이 떠지는 소리 + 낮은 웅웅거림 */
+  eyeOpen(v = 1) { this.noise(900, 0.4, 0.12 * v); this.tone(90, 120, 1.4, 0.12 * v, 'sine'); this.tone(180, 240, 1.4, 0.05 * v, 'triangle', 0.1); },
+  /** 그을음: 연기가 쉭쉭 */
+  hiss(v = 1) { this.noise(5200, 0.6, 0.18 * v); this.noise(1600, 0.4, 0.08 * v, 0.1); },
   // ---- Level ! 괴물 떼 ----
   hordeRoar(v) { this.tone(140 + Math.random() * 80, 60, 0.9, 0.12 * v, 'sawtooth'); this.noise(500, 0.8, 0.12 * v); if (Math.random() < 0.4) this.howl(v * 0.4); },
   hordeStomp(v) { this.noise(120 + Math.random() * 80, 0.12, 0.25 * v); },
@@ -320,6 +344,12 @@ export const Sound = {
     else if (type === 'camoCrawler') { this.screech(0.6); this.noise(800, 0.3, 0.2); }
     else if (type === 'duller') this.tone(200, 160, 1.0, 0.1, 'sine');
     else if (type === 'sheet') this.moan(1);
+    else if (type === 'mimic') this.snapShut(0.8);
+    else if (type === 'shadow') { this.whisper(1); this.tone(220, 110, 1.0, 0.1, 'sine'); }
+    else if (type === 'mannequin') { this.creak(1); this.creak(0.8, 0.15); }
+    else if (type === 'burrower') this.rumble(0.8);
+    else if (type === 'soot') this.hiss(0.8);
+    else if (type === 'drowned') this.splash(0.8, true);
     else this.growl();
   },
   /** 춤출 때 나오는 짧은 칩튠 (약 5초). spin = 춤 2 */

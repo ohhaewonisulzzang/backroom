@@ -10,7 +10,7 @@
  *
  * 목소리 흉내: 보이스 챗으로 들린 남의 말을 몇 초씩 녹음해 이 브라우저 메모리에만 둔다 (서버로 보내지 않음, 방을 나가면 지움).
  * 내 목소리는 녹음하지 않는다 — 자기 목소리를 자기가 다시 듣는 일은 없다 (남들 브라우저에선 내 목소리가 흉내 내진다).
- * 서버가 'mimic' 이벤트를 보내면 그 엔티티 위치에서 녹음 하나를 낮고 먹먹하게 틀어 준다.
+ * 서버가 'mimic' 이벤트를 보내면 그 엔티티 위치에서 녹음 하나를 원본 그대로 틀어 준다 (거리 볼륨·좌우만).
  *
  * 출력 장치: 블루투스 이어폰(갤럭시 버즈 등)의 마이크를 열면 Windows 가 이어폰을 "헤드폰(스테레오)" 에서
  * "헤드셋(핸즈프리)" 이라는 다른 출력 장치로 바꾼다. 게임 소리가 예전 장치로 계속 나가면 아무것도 안 들리므로,
@@ -279,17 +279,19 @@ export const Voice = {
     if (x && (x.quietT += dt) > 0.5) this.stopClip(key);
   },
   get hasClips() { return this.clips.length > 0; },
-  /** 녹음 하나를 엔티티 위치에서 튼다: vol 0~1 (거리), pan -1~1. 낮고 느리게 + 먹먹하게 */
+  /**
+   * 녹음 하나를 엔티티 위치에서 튼다: vol 0~1 (거리), pan -1~1.
+   * 원본 목소리 그대로 (속도·높낮이·음색을 바꾸지 않는다) — 거리 볼륨과 좌우만.
+   * 진짜 동료 목소리와 똑같은 출력 경로(out: 음성 볼륨 + 고정 증폭 + 리미터)로 내보내 크기도 같게 들린다.
+   */
   playMimic(vol, pan = 0) {
     if (!this.ctx || !this.clips.length || vol <= 0) return;
     const ctx = this.ctx, t = ctx.currentTime;
-    const src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain(), p = ctx.createStereoPanner();
+    const src = ctx.createBufferSource(), g = ctx.createGain(), p = ctx.createStereoPanner();
     src.buffer = this.clips[Math.floor(Math.random() * this.clips.length)];
-    src.playbackRate.value = 0.82 + Math.random() * 0.12;
-    lp.type = 'lowpass'; lp.frequency.value = 2200 + vol * 2500;
-    g.gain.value = Math.min(1.2, vol * 1.3) * this.settings().outputVolume;
+    g.gain.value = Math.min(1, vol);
     p.pan.value = Math.max(-1, Math.min(1, pan));
-    src.connect(lp).connect(g).connect(p).connect(ctx.destination);
+    src.connect(g).connect(p).connect(this.out);
     src.start(t);
   },
   hello() { this.ensureCtx(); this.signal?.('*', { t: 'hello' }); },

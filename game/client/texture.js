@@ -170,6 +170,49 @@ export const THEMES = {
     cap: [120, 122, 124], capLine: [130, 132, 134], capEdge: [60, 62, 64],
     paper: [150, 152, 150], stripe: [130, 132, 130], motif: [230, 190, 40], drip: [110, 112, 110], dripDark: [90, 92, 90],
     molding: [100, 102, 100], moldingHi: [170, 172, 170], base: [36, 36, 36], baseDark: [24, 24, 24] },
+  // Level 14: 버려진 병원 — 연두빛 리놀륨 타일, 위는 흰 타일 / 아래는 민트색 페인트
+  hospital: { ...DOOR, floorTiles: 16, wallStyle: 'hospital',
+    carpet: [176, 190, 180], carpetDark: [150, 166, 156], carpetLight: [194, 206, 196], stain: [140, 120, 96], stainDark: [110, 70, 60],
+    cap: [70, 78, 74], capLine: [80, 88, 84], capEdge: [32, 36, 34],
+    paper: [220, 226, 222], stripe: [176, 186, 180], motif: [120, 170, 150], drip: [150, 130, 100], dripDark: [120, 70, 60],
+    molding: [110, 130, 120], moldingHi: [200, 214, 206], base: [90, 120, 108], baseDark: [60, 84, 74] },
+  // Level 18: 추억의 골목 — 바랜 나무 바닥, 누렇게 바랜 꽃무늬 벽지 (어릴 때 살던 집 같은)
+  memory: { ...DOOR, parquet: true, wallStyle: 'floral',
+    carpet: [142, 106, 76], carpetDark: [122, 90, 64], carpetLight: [160, 122, 90], stain: [104, 76, 54], stainDark: [84, 60, 42],
+    cap: [70, 56, 46], capLine: [80, 64, 52], capEdge: [32, 24, 18],
+    paper: [214, 196, 160], stripe: [196, 176, 140], motif: [176, 120, 120], drip: [170, 146, 110], dripDark: [140, 118, 86],
+    molding: [120, 92, 66], moldingHi: [180, 150, 110], base: [110, 82, 58], baseDark: [76, 56, 38] },
+  // Level 20: 창고 — 회색 콘크리트 바닥(노란 안전선), 벽은 상자가 쌓인 철제 선반
+  warehouse: { ...DOOR, floorTiles: 32, wallStyle: 'shelves', safetyLines: true,
+    carpet: [118, 116, 110], carpetDark: [104, 102, 98], carpetLight: [132, 130, 124], stain: [90, 86, 80], stainDark: [72, 70, 66],
+    cap: [46, 52, 60], capLine: [56, 62, 70], capEdge: [20, 24, 28],
+    paper: [60, 66, 74], stripe: [40, 46, 54], motif: [200, 150, 40], drip: [90, 90, 90], dripDark: [70, 70, 70],
+    molding: [70, 80, 96], moldingHi: [130, 140, 156], base: [56, 62, 72], baseDark: [36, 40, 48] },
+  // Level 33: 모래 폭풍 — 바람 무늬 모래 바닥, 벽은 사암 절벽
+  desert: { ...DOOR, wallStyle: 'rock', sandRipples: true,
+    carpet: [200, 168, 110], carpetDark: [184, 152, 98], carpetLight: [216, 186, 128], stain: [168, 136, 86], stainDark: [150, 118, 72],
+    cap: [150, 108, 70], capLine: [164, 120, 80], capEdge: [90, 60, 36],
+    paper: [190, 140, 92], stripe: [156, 108, 68], motif: [214, 168, 116], drip: [150, 110, 70], dripDark: [124, 88, 54],
+    molding: [160, 116, 74], moldingHi: [214, 170, 120], base: [140, 100, 64], baseDark: [104, 72, 44] },
+  // Level 47: 미술관 — 반들반들한 대리석 체크 바닥, 붉은 벽에 금테 액자
+  gallery: { ...DOOR, floorTiles: 16, checker: true, wallStyle: 'paintings',
+    carpet: [222, 216, 204], carpetDark: [70, 66, 62], carpetLight: [240, 236, 226], stain: [190, 184, 170], stainDark: [160, 154, 140],
+    cap: [60, 30, 32], capLine: [70, 36, 38], capEdge: [28, 12, 14],
+    paper: [130, 40, 46], stripe: [110, 32, 38], motif: [210, 170, 70], drip: [100, 30, 34], dripDark: [80, 22, 26],
+    molding: [180, 140, 60], moldingHi: [240, 210, 120], base: [70, 30, 32], baseDark: [44, 18, 20] },
+  // Level 66: 죽은 쇼핑몰 — 광택 나는 흰 타일, 벽은 셔터 내린 가게와 깨진 진열창
+  mall: { ...DOOR, floorTiles: 16, wallStyle: 'shops',
+    carpet: [200, 200, 196], carpetDark: [180, 180, 176], carpetLight: [216, 216, 212], stain: [160, 156, 148], stainDark: [130, 126, 118],
+    cap: [80, 84, 92], capLine: [90, 94, 102], capEdge: [36, 38, 44],
+    paper: [150, 156, 166], stripe: [110, 116, 126], motif: [80, 160, 200], drip: [120, 120, 120], dripDark: [96, 96, 96],
+    molding: [120, 126, 136], moldingHi: [200, 206, 214], base: [90, 94, 102], baseDark: [60, 62, 70] },
+  // Level 373: 흐릿한 강 — 젖은 나무 판자 강가, 이끼 낀 바위, 탁한 청록색 깊은 물
+  river: { ...DOOR, parquet: true, wallStyle: 'rock',
+    carpet: [96, 78, 56], carpetDark: [80, 64, 46], carpetLight: [112, 92, 66], stain: [70, 60, 46], stainDark: [56, 48, 36],
+    cap: [52, 60, 56], capLine: [60, 70, 64], capEdge: [24, 28, 26],
+    paper: [80, 92, 84], stripe: [58, 70, 62], motif: [96, 120, 90], drip: [70, 90, 80], dripDark: [50, 66, 58],
+    molding: [66, 76, 70], moldingHi: [110, 124, 116], base: [56, 64, 60], baseDark: [38, 44, 40],
+    deep: [26, 54, 60], deepDark: [18, 40, 46], deepHi: [70, 110, 112] },
   // Level 3: 어두운 전기실
   electrical: { ...DOOR,
     carpet: [70, 74, 78], carpetDark: [60, 64, 68], carpetLight: [84, 88, 92], stain: [48, 50, 54], stainDark: [36, 38, 42],
@@ -310,6 +353,66 @@ export function buildMapTexture(level) {
           else if (fy >= fh - 4) col = (x === 10 || x === 20) ? NEON[(k + 1) % 4] : C.molding;  // 조작판 + 버튼
           put(ox + x, oy + y, col, Math.floor(n / 2));
         }
+        else if (C.wallStyle === 'hospital') {
+          // 병원: 위쪽은 흰 타일, 아래 절반은 민트색 페인트 + 손잡이 레일
+          const fy = y - capH, fh = P - capH - 6;
+          let col = fy < fh * 0.45 ? (x % 6 === 0 || fy % 6 === 0 ? C.stripe : C.paper) : C.motif;
+          if (fy === Math.round(fh * 0.45) || fy === Math.round(fh * 0.45) + 1) col = C.moldingHi;
+          for (const dr of drips) if (x === dr.x && fy < dr.len) col = C.dripDark;
+          put(ox + x, oy + y, col, Math.floor(n / 2));
+        }
+        else if (C.wallStyle === 'floral') {
+          // 바랜 꽃무늬 벽지: 작은 꽃(4잎) 엇갈림 + 세로 줄
+          const fy = y - capH, lx = (x + (Math.floor(fy / 8) % 2) * 4) % 8, ly = fy % 8;
+          let col = x % 16 === 0 ? C.stripe : C.paper;
+          if ((ly === 3 && (lx === 3 || lx === 5)) || ((ly === 2 || ly === 4) && lx === 4)) col = C.motif;
+          if (ly === 3 && lx === 4) col = [200, 170, 90];
+          for (const dr of drips) if (x >= dr.x && x <= dr.x + 1 && fy < dr.len) col = C.dripDark;
+          put(ox + x, oy + y, col, n);
+        }
+        else if (C.wallStyle === 'shelves') {
+          // 철제 선반 3단 + 칸마다 다른 상자
+          const fy = y - capH, fh = P - capH - 6, shelfH = Math.floor(fh / 3), row = Math.floor(fy / shelfH), ry = fy % shelfH;
+          let col = C.paper;
+          if (x < 2 || x > P - 3) col = C.motif;                                         // 노란 기둥
+          else if (ry >= shelfH - 2) col = ry === shelfH - 2 ? C.moldingHi : C.molding;  // 선반 판
+          else {
+            const box = ((tx * 5 + ty * 3 + row * 7) % 4), bx = (x + row * 5) % 12;
+            if (box && bx > 1 && bx < 11 && ry > 1) {
+              const BOX = [[176, 132, 76], [150, 110, 62], [196, 156, 96]];
+              col = BOX[(box + row) % 3];
+              if (ry === 2) col = [col[0] + 20, col[1] + 18, col[2] + 14];
+              if (bx === 6) col = [210, 196, 150];                                      // 테이프
+            } else col = C.stripe;
+          }
+          put(ox + x, oy + y, col, Math.floor(n / 2));
+        }
+        else if (C.wallStyle === 'paintings') {
+          // 붉은 벽지 + 금테 액자 (칸마다 다른 그림: 풍경 / 초상 / 추상)
+          const fy = y - capH, fh = P - capH - 6;
+          let col = (x + fy) % 7 === 0 ? C.stripe : C.paper;
+          const kind = (tx * 7 + ty * 13) % 5;
+          if (kind < 3 && x > 5 && x < P - 6 && fy > 2 && fy < fh - 2) {
+            const fx = x - 6, fyy = fy - 3, fw = P - 12, fhh = fh - 5;
+            if (fx < 2 || fx >= fw - 2 || fyy < 2 || fyy >= fhh - 2) col = (fx + fyy) % 3 ? C.motif : C.moldingHi;   // 금테
+            else if (kind === 0) col = fyy < fhh * 0.5 ? [90, 130, 170] : fyy < fhh * 0.7 ? [70, 110, 60] : [60, 90, 50];          // 풍경
+            else if (kind === 1) col = Math.hypot(fx - fw / 2, fyy - fhh * 0.45) < 4 ? [200, 170, 140] : fyy > fhh * 0.7 ? [40, 30, 30] : [70, 60, 50];   // 초상
+            else col = (fx * 3 + fyy * 2) % 9 < 3 ? [30, 60, 120] : (fx + fyy) % 5 === 0 ? [200, 60, 50] : [220, 210, 180];          // 추상
+          }
+          put(ox + x, oy + y, col, Math.floor(n / 2));
+        }
+        else if (C.wallStyle === 'shops') {
+          // 가게 앞면: 위는 색 바랜 간판, 아래는 내린 셔터 또는 깨진 진열창
+          const fy = y - capH, fh = P - capH - 6, kind = (tx * 3 + ty * 7) % 3;
+          const SIGN = [[180, 70, 60], [60, 120, 170], [200, 160, 60]];
+          let col;
+          if (fy < 4) col = (x % 5 === 0 && fy === 2) ? [240, 236, 220] : SIGN[(tx + ty) % 3];
+          else if (x < 2 || x > P - 3) col = C.stripe;
+          else if (kind === 0) col = fy % 3 === 0 ? C.stripe : C.paper;                                         // 셔터
+          else if (kind === 1) { col = (x + fy) % 11 === 0 ? [180, 210, 220] : [24, 30, 38]; if (Math.abs((x - 16) - (fy - 10) * 0.8) < 1) col = [150, 180, 190]; }   // 진열창 + 금
+          else col = fy > fh - 6 ? C.molding : ((x >> 2) + (fy >> 2)) % 2 ? [40, 44, 52] : [30, 34, 40];       // 어두운 매장 입구
+          put(ox + x, oy + y, col, Math.floor(n / 2));
+        }
         else if (C.wallStyle === 'tiles') {
           const fy = y - capH;
           put(ox + x, oy + y, x % 8 === 0 || fy % 8 === 0 ? C.stripe : C.paper, Math.floor(n / 2));
@@ -333,6 +436,19 @@ export function buildMapTexture(level) {
       continue;
     }
 
+    // 깊은 물 (보트로만 다닌다): 탁한 물결 무늬, 땅과 닿은 곳엔 하얀 물거품
+    if (t === T.DEEP) {
+      const D = C.deep || [26, 54, 60], DD = C.deepDark || [18, 40, 46], DH = C.deepHi || [70, 110, 112];
+      for (let y = 0; y < P; y++) for (let x = 0; x < P; x++) {
+        const gx = tx * P + x, gy = ty * P + y, w = Math.round(Math.sin(gx * 0.12 + gy * 0.05) * 2 + Math.sin(gy * 0.3) * 1);
+        let col = (gy + w) % 7 === 0 ? DH : (gx + gy * 2) % 13 < 5 ? DD : D;
+        const shore = (map.get(tx - 1, ty) !== T.DEEP && x < 2) || (map.get(tx + 1, ty) !== T.DEEP && x > P - 3) ||
+          (map.get(tx, ty - 1) !== T.DEEP && y < 3) || (map.get(tx, ty + 1) !== T.DEEP && y > P - 3);
+        if (shore && rng() < 0.55) col = [176, 196, 190];
+        put(ox + x, oy + y, col, Math.floor((rng() - 0.5) * 6));
+      }
+      continue;
+    }
     // 바닥: 축축한 카펫 (짜임 무늬 + 얼룩)
     const stains = [];
     if (rng() < 0.14) stains.push({ x: 6 + rng() * 20, y: 6 + rng() * 20, r: 3 + rng() * 7 });
@@ -357,6 +473,17 @@ export function buildMapTexture(level) {
       if (C.parkingLines) {
         const gx = tx * P + x, gy = ty * P + y;
         if ((gx % (P * 3) < 2 && (gy % (P * 5)) < P * 2) || ((gy % (P * 5)) === P * 2 && gx % (P * 3) < P * 2)) put(ox + x, oy + y, [196, 196, 186], Math.floor((rng() - 0.5) * 10));
+      }
+      // 창고: 노란 안전선 (큰 격자)
+      if (C.safetyLines) {
+        const gx = tx * P + x, gy = ty * P + y;
+        if ((gx % (P * 4) < 2 || gy % (P * 4) < 2) && ((gx + gy) >> 3) % 2) put(ox + x, oy + y, [200, 160, 40], Math.floor((rng() - 0.5) * 10));
+      }
+      // 사막: 바람에 생긴 모래 물결
+      if (C.sandRipples) {
+        const gx = tx * P + x, gy = ty * P + y, w = Math.round(Math.sin(gx * 0.08 + gy * 0.02) * 3);
+        if ((gy + w) % 9 === 0) put(ox + x, oy + y, C.carpetDark, Math.floor((rng() - 0.5) * 6));
+        else if ((gy + w) % 9 === 1) put(ox + x, oy + y, C.carpetLight, Math.floor((rng() - 0.5) * 6));
       }
       // 오락실 카펫: 네온 물결 무늬
       if (C.neonCarpet) {

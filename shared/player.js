@@ -20,6 +20,7 @@ export class PlayerState {
     this.vc = 0;               // 보이스 챗: 0 = 안 씀, 1 = 마이크 켜짐, 2 = 마이크 꺼짐 (이름표 옆 아이콘)
     this.held = -1;            // 손에 든 가방 칸 (클라이언트가 보냄). 다른 사람에겐 그 칸의 아이템 종류(hold)로 보인다
     this.nvUntil = 0;          // 서버 전용: 야간 투시경을 쓰고 있는 시각까지 (얼굴에 투시경이 보인다)
+    this.boat = false;         // 보트를 타고 있음 (Level 373) — 물 위로만 다닌다
   }
 
   get alive() { return this.status === 'alive'; }
@@ -46,6 +47,7 @@ export class PlayerState {
       vc: this.vc,
       hold: (this.held >= 0 && this.inv?.[this.held]?.type) || null,   // 손에 든 아이템 종류
       nv: this.nvUntil > Date.now() ? 1 : 0,                            // 야간 투시경 착용 중
+      boat: this.boat ? 1 : 0,                                          // 보트를 타고 있음
     };
   }
 

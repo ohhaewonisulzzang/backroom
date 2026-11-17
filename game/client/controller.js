@@ -1,5 +1,5 @@
 import { CONFIG, TS, T, ITEM_TYPES } from '../../shared/config.js';
-import { moveEntity } from '../../shared/physics.js';
+import { moveEntity, passMap } from '../../shared/physics.js';
 import { Input } from './input.js';
 import { Sound } from './sound.js';
 import { angleDiff } from '../../shared/utils.js';
@@ -19,7 +19,7 @@ export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   if (moving) { const l = Math.hypot(ix, iy); ix /= l; iy /= l; } else { ix = iy = 0; } // 방향만 쓰고 속도는 걷기/달리기로
 
   p.crouching = Input.held('crouch') || (T.active && T.crouch);   // 웅크리기: 느리지만 발소리가 나지 않음
-  const wantSprint = moving && !p.crouching && (Input.held('sprint') || (T.active && T.sprint));
+  const wantSprint = moving && !p.crouching && !opts.noSprint && (Input.held('sprint') || (T.active && T.sprint));   // '달리기 금지' 모드
   if (p.boostT > 0) p.boostT -= dt;
   if (wantSprint && !p.exhausted && p.stamina > 0) {
     p.sprinting = true;
@@ -34,14 +34,16 @@ export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   const slow = map.get(Math.floor(p.x / TS), Math.floor(p.y / TS)) === T.SLOW ? CONFIG.RUN.SLOW : 1;   // 웅덩이/잔해
   if (p.adrenalineT > 0) p.adrenalineT -= dt;
   const rush = p.adrenalineT > 0 ? ITEM_TYPES.adrenaline.speed : 1;            // 아드레날린 주사 효과 중
-  const speed = (p.crouching ? C.CROUCH : p.sprinting ? C.SPRINT : C.WALK) * slow * rush;
+  const R = CONFIG.RIVER;
+  const speed = p.boat ? (p.crouching ? R.ROW_QUIET : p.sprinting ? R.ROW_FAST : R.ROW)                  // 보트: 조용히 / 세게 / 보통 젓기
+    : (p.crouching ? C.CROUCH : p.sprinting ? C.SPRINT : C.WALK) * slow * rush;
   const bx = p.x, by = p.y;
-  moveEntity(p, ix * speed * dt, iy * speed * dt, C.RADIUS, map);
+  moveEntity(p, ix * speed * dt, iy * speed * dt, C.RADIUS, passMap(map, p.boat));   // 걸으면 깊은 물이, 보트면 땅이 벽
   const moved = Math.hypot(p.x - bx, p.y - by);
   p.moving = moved > 0.1;
   p.walkPhase += moved * 0.15;
   p.stepAcc += moved;
-  if (p.stepAcc > (p.sprinting ? 46 : 36)) { p.stepAcc = 0; if (!p.crouching) Sound.step(p.sprinting); }
+  if (p.stepAcc > (p.sprinting ? 46 : 36)) { p.stepAcc = 0; if (p.boat) Sound.splash(p.crouching ? 0.06 : p.sprinting ? 0.3 : 0.16); else if (!p.crouching) Sound.step(p.sprinting); }   // 보트: 노 젓는 물소리
 
   if (T.active) {
     // 터치: 오른쪽 스틱으로 비추는 방향. 스틱을 놓고 있으면 걷는 방향으로 부드럽게 돌아간다 (서 있으면 그대로)

@@ -115,6 +115,30 @@ export const CONFIG = {
     sheet:       { chase: 58, sense: 11 * 48, flee: 120, scared: 2.5 },
     // 파티 푸퍼: 해치지 않는다. E 로 말을 걸면 남은 열쇠/단말기 하나까지 앞장서 데려가고, 그 열쇠를 누가 먹으면 사라진다
     partyPooper: { speed: 128, wait: 3.2 * 48, talk: 58 },
+    // 미믹 (엔티티 400, Level 130): 사물함인 척 벽에 붙어 있다. 그 안에 숨으려 하면 삼킨다. 바로 앞에 오래(linger 초) 서 있어도 덮친다
+    //   reach: 덮칠 때 사물함에서 손(혀)이 닿는 거리
+    mimic:       { lure: 1.3 * 48, linger: 2.4, lunge: 260, reach: 1.6 * 48, biteTime: 0.9 },
+    // 스토커 (엔티티 150, Level 18) — 코드 키는 shadow: wake 초 뒤 깨어나 가장 가까운 사람의 "지나간 길"을 그대로 밟아 온다 (걷기 138 보다 조금 느림).
+    //   멈춰 있거나 웅크려 느리게 가거나 되돌아가면 따라잡힌다. 숨으면 길을 잃고 흩어졌다가 regroup 초 뒤 멀리서 다시 나타난다
+    shadow:      { follow: 124, wake: 12, regroup: 7, step: 10, maxTrail: 900 },
+    // 돌페이스 (엔티티 34, Level 520) — 코드 키는 mannequin: sense 안의 누군가가 움직이고 있을 때만 움직인다 (걷기보다 조금 느림). 모두 멈추면 그 자리에 굳는다.
+    //   2칸 안으로 다가오면 lunge 속도로 확 달려든다
+    mannequin:   { chase: 128, lunge: 235, sense: 9 * 48 },
+    // 공포증 지네 (엔티티 134, Level 46) — 코드 키는 burrower: 땅속을 헤엄친다(벽 무시, 무해). 발소리를 듣고 그 자리로 와서 rise 초 동안 땅이 들썩인 뒤
+    //   bite 초 동안 솟구쳐 문다. 그 뒤 sink 초 동안 가라앉는다. 웅크리면 발소리가 안 난다
+    burrower:    { roam: 60, hunt: 172, hearWalk: 5.5 * 48, hearSprint: 9 * 48, rise: 0.85, bite: 0.6, sink: 1.6, biteR: 1.1 * 48 },
+    // 아르고스 (엔티티 74, Level 57) — 코드 키는 gazer: 벽의 거대한 눈. 감겨 있다가(closed 초) warn 초 동안 떠지고, open 초 동안 노려본다.
+    //   눈이 떠 있을 때 시야(range) 안에서 움직이는 사람은 grace 초 뒤 죽는다. 웅크려 움직여도 들킨다
+    gazer:       { closed: [6, 11], warn: 1.5, open: 3.4, range: 11 * 48, grace: 0.3 },
+    // 망령 (엔티티 112, Level 33) — 코드 키는 soot: 주변(aura)의 불빛을 먹는 검은 연기. 가까운 사람(sense)에게 길을 따라 다가온다.
+    //   손전등을 비추면 물러난다 (scared 초). aura 안은 어둠 취급 — 정신력이 빨리 줄고 스마일러가 들어온다
+    soot:        { patrol: 46, chase: 122, sense: 12 * 48, aura: 3.6 * 48, scared: 2.2, flee: 150 },
+    // 익사자 (엔티티 232, Level 373): 깊은 물속에만 있다. 보트 젓는 소리를 듣고 따라온다
+    //   (세게 저으면 멀리서, 보통은 hear, 웅크려 조용히 저으면 hearQuiet 안에서만). 보트 strike 거리까지 오면
+    //   surface 초 동안 손이 먼저 올라오고(예고) → grab 초 동안 끌어당긴다(reach) → sink 초 동안 가라앉는다.
+    //   손전등을 비추면 바로 가라앉는다 (sinkLit 초). 땅 위나 보트에서 내린 사람은 건드리지 못한다
+    drowned:     { roam: 50, swim: 108, hear: 6 * 48, hearFast: 10 * 48, hearQuiet: 2.2 * 48, strike: 1.5 * 48,
+                   surface: 0.9, grab: 0.8, sink: 2.2, sinkLit: 3, reach: 1.1 * 48, lunge: 150 },
   },
 
   // 감정 표현 (, 키) — 목소리도 소리라서 귀가 밝은 엔티티는 듣는다
@@ -151,6 +175,8 @@ export const CONFIG = {
   BLACKOUT: { every: 16, warn: 3, dur: 9, smilerSpeed: 330, sight: 12 * 48 },
   // 끝없는 도시 (Level 11): 세로로 긴 맵 크기(타일). 노클립 존에서 E 를 누를 수 있는 거리
   CITY: { W: 33, H: 161, NOCLIP_DIST: 1.4 * 48 },
+  // 흐릿한 강 (Level 373): 가로로 긴 강 맵(타일). 보트 속도 (보통 / 세게 젓기(스태미나) / 조용히 젓기), 강가에서 E 로 탈 수 있는 거리
+  RIVER: { W: 131, H: 37, ROW: 118, ROW_FAST: 172, ROW_QUIET: 62, BOARD_DIST: 1.4 * 48 },
 
   // 처음 Level 0 에 들어갈 때 나오는 오프닝 (친구들과 촬영하다 노클립)
   STORY: { DURATION: 19.6 },
@@ -266,27 +292,65 @@ export const LEVELS = [
     mission: { type: 'survive', time: 150, kind: 'elevator' },
     entities: { duller: 4, sheet: 4 }, items: { almondWater: 9 },
     lights: { DARK_ZONES: 5, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.1, FLICKER_CHANCE: 0.25 } },
+  // Level 18: 추억. 어린 시절 집 같은 복도. 스토커가 내가 지나간 길을 그대로 밟아 온다 — 멈추지 말고, 왔던 길로 돌아가지 마라
+  { id: 0, label: '18', name: 'MEMORY LANE', theme: 'memory', lightTint: '255,220,170',
+    mission: { type: 'keys', count: 5 }, puzzles: ['memory', 'oneStroke'],
+    entities: { shadow: 2, wanderer: 2 }, items: { staminaDrink: 8 },
+    lights: { DARK_ZONES: 4, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.08, FLICKER_CHANCE: 0.15 } },
+  // Level 33: 무한한 쇼핑몰. 망령이 지나가면 불이 죽고, 그 어둠 속으로 스마일러가 따라 들어온다 — 손전등으로 쫓아내라
+  { id: 0, label: '33', name: 'THE INFINITE MALL', theme: 'mall', lightTint: '230,240,255',
+    mission: { type: 'activate', count: 3, kind: 'breaker', turns: 3 },
+    entities: { soot: 3, smiler: 3 }, items: { almondWater: 8 },
+    lights: { DARK_ZONES: 3, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.08, FLICKER_CHANCE: 0.2 } },
   // Level 37: 풀룸. 하얀 타일 수영장. 탁한 초록 물엔 하이드로리티스 플레그, 클럼프는 물에 못 들어온다
   { id: 17, label: '37', name: 'THE POOLROOMS', theme: 'pool', puddles: 0.08, toxic: 0.4, hazards: ['hydrolitis'],
     mission: { type: 'activate', count: 4, kind: 'drain', turns: 3 },
     entities: { clump: 2 }, items: { almondWater: 8 },
     lights: { DARK_ZONES: 3, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.05, FLICKER_CHANCE: 0.1 } },
+  // Level 46: 아라비아 사막. 공포증 지네가 모래 밑에서 발소리를 듣는다 — 웅크려 걷고, 땅이 들썩이면 바로 비켜라
+  { id: 0, label: '46', name: 'ARABIAN DESERT', theme: 'desert', lightTint: '255,210,150',
+    mission: { type: 'activate', count: 3, kind: 'well', turns: 3 },
+    entities: { burrower: 3 }, items: { firecracker: 5, almondWater: 8 },
+    lights: { SPACING: 3, DARK_ZONES: 3, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.05, FLICKER_CHANCE: 0.06 } },
   // Level 52: 학교 복도. 파티고어가 복도를 지키고 어둠 속엔 스마일러. 교실 단말기 4대의 시험을 통과해야 한다
   //   파티 푸퍼(유일하게 도와주는 엔티티)에게 E 를 누르면 남은 단말기 하나까지 데려다준다
   { id: 18, label: '52', name: 'SCHOOL HALLS', theme: 'school',
     mission: { type: 'keys', count: 4, kind: 'exams' }, puzzles: ['oneStroke', 'memory', 'oneStroke', 'memory'],
     entities: { partygoer: 4, smiler: 2, partyPooper: 3 },
     lights: { DARK_ZONES: 4, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.12, FLICKER_CHANCE: 0.3 } },
+  // Level 57: 주관 미술관. 벽에 박힌 아르고스의 눈이 가끔 떠진다 — 눈이 떠 있을 땐 그 자리에서 멈춰라
+  { id: 0, label: '57', name: 'SUBJECTIVE ART GALLERY', theme: 'gallery',
+    mission: { type: 'keys', count: 5 }, puzzles: ['oneStroke', 'memory'],
+    entities: { gazer: 7, wanderer: 1 },
+    lights: { DARK_ZONES: 2, DARK_ZONE_RADIUS: [4, 5], BROKEN_CHANCE: 0.04, FLICKER_CHANCE: 0.08 } },
   // Level 94: 모션. 만화 같은 마을. 밤이 오면 애니메이션이 깨어난다 — 사물함(옷장)에 숨어라. 애니메이션 킹은 눈을 떼면 다가온다
   { id: 19, label: '94', name: 'MOTION', theme: 'motion', night: true,
     mission: { type: 'survive', time: 140, kind: 'motion' },
     entities: { animation: 6, animatedKing: 1 },
     lights: { DARK_ZONES: 2, DARK_ZONE_RADIUS: [4, 5], BROKEN_CHANCE: 0.03, FLICKER_CHANCE: 0.04 } },
+  // Level 130: 웰본 병원. 사물함 중 몇 개는 미믹이다 — 하운드에게 쫓기다 아무 사물함에나 숨으면 먹힌다.
+  //   lockers: 사물함 수를 바꾼다 (미믹이 섞여 들어갈 자리를 넉넉히)
+  { id: 0, label: '130', name: 'WELLBORN HOSPITAL', theme: 'hospital', lightTint: '210,255,230', lockers: 56,
+    mission: { type: 'deliver', count: 4, kind: 'meds' },
+    entities: { mimic: 9, hound: 2 }, items: { camera: 4 },
+    lights: { DARK_ZONES: 5, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.14, FLICKER_CHANCE: 0.35 } },
   // Level 188: 창문의 안뜰. 넓은 안뜰엔 아라네아 멤브리, 벽의 창문엔 창문들. 좁은 복도로 다녀라
   { id: 20, label: '188', name: 'COURTYARD OF WINDOWS', theme: 'courtyard', roads: 12,
     mission: { type: 'keys', count: 5 }, puzzles: ['memory', 'oneStroke'],
     entities: { aranea: 2, windows: 8 },
     lights: { DARK_ZONES: 4, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.1, FLICKER_CHANCE: 0.15 } },
+  // Level 373: 흐릿한 강. 안개 낀 넓은 강을 보트로 건너 맞은편 강가의 출구로 간다.
+  //   강가에서 E 로 보트를 타고, 맞은편 강가에서 E 로 내린다. 물속의 익사자는 젓는 소리를 듣는다 — 조용히 저어라
+  //   haze: 안개 (시야가 줄고 뿌옇다)
+  { id: 0, label: '373', name: 'THE HAZED RIVER', theme: 'river', layout: 'river', haze: true, lightTint: '200,220,215',
+    mission: { type: 'cross' },
+    entities: { drowned: 5 }, items: { almondWater: 4, flare: 3, camera: 2 },
+    lights: { SPACING: 4, DARK_ZONES: 3, DARK_ZONE_RADIUS: [4, 7], BROKEN_CHANCE: 0.2, FLICKER_CHANCE: 0.2 } },
+  // Level 520: 창고. 끝없는 철제 선반. 돌페이스는 누가 움직일 때만 움직인다 — 다가오면 모두 멈춰라
+  { id: 0, label: '520', name: 'THE WAREHOUSE', theme: 'warehouse',
+    mission: { type: 'deliver', count: 5, kind: 'boxes' },
+    entities: { mannequin: 6 },
+    lights: { SPACING: 3, DARK_ZONES: 4, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.1, FLICKER_CHANCE: 0.12 } },
   // Level 974: 키티의 집. 흩어진 장난감을 모아 장난감 상자에 넣어라. 키티에게서 눈을 떼지 마라
   { id: 21, label: '974', name: "KITTY'S HOUSE", theme: 'kitty',
     mission: { type: 'deliver', count: 6, kind: 'toys' },
@@ -311,6 +375,7 @@ export const LEVELS = [
     entities: { duller: 3, smiler: 4 }, items: { almondWater: 10, camera: 4 },
     lights: { DARK_ZONES: 3, DARK_ZONE_RADIUS: [4, 6], BROKEN_CHANCE: 0.04, FLICKER_CHANCE: 0.08 } },
 ];
+LEVELS.forEach((L, i) => { L.id = i; });   // id = 순서 번호 (중간에 레벨을 끼워 넣어도 번호를 손으로 고칠 필요 없게)
 
 /**
  * 미션 (출구 여는 조건)
@@ -345,12 +410,17 @@ export const MISSION_TEXT = {
   boiler:    { unit: '압력 밸브', goal: n => t('보일러 압력 밸브 {n}개를 잠가라 — 야수가 돌진하면 옆으로 피하라', { n }) },
   pump:      { unit: '배수 펌프', goal: n => t('벽의 배수 펌프 {n}개를 돌려라 — 물속에선 조용히 움직여라', { n }) },
   cabinets:  { unit: '오락기', goal: n => t('오락기 {n}대를 클리어해 집으로 가는 문을 열어라', { n }) },
+  meds:      { unit: '약품', depot: '약품 카트', goal: n => t('약품 {n}개를 찾아 시작 지점 약품 카트에 넣어라 — 아무 사물함에나 숨지 마라', { n }) },
+  boxes:     { unit: '상자', depot: '출고대', goal: n => t('택배 상자 {n}개를 찾아 시작 지점 출고대에 올려라 — 돌페이스가 보이면 멈춰라', { n }) },
+  well:      { unit: '우물 펌프', goal: n => t('우물 펌프 {n}개를 돌려라 — 땅이 들썩이면 바로 비켜라', { n }) },
+  breaker:   { unit: '차단기', goal: n => t('벽의 차단기 {n}개를 올려라 — 불이 죽으면 손전등을 비춰라', { n }) },
   elevator:  { unit: '엘리베이터', goal: s => t('엘리베이터가 올 때까지 {s}초 버텨라 — 숨어만 있으면 시간이 멈춘다', { s }) },
   motion:    { unit: '탈출', goal: s => t('{s}초 버텨라 — 밤이 오면 옷장(사물함)에 숨어라', { s }) },
   checkout:  { unit: '체크아웃', goal: s => t('체크아웃 시간까지 {s}초 버텨라 — 숨어만 있으면 시간이 멈춘다', { s }) },
   dawn:      { unit: '새벽', goal: s => t('해가 뜰 때까지 {s}초 버텨라 — 숨어만 있으면 시간이 멈춘다', { s }) },
   run:       { unit: '', goal: () => t('오른쪽 끝까지 달려라') },
   noclip:    { unit: '', goal: () => t('도시 맨 위 끝의 노클립 존을 찾아 E 를 눌러라 — 넓은 도로엔 눈알이 걸어 다닌다') },
+  cross:     { unit: '', goal: () => t('강가에서 E 로 보트를 타고 안개 낀 강을 건너라 — 물속의 익사자가 젓는 소리를 듣는다') },
 };
 export const missionOf = i => { const L = levelInfo(i); return { type: 'keys', count: CONFIG.KEY_COUNT, ...L.mission }; };
 export const missionKind = m => m.kind || m.type;
@@ -377,10 +447,11 @@ export const ITEM_TYPES = {
 export const levelInfo = i => LEVELS[Math.max(0, Math.min(LEVELS.length - 1, i | 0))];
 
 export const TS = CONFIG.TILE;
-export const T = Object.freeze({ FLOOR: 0, WALL: 1, EXIT: 2, SLOW: 3 });   // SLOW = 웅덩이/잔해 (지나갈 수 있지만 느려짐)
+export const T = Object.freeze({ FLOOR: 0, WALL: 1, EXIT: 2, SLOW: 3, DEEP: 4 });   // SLOW = 웅덩이/잔해 (지나갈 수 있지만 느려짐), DEEP = 깊은 물 (보트로만 다닌다, 시야는 막지 않는다)
 export const ENTITY_TYPES = ['wanderer', 'howler', 'smiler', 'skinStealer', 'hound', 'partygoer', 'deathmoth', 'wretch', 'scratcher',
   'windows', 'watch', 'faceling', 'clump', 'animation', 'animatedKing', 'aranea', 'kitty', 'partyPooper',
-  'beast', 'seaThing', 'crawler', 'deathrat', 'jackLantern', 'camoCrawler', 'duller', 'sheet'];
+  'beast', 'seaThing', 'crawler', 'deathrat', 'jackLantern', 'camoCrawler', 'duller', 'sheet',
+  'mimic', 'shadow', 'mannequin', 'burrower', 'gazer', 'soot', 'drowned'];
 /** 화면 표시용 레벨 이름 ("LEVEL 0", "LEVEL FUN =)") */
 export const levelLabel = i => { const L = LEVELS[Math.max(0, Math.min(LEVELS.length - 1, i | 0))]; return L.label ? `LEVEL ${L.label}` : `LEVEL ${L.id}`; };
 /** 방호복 색 (대기방에서 고름). 방랑자/스킨 스틸러도 이 중 하나를 랜덤으로 입는다 */
@@ -400,6 +471,24 @@ export const randomSuit = () => PLAYER_COLORS[Math.floor(Math.random() * PLAYER_
  *  moreEntities — 엔티티가 1.5배 많다
  *  moreItems    — 아이템이 2배 많이 떨어져 있다
  *  noFlashlight — 손전등을 켤 수 없다
+ *  noHide       — 사물함·탁자에 숨을 수 없다
+ *  infiniteStamina — 스태미나가 줄지 않는다
+ *  thickFog     — 시야가 절반으로 줄고 안개가 짙다
+ *  noMinimap    — 미니맵이 없다
+ *  noItems      — 바닥에 아이템이 하나도 없다
+ *  shuffleLevels — 탈출할 때마다 다음 레벨이 무작위 (마지막 레벨은 모든 레벨을 지난 뒤에)
+ *  slowEntities — 엔티티가 25% 느리다 (쉬운 모드)
+ *  paranoia     — 정신력과 상관없이 가끔 속삭임과 가짜 발소리가 들린다
+ *  photographer — 모두 무한 카메라를 들고 시작한다. 그 레벨의 괴물(방랑자·파티 푸퍼 제외)을 한 번 찍어야 출구가 열린다
+ *  oneItem      — 가방이 한 칸. 처음 주운 아이템을 무한히 쓰지만 버릴 수 없다
+ *  noSprint     — 달릴 수 없다
+ *  timeLimit    — 레벨마다 MODE_RULES.TIME_LIMIT 초 안에 탈출하지 못하면 모두 죽는다
+ *  permaDeath   — 죽은 사람은 다음 레벨에서도 관전만 한다. 모두 죽으면 Level 0 부터 다시
+ *  speedrun     — 화면에 전체 시간과 이번 레벨 시간이 표시된다
+ *  itemRain     — MODE_RULES.ITEM_RAIN 초마다 살아 있는 사람 근처에 아이템이 떨어진다
+ *  battery      — 손전등 배터리가 닳는다 (끄면 충전된다)
+ *  entityRadar  — 미니맵에 가까운 괴물이 빨간 점으로 보인다
+ *  calm         — 정신력이 줄지 않는다
  */
 export const MODES = [
   { id: 'mimic', name: '목소리 흉내', desc: '엔티티가 녹음된 목소리를 흉내 낸다', on: true },
@@ -411,5 +500,32 @@ export const MODES = [
   { id: 'moreEntities', name: '엔티티 증가', desc: '엔티티가 1.5배 많이 나온다', on: false },
   { id: 'moreItems', name: '아이템 풍족', desc: '아이템이 2배 많이 떨어져 있다', on: false },
   { id: 'noFlashlight', name: '손전등 금지', desc: '손전등을 켤 수 없다', on: false },
+  { id: 'noHide', name: '숨기 금지', desc: '사물함·탁자에 숨을 수 없다', on: false },
+  { id: 'infiniteStamina', name: '무한 스태미나', desc: '스태미나가 줄지 않는다', on: false },
+  { id: 'thickFog', name: '짙은 안개', desc: '시야가 절반으로 줄어든다', on: false },
+  { id: 'noMinimap', name: '미니맵 없음', desc: '미니맵이 보이지 않는다', on: false },
+  { id: 'noItems', name: '아이템 없음', desc: '바닥에 아이템이 하나도 없다', on: false },
+  { id: 'shuffleLevels', name: '레벨 셔플', desc: '탈출할 때마다 다음 레벨이 무작위로 정해진다', on: false },
+  { id: 'slowEntities', name: '엔티티 감속', desc: '엔티티가 25% 느려진다', on: false },
+  { id: 'paranoia', name: '편집증', desc: '정신력과 상관없이 속삭임과 가짜 발소리가 들린다', on: false },
+  { id: 'photographer', name: '사진작가', desc: '무한 카메라로 그 레벨의 괴물을 찍어야 출구가 열린다', on: false },
+  { id: 'oneItem', name: '단 하나', desc: '가방이 한 칸. 처음 주운 아이템을 무한히 쓰지만 버릴 수 없다', on: false },
+  { id: 'noSprint', name: '달리기 금지', desc: '달릴 수 없다', on: false },
+  { id: 'timeLimit', name: '제한 시간', desc: '레벨마다 5분 안에 탈출하지 못하면 모두 죽는다', on: false },
+  { id: 'permaDeath', name: '영구 사망', desc: '죽으면 다음 레벨에서도 관전만 한다. 모두 죽으면 처음부터', on: false },
+  { id: 'speedrun', name: '스피드런', desc: '전체 시간과 레벨 시간이 화면에 표시된다', on: false },
+  { id: 'itemRain', name: '아이템 비', desc: '25초마다 근처에 아이템이 떨어진다', on: false },
+  { id: 'battery', name: '손전등 배터리', desc: '손전등 배터리가 닳는다. 끄면 천천히 충전된다', on: false },
+  { id: 'entityRadar', name: '괴물 레이더', desc: '미니맵에 가까운 괴물이 빨간 점으로 보인다', on: false },
+  { id: 'calm', name: '평온', desc: '정신력이 줄지 않는다', on: false },
 ];
+/** 모드 숫자 (MODES 참고) */
+export const MODE_RULES = {
+  TIME_LIMIT: 300,          // 제한 시간 (초)
+  ITEM_RAIN: 25,            // 아이템 비 간격 (초)
+  PHOTO_COOLDOWN: 1.2,      // 사진작가 카메라 재사용 대기 (초) — 무한 플래시 연타 방지
+  PHOTO_SKIP: ['wanderer', 'partyPooper'],   // 사진작가: 찍어도 인정 안 되는 엔티티 (해치지 않는 것)
+  BATTERY: { drain: 45, charge: 30, min: 20 },   // 손전등 배터리: 다 닳는 시간 / 다 차는 시간(초) / 다시 켤 수 있는 최소(%)
+  RADAR: 15 * 48,           // 괴물 레이더 범위
+};
 export const defaultModes = () => Object.fromEntries(MODES.map(m => [m.id, !!m.on]));

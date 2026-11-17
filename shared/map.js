@@ -11,6 +11,7 @@ export class GameMap {
     if (layout === 'run') this.generateRun();
     else if (layout === 'garage') this.generateGarage();
     else if (layout === 'city') this.generateCity();
+    else if (layout === 'river') this.generateRiver();
     else { this.generate(); if (roads > 0) this.addRoads(roads); if (puddles > 0) this.addPuddles(puddles); }
     this.floorCells = [];
     for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i] !== T.WALL) this.floorCells.push(i);
@@ -124,6 +125,64 @@ export class GameMap {
     // 시작점에서 못 가는 바닥은 벽으로
     const d = this.bfs(this.startX, h - 2);
     for (let i = 0; i < w * h; i++) if (this.tiles[i] !== T.WALL && d[i] < 0) this.tiles[i] = T.WALL;
+  }
+
+  /**
+   * 흐릿한 강 (가로로 긴 맵): 왼쪽 강가(시작) — 깊은 물(DEEP) — 오른쪽 강가(출구).
+   * 강 위아래 기슭은 울퉁불퉁한 바위, 강 한가운데엔 바위섬과 틈이 몇 개 난 바위 둑. 양쪽 강가엔 물로 튀어나온 나무 선착장.
+   * 왼쪽 선착장에서 오른쪽 선착장까지 물길이 이어져 있지 않으면 다시 만든다.
+   */
+  generateRiver() {
+    const { w, h, rng } = this, ri = (a, b) => a + Math.floor(rng() * (b - a + 1)), my = h >> 1;
+    const L1 = 8, R0 = w - 9;                    // 물 = L1 ~ R0 열
+    for (let attempt = 0; attempt < 40; attempt++) {
+      this.tiles.fill(T.WALL);
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < L1; x++) this.set(x, y, T.FLOOR);
+        for (let x = R0 + 1; x < w - 1; x++) this.set(x, y, T.FLOOR);
+        for (let x = L1; x <= R0; x++) this.set(x, y, T.DEEP);
+      }
+      // 강가: 쓰러진 나무 상자 / 바위 기둥 (숨을 곳은 없다)
+      for (const [x0, x1] of [[2, L1 - 2], [R0 + 2, w - 3]]) for (let n = 0; n < 9; n++) {
+        const x = ri(x0, x1), y = ri(2, h - 3);
+        if (Math.abs(y - my) > 2) this.set(x, y, T.WALL);
+      }
+      // 위아래 기슭: 울퉁불퉁한 바위
+      let top = 3, bot = 3;
+      for (let x = L1; x <= R0; x++) {
+        top = Math.max(1, Math.min(8, top + ri(-1, 1))); bot = Math.max(1, Math.min(8, bot + ri(-1, 1)));
+        for (let y = 1; y <= top; y++) this.set(x, y, T.WALL);
+        for (let y = h - 1 - bot; y < h - 1; y++) this.set(x, y, T.WALL);
+      }
+      // 바위섬
+      for (let n = 0; n < 60; n++) {
+        const cx = ri(L1 + 5, R0 - 5), cy = ri(4, h - 5), r = 0.7 + rng() * 2.1;
+        for (let y = Math.floor(cy - r); y <= cy + r; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+          if (Math.hypot(x - cx, y - cy) <= r && this.get(x, y) === T.DEEP) this.set(x, y, T.WALL);
+        }
+      }
+      // 바위 둑: 세로로 가로막고 틈(3칸) 1~2개
+      for (let x = L1 + 14; x < R0 - 10; x += ri(14, 20)) {
+        const gaps = Array.from({ length: ri(1, 2) }, () => ri(4, h - 7));
+        for (let y = 1; y < h - 1; y++) {
+          if (gaps.some(g => y >= g && y < g + 3)) { for (let k = 0; k < 2; k++) if (this.get(x + k, y) === T.WALL) this.set(x + k, y, T.DEEP); continue; }
+          if (this.get(x, y) === T.DEEP) this.set(x, y, T.WALL);
+          if (this.get(x + 1, y) === T.DEEP) this.set(x + 1, y, T.WALL);
+        }
+      }
+      // 선착장 (물로 튀어나온 나무 판자) + 그 앞 물은 비워 둔다
+      for (let y = my - 1; y <= my + 1; y++) {
+        for (const x of [L1, L1 + 1, R0 - 1, R0]) this.set(x, y, T.FLOOR);
+        for (const x of [L1 + 2, L1 + 3, L1 + 4, R0 - 2, R0 - 3, R0 - 4]) this.set(x, y, T.DEEP);
+      }
+      for (const x of [L1 + 2, L1 + 3, R0 - 2, R0 - 3]) { this.set(x, my - 2, T.DEEP); this.set(x, my + 2, T.DEEP); }
+      // 물길 확인 (물로만)
+      const pass = (x, y) => this.get(x, y) === T.DEEP, n = w * h, seen = new Uint8Array(n), q = [my * w + L1 + 2];
+      seen[q[0]] = 1;
+      for (let k = 0; k < q.length; k++) for (const nb of this.neighbors(q[k], pass)) if (!seen[nb]) { seen[nb] = 1; q.push(nb); }
+      if (seen[my * w + R0 - 2]) break;
+    }
+    this.startX = 2;
   }
 
   /** spacing 칸마다 가로/세로 3칸 너비 도로 (넓은 곳만 다니는 엔티티의 길) */
@@ -257,17 +316,20 @@ export function generateLevel(seed, levelIndex = 0) {
   const run = info.layout === 'run';     // Level ! : 긴 복도
   const mission = missionOf(levelIndex);
   const city = info.layout === 'city';   // Level 11 : 세로로 긴 도시
+  const river = info.layout === 'river'; // Level 373 : 가로로 긴 강
   const map = run ? new GameMap(CONFIG.RUN.LENGTH, CONFIG.RUN.HEIGHT, seed, 'run')
     : city ? new GameMap(CONFIG.CITY.W, CONFIG.CITY.H, seed, 'city')
+    : river ? new GameMap(CONFIG.RIVER.W, CONFIG.RIVER.H, seed, 'river')
     : new GameMap(CONFIG.MAP_W, CONFIG.MAP_H, seed, info.layout === 'garage' ? 'garage' : 'maze', info.puddles || 0, info.roads || 0);
   const rng = mulberry32(seed ^ 0x9e3779b9);
-  const sx = city ? map.startX : 1, sy = run ? map.h >> 1 : city ? map.h - 2 : 1;      // 시작 타일 (sx, sy)
+  const sx = city || river ? map.startX : 1, sy = run || river ? map.h >> 1 : city ? map.h - 2 : 1;      // 시작 타일 (sx, sy)
   const dist = map.bfs(sx, sy);
   const center = i => ({ x: (i % map.w) * TS + TS / 2, y: ((i / map.w) | 0) * TS + TS / 2 });
 
   // 출구 = 시작점에서 가장 먼 타일 (질주 레벨은 복도 오른쪽 끝 가운데)
   let far = -1, exitIdx = -1;
   if (run) exitIdx = sy * map.w + map.w - 2;
+  else if (river) exitIdx = sy * map.w + map.w - 3;          // 맞은편 강가 끝
   else for (let i = 0; i < dist.length; i++) if (dist[i] > far) { far = dist[i]; exitIdx = i; }
   map.tiles[exitIdx] = T.EXIT;
   const ex = exitIdx % map.w, ey = (exitIdx / map.w) | 0;
@@ -317,7 +379,7 @@ export function generateLevel(seed, levelIndex = 0) {
   const mi = mc.length ? mc[Math.floor(rng() * mc.length)] : map.floorCells[map.floorCells.length - 1];
 
   const lighting = buildLighting(map, rng, dist, { ...CONFIG.LIGHTS, ...info.lights }, sx, sy);
-  const lockers = run ? [] : placeLockers(map, rng, dist, exitIdx, [...keys, ...parts, ...stations, ...(depot ? [depot] : [])]);
+  const lockers = run ? [] : placeLockers(map, rng, dist, exitIdx, [...keys, ...parts, ...stations, ...(depot ? [depot] : [])], info.lockers || CONFIG.LOCKER.COUNT);
   // 장식 (Level Fun 의 풍선 등). 화면용이라 충돌 없음
   const decor = [];
   if (info.decor === 'moths') {   // 데스모스 수컷 떼: 형광등 주변을 맴도는 작은 나방 (무해)
@@ -334,6 +396,17 @@ export function generateLevel(seed, levelIndex = 0) {
     }
   }
 
+  // 히든 엔딩 (Level 0 만): 시작점에서 아주 먼 막다른 곳(3면이 벽, 북쪽이 벽)에 숨겨진 마닐라 룸 문
+  let secret = null;
+  if (levelIndex === 0) {
+    const dead = map.floorCells.filter(i => {
+      const x = i % map.w, y = (i / map.w) | 0;
+      if (map.tiles[i] !== T.FLOOR || dist[i] < 30 || i === exitIdx || !map.isSolid(x, y - 1)) return false;
+      return [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => map.isSolid(x + dx, y + dy)).length === 3;
+    }).filter(i => ![...keys, ...lockers].some(k => k.tx === i % map.w && k.ty === ((i / map.w) | 0)));
+    if (dead.length) { const i = dead[Math.floor(mulberry32(seed ^ 0x6d616e69)() * dead.length)]; secret = { tx: i % map.w, ty: (i / map.w) | 0, ...center(i) }; }
+  }
+
   // 쪽지 (레벨 시작 지점 옆 바닥): E 로 읽으면 이 레벨에서 할 일이 적혀 있다
   const [nx, ny] = [[1, 0], [0, -1], [0, 1], [-1, 0], [1, 1], [1, -1]].map(([dx, dy]) => [sx + dx, sy + dy])
     .find(([x, y]) => map.get(x, y) === T.FLOOR && !keys.some(k => k.tx === x && k.ty === y)) || [sx, sy];
@@ -343,7 +416,7 @@ export function generateLevel(seed, levelIndex = 0) {
     note,
     waterCells: map.floorCells.filter(i => map.tiles[i] === T.SLOW),
     ...areaMasks(map, info, mulberry32(seed ^ 0x2545f491)),
-    seed, level: info.id, info, mission, map, keys, parts, stations, depot, exitIdx, dist, lockers, decor,
+    seed, level: info.id, info, mission, map, keys, parts, stations, depot, exitIdx, dist, lockers, decor, secret,
     spawn: { x: sx * TS + TS / 2, y: sy * TS + TS / 2 },
     monsterSpawn: center(mi),
     ...lighting,
@@ -351,17 +424,17 @@ export function generateLevel(seed, levelIndex = 0) {
 }
 
 /** 숨을 수 있는 사물함: 북쪽이 벽인 바닥 타일(벽에 붙여 세움), 서로 떨어뜨려 배치 */
-function placeLockers(map, rng, dist, exitIdx, keys) {
+function placeLockers(map, rng, dist, exitIdx, keys, count = CONFIG.LOCKER.COUNT) {
   const { w } = map;
   const cand = map.floorCells.filter(i => {
     const x = i % w, y = (i / w) | 0;
-    return map.isSolid(x, y - 1) && dist[i] >= 3 && i !== exitIdx && !keys.some(k => k.tx === x && k.ty === y);
+    return map.tiles[i] !== T.DEEP && map.isSolid(x, y - 1) && dist[i] >= 3 && i !== exitIdx && !keys.some(k => k.tx === x && k.ty === y);
   });
   for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [cand[i], cand[j]] = [cand[j], cand[i]]; }
   const lockers = [];
-  for (let spacing = 6; spacing >= 2 && lockers.length < CONFIG.LOCKER.COUNT; spacing -= 2) {
+  for (let spacing = 6; spacing >= 2 && lockers.length < count; spacing -= 2) {
     for (const i of cand) {
-      if (lockers.length >= CONFIG.LOCKER.COUNT) break;
+      if (lockers.length >= count) break;
       const x = i % w, y = (i / w) | 0;
       if (lockers.some(l => Math.abs(l.tx - x) + Math.abs(l.ty - y) < spacing)) continue;
       lockers.push({ tx: x, ty: y, x: x * TS + TS / 2, y: y * TS + TS * 0.55 });

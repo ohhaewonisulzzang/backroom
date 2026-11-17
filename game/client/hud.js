@@ -1,4 +1,4 @@
-import { CONFIG, TS, T, SUIT_HEX, MISSION, MISSION_TEXT, levelLabel, levelInfo, missionKind, missionGoal, ITEM_TYPES } from '../../shared/config.js';
+import { CONFIG, TS, T, SUIT_HEX, MISSION, MISSION_TEXT, levelLabel, levelInfo, missionKind, missionGoal, ITEM_TYPES, MODE_RULES } from '../../shared/config.js';
 import { Input, keyLabel } from './input.js';
 import { itemIcon } from './sprites.js';
 import { BESTIARY, typesInLevel } from './bestiary.js';
@@ -66,7 +66,7 @@ export class Hud {
     for (let i = 0; i < m.tiles.length; i++) {
       if (!game.explored[i]) continue;
       const t = m.tiles[i];
-      g.fillStyle = t === T.WALL ? '#7a6a30' : t === T.EXIT ? (game.exitUnlocked ? '#6edc78' : '#c8402c') : '#2e2610';
+      g.fillStyle = t === T.WALL ? '#7a6a30' : t === T.EXIT ? (game.exitUnlocked && (!game.photo?.need || game.photo.taken) ? '#6edc78' : '#c8402c') : t === T.DEEP ? '#173040' : '#2e2610';
       g.fillRect((i % m.w) * s, ((i / m.w) | 0) * s, s, s);
     }
     g.fillStyle = '#ffe58a';
@@ -89,6 +89,15 @@ export class Hud {
     for (const it of game.items) {
       const tx = Math.floor(it.x / TS), ty = Math.floor(it.y / TS);
       if (game.explored[ty * m.w + tx]) g.fillRect(tx * s, ty * s, s, s);
+    }
+    // '괴물 레이더' 모드: 가까운 괴물 (해치지 않는 것과 물 밑·땅속·숨은 것도 포함, 방랑자·파티 푸퍼 제외)
+    const v = game.viewTarget?.();
+    if (game.modes?.entityRadar && v) {
+      g.fillStyle = '#ff3a2a';
+      for (const mo of game.monsters) {
+        if (mo.type === 'wanderer' || mo.type === 'partyPooper' || Math.hypot(mo.x - v.x, mo.y - v.y) > MODE_RULES.RADAR) continue;
+        g.fillRect(Math.floor(mo.x / TS) * s - 1, Math.floor(mo.y / TS) * s - 1, s + 1, s + 1);
+      }
     }
   }
 
@@ -196,6 +205,7 @@ export class Hud {
     }
 
     this.drawInventory(ctx, game, W, H, dt);
+    this.drawModeHud(ctx, game, W, H);
     this.drawMic(ctx, game, H);
     if (game.compassT > 0 && p.alive) this.drawCompass(ctx, game, W, H);
     if (game.emoteOpen) this.drawEmoteWheel(ctx, game, W, H);
@@ -207,10 +217,10 @@ export class Hud {
       ctx.fillText(m.text, W / 2, H - 150 - i * 22);
     });
 
-    // 미니맵 (탐색한 구역 + 내 위치). 질주 레벨은 진행 막대로 대신
-    if (game.horde) return;
+    // 미니맵 (탐색한 구역 + 내 위치). 질주 레벨은 진행 막대로 대신, '미니맵 없음' 모드면 안 그린다
+    if (game.horde || game.modes?.noMinimap) return;
     this.minimapT -= dt;
-    if (this.minimapT <= 0) { this.renderMinimap(game); this.minimapT = 0.25; }
+    if (this.minimapT <= 0) { this.renderMinimap(game); this.minimapT = game.modes?.entityRadar ? 0.1 : 0.25; }
     const s = this.mmScale, mw = this.minimap.width, mh = this.minimap.height, mx = W - mw - 16, my = H - mh - 16;
     ctx.globalAlpha = 0.85;
     ctx.drawImage(this.minimap, mx, my);
@@ -308,6 +318,12 @@ export class Hud {
       ctx.fillText(tr('노클립 존까지 {n}칸 ↑', { n: Math.max(0, py - ey) }), 20, 50);
       return;
     }
+    if (!o && game.level?.mission?.type === 'cross') {          // 흐릿한 강: 맞은편 강가까지 남은 거리
+      const e = game.level.exitIdx, ex = e % game.map.w, px = Math.floor((game.local?.x ?? 0) / TS);
+      ctx.font = '20px VT323, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = '#9fd8c8';
+      ctx.fillText(tr('맞은편 강가까지 {n}칸 →', { n: Math.max(0, ex - px) }) + (game.local?.boat ? tr('  (보트)') : ''), 20, 50);
+      return;
+    }
     if (!o) return;
     const M = game.level.mission, TXT = MISSION_TEXT[missionKind(M)] || {}, unit = tr(TXT.unit);
     let text;
@@ -362,8 +378,38 @@ export class Hud {
    * 손에 든 칸은 밝은 테두리로 살짝 올라오고, 그 위에 사용법 안내.
    * 칸 위: 꾹 눌러 쓰는 중이면 흰 원이 차오른다. (지속 효과 남은 초는 정신력 옆에)
    */
+  /** 모드 표시: 제한 시간(위 가운데) / 스피드런(오른쪽 위) / 사진작가(미션 아래) / 손전등 배터리(가방 왼쪽) */
+  drawModeHud(ctx, game, W, H) {
+    const M = game.modes || {}, p = game.local;
+    ctx.textBaseline = 'top';
+    if (M.timeLimit && game.timeLeft != null && game.roundPhase === 'playing') {
+      const s = Math.max(0, game.timeLeft), low = s <= 30;
+      ctx.font = '30px VT323, monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = low && Math.floor(game.time * 4) % 2 ? '#ff4a3a' : low ? '#ff8a6a' : '#e6dcb0';
+      ctx.fillText(fmtTime(s), W / 2, 44);
+    }
+    if (M.speedrun) {
+      const f = v => { const m = Math.floor(v / 60), sec = v - m * 60; return `${m}:${sec.toFixed(1).padStart(4, '0')}`; };
+      ctx.font = '22px VT323, monospace'; ctx.textAlign = 'right'; ctx.fillStyle = '#9fe8a0';
+      ctx.fillText(`⏱ ${f(game.totalTime || 0)}`, W - 16, 14);
+      ctx.fillStyle = '#7ab87a'; ctx.fillText(tr('레벨 {t}', { t: f(game.levelTime || 0) }), W - 16, 36);
+    }
+    if (game.photo?.need) {
+      ctx.font = '20px VT323, monospace'; ctx.textAlign = 'left';
+      ctx.fillStyle = game.photo.taken ? '#6edc78' : '#ffd25a';
+      ctx.fillText(game.photo.taken ? tr('📷 괴물 사진 완료') : tr('📷 이 레벨의 괴물을 카메라로 찍어라'), 20, 74);
+    }
+    if (M.battery && p?.alive) {
+      const b = game.battery ?? 100, x = W / 2 - 140, y = H - 40, w = 60;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x - w - 8, y, w + 6, 14);
+      ctx.fillStyle = b < MODE_RULES.BATTERY.min ? '#e0604a' : '#e6c24e'; ctx.fillRect(x - w - 5, y + 3, Math.round((w) * b / 100), 8);
+      ctx.strokeStyle = '#8a7a3a'; ctx.strokeRect(x - w - 8.5, y - 0.5, w + 7, 15); ctx.fillRect(x - 1, y + 4, 3, 6);
+      ctx.font = '14px VT323, monospace'; ctx.textAlign = 'right'; ctx.fillStyle = '#cfc6a6'; ctx.fillText('🔦', x - w - 12, y);
+    }
+  }
+
   drawInventory(ctx, game, W, H, dt = 0.016) {
-    const n = CONFIG.INVENTORY_SIZE, size = 46, gap = 6, x0 = Math.round(W / 2 - (n * size + (n - 1) * gap) / 2), y0 = H - size - 18;
+    const n = game.modes?.oneItem ? 1 : CONFIG.INVENTORY_SIZE, size = 46, gap = 6, x0 = Math.round(W / 2 - (n * size + (n - 1) * gap) / 2), y0 = H - size - 18;
     // 손에 든 칸은 부드럽게 6px 떠오르고, 내려놓으면 부드럽게 내려간다
     if (!this.slotLift) this.slotLift = Array(n).fill(0);
     for (let i = 0; i < n; i++) this.slotLift[i] += ((game.held === i ? 6 : 0) - this.slotLift[i]) * Math.min(1, dt * 16);
@@ -381,7 +427,8 @@ export class Hud {
       if (!it) continue;
       const ic = itemIcon(it.type), k = 2;
       ctx.drawImage(ic, Math.round(x + size / 2 - (ic.width * k) / 2), Math.round(y + size / 2 - (ic.height * k) / 2 + 2), ic.width * k, ic.height * k);
-      for (let u = 0; u < it.uses && it.uses > 1; u++) { ctx.fillStyle = '#d8c46a'; ctx.fillRect(x + size - 7 - u * 5, y + size - 6, 3, 3); }
+      if (it.inf) { ctx.font = '16px VT323, monospace'; ctx.textAlign = 'right'; ctx.fillStyle = '#d8c46a'; ctx.fillText('∞', x + size - 3, y + size - 15); }   // 무한 아이템
+      else for (let u = 0; u < it.uses && it.uses > 1; u++) { ctx.fillStyle = '#d8c46a'; ctx.fillRect(x + size - 7 - u * 5, y + size - 6, 3, 3); }
     }
     // 칸 위 표시: 꾹 누르는 진행 원
     const above = i => ({ cx: x0 + i * (size + gap) + size / 2, top: y0 - liftOf(i) - 6 });

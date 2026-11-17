@@ -109,6 +109,8 @@ export function attachGameServer(io, { testMode = false } = {}) {
     on('interact', data => room?.onInteract(socket.id, data));
     on('popBalloon', data => room?.onPopBalloon(socket.id, data));
     on('noclip', () => room?.onNoclip(socket.id));
+    on('boat', () => room?.onBoat(socket.id));
+    on('manila', () => room?.onManila(socket.id));
     on('chat', data => room?.onChat(socket.id, data));
     on('speaking', data => room?.onSpeaking(socket.id, data));
     on('voiceState', data => room?.onVoiceState(socket.id, data));

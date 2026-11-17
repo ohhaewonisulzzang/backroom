@@ -768,7 +768,8 @@ const ENTITY_BUTTONS = [['wanderer', '방랑자'], ['howler', '하울러'], ['sm
   ['windows', '창문들'], ['watch', '동네 감시자'], ['faceling', '페이슬링'], ['clump', '클럼프'], ['animation', '애니메이션'],
   ['animatedKing', '애니메이션 킹'], ['aranea', '아라네아 멤브리'], ['kitty', '키티'], ['partyPooper', '파티 푸퍼'],
   ['beast', '레벨 5의 야수'], ['seaThing', '레벨 7의 무언가'], ['crawler', '크롤러'], ['deathrat', '죽음쥐'], ['jackLantern', '잭-오-랜턴'],
-  ['camoCrawler', '위장 크롤러'], ['duller', '덜러'], ['sheet', '시츠']];
+  ['camoCrawler', '위장 크롤러'], ['duller', '덜러'], ['sheet', '시츠'],
+  ['mimic', '미믹'], ['shadow', '스토커'], ['mannequin', '돌페이스'], ['burrower', '공포증 지네'], ['gazer', '아르고스'], ['soot', '망령'], ['drowned', '익사자']];
 const LEVEL_NAMES = LEVELS.map(L => `${L.label ?? L.id} ${L.name}`);   // 테스트 패널 레벨 버튼
 const ITEM_BUTTONS = [['almondWater', '아몬드 워터'], ['staminaDrink', '스테미너 드링크'], ['camera', '카메라'], ['bugSpray', '살충제'], ['flare', '조명탄'], ['compass', '나침반'],
   ['firecracker', '폭죽'], ['nightVision', '야간 투시경'], ['adrenaline', '아드레날린']];
@@ -818,7 +819,11 @@ function TestPanel({ onCmd, onClose }) {
           <B cmd="tpKey">{t('목표로 이동')}</B>
           <B cmd="tpPuzzle">{t('퍼즐로 이동')}</B>
           <B cmd="tpExit">{t('출구로 이동')}</B>
-          <B cmd="ending">{t('엔딩 보기')}</B>
+          <B cmd="ending" arg="good">{t('엔딩 보기')}</B>
+          <B cmd="ending" arg="bad">{t('배드 엔딩')}</B>
+          <B cmd="ending" arg="madness">{t('광기 엔딩')}</B>
+          <B cmd="ending" arg="manila">{t('히든 엔딩')}</B>
+          <B cmd="tpSecret">{t('숨겨진 문으로')}</B>
         </div>}
       </div>
     </div>
