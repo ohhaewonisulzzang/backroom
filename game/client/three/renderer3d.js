@@ -3,6 +3,8 @@ import { toM, yawFromAngle, EYE_H, EYE_CROUCH } from './units.js';
 import { buildWorld } from './world.js';
 import { LightRig } from './lights.js';
 import { ActorLayer } from './actors.js';
+import { PostFx } from './post.js';
+import { Input } from '../input.js';
 
 /** WebGL 을 쓸 수 있는가 (못 쓰면 엔진이 2D 로만 그린다) */
 export function webglAvailable() {
@@ -39,6 +41,7 @@ export class Renderer3D {
     this.ambient = new THREE.AmbientLight(0xfff4dc, 0.05);  // 벽·바닥 밝기는 구워 둔 형광등 밝기(lightTex)가 정한다. 이건 아주 옅은 바탕빛
     this.scene.add(this.ambient, this.camera);
     this.eye = EYE_H;
+    this.bobAmp = 0;                      // 머리 흔들림 크기 (부드럽게 바뀐다)
     this.level = null;
     this.levelGroup = null;               // 레벨마다 새로 짓는 것 (setLevel 에서 dispose)
     this.actors = new ActorLayer(this.scene, (x, y) => this.lightAt(x, y));
@@ -49,11 +52,15 @@ export class Renderer3D {
     this.resize();
   }
 
+  /** 품질이 바뀌면 픽셀 비율·후처리·그림자를 다시 맞춘다 (조명 개수는 다음 레벨부터) */
   setQuality(q) {
     if (!QUALITY[q]) q = 'medium';
-    if (q === this.quality && this.qSet) return;
-    this.quality = q; this.qSet = true;
+    if (q === this.quality && this.post) return;
+    this.quality = q;
+    this.gl.shadowMap.enabled = QUALITY[q].shadows;
     this.resize();
+    this.post?.dispose();
+    this.post = new PostFx(this.gl, this.scene, this.camera, q);
   }
 
   resize() {
@@ -62,6 +69,8 @@ export class Renderer3D {
     this.gl.setSize(W, H, false);
     this.camera.aspect = W / H;
     this.camera.updateProjectionMatrix();
+    this.post?.setSize(W, H);
+    this.W = W; this.H = H;
   }
 
   /** 레벨 짓기. 이전 레벨의 지오메트리·재질·텍스처는 모두 해제한다 */
@@ -122,6 +131,17 @@ export class Renderer3D {
     } else this.deathYaw = null;
     this.camera.rotation.y = yaw;
     this.camera.rotation.x = pitch;
+    // 머리 흔들림 (걷기 ±3cm, 달리기 ±6cm) + 화면 흔들림. 설정 '화면 흔들림'을 끄면 둘 다 없다
+    if (game.settings?.shake !== false && v.alive) {
+      const amp = v.moving ? (v.sprinting ? 0.06 : 0.03) : 0;
+      this.bobAmp += (amp - (this.bobAmp || 0)) * Math.min(1, dt * 8);
+      const ph = (v.walkPhase || 0) * 0.42;
+      this.camera.position.y += Math.sin(ph * 2) * this.bobAmp;
+      this.camera.position.x += Math.cos(yaw) * Math.sin(ph) * this.bobAmp * 0.5;
+      this.camera.position.z -= Math.sin(yaw) * Math.sin(ph) * this.bobAmp * 0.5;
+      const sh = (game.shake || 0) * 0.004;
+      if (sh > 0) { this.camera.position.x += (Math.random() - 0.5) * sh; this.camera.position.y += (Math.random() - 0.5) * sh; }
+    }
   }
 
   render(game, dt) {
@@ -135,13 +155,25 @@ export class Renderer3D {
     const nv = game.nightVisionT > 0;                                 // 야간 투시경: 어둠 속도 보이게 바탕빛을 크게
     this.ambient.intensity = game.test?.fullbright ? 3 : nv ? 2.2 : 0.05;
     if (nv) this.scene.fog.density *= 0.35;
-    this.gl.render(this.scene, this.camera);
+    this.post.render(game, dt);
     this.overlay.prepareView(game, dt);
-    this.overlay.renderOverlay(game, dt, { three: true });
+    this.overlay.renderOverlay(game, dt, { three: true, world3d: { project: (x, y, h) => this.project(x, y, h), locked: Input.locked, touch: !!Input.touch.active } });
+  }
+
+  /** 2D 좌표(px)와 높이(m) → 화면 좌표. 카메라 뒤면 visible = false */
+  project(x, y, h) {
+    const v = this._v || (this._v = new THREE.Vector3());
+    v.set(toM(x), h, toM(y)).applyMatrix4(this.camera.matrixWorldInverse);
+    if (v.z > -0.1) return { sx: 0, sy: 0, visible: false, dist: -v.z };
+    const dist = -v.z;
+    v.applyMatrix4(this.camera.projectionMatrix);
+    const sx = (v.x * 0.5 + 0.5) * this.W, sy = (-v.y * 0.5 + 0.5) * this.H;
+    return { sx, sy, visible: sx > -50 && sx < this.W + 50 && sy > -50 && sy < this.H + 50, dist };
   }
 
   dispose() {
     this.disposeLevel();
+    this.post?.dispose();
     this.actors.dispose();
     removeEventListener('resize', this.onResize);
     this.canvas.removeEventListener('webglcontextlost', this.onLost);

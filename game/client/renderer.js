@@ -1,6 +1,6 @@
 import { CONFIG, TS, MISSION, levelLabel, levelInfo, missionKind, MODE_RULES } from '../../shared/config.js';
 import { clamp, mulberry32 } from '../../shared/utils.js';
-import { castRay } from '../../shared/physics.js';
+import { castRay, hasLOS } from '../../shared/physics.js';
 import { LightSystem } from './lighting.js';
 import { buildMapTexture, TILE_PX } from './texture.js';
 import {
@@ -312,6 +312,7 @@ export class Renderer {
     }
     if (game.flashT > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(255,255,248,${(game.flashT / 0.35) * 0.75})`; ctx.fillRect(0, 0, W, H); }
     if (!opts.three) this.drawPostFx(game);    // 3D 는 three 후처리(PostFx)가 그레인·비네트를 낸다
+    if (opts.world3d && game.deathT <= 0 && !game.local.hidden) this.drawWorld3D(game, opts.world3d);
     if (game.deathT <= 0) this.hud.draw(ctx, game, W, H, dt);
     if (game.scare && game.deathT <= 0) this.drawGameScare(game);   // 게임 중 점프스케어 (HUD 까지 덮는다)
     if (game.cine) { this.drawCinematic(game); this.drawSkipHint(game); }
@@ -647,6 +648,49 @@ export class Renderer {
    * Level 94 밤: 예고(warn)엔 화면이 깜빡이고, 밤(night)엔 어둡고 붉은 테두리.
    * Level 37 초록 물: 오래 서 있을수록 초록빛으로 어두워진다.
    */
+  /**
+   * 3D 화면 위 표시: E 안내·이름표·말풍선을 그 사물/사람 위에, 화면 가운데 조준점,
+   * 포인터가 안 잠겼으면 '클릭해서 시점 조작'. w3 = { project(x, y, heightM) → { sx, sy, visible, dist }, locked, touch }
+   */
+  drawWorld3D(game, w3) {
+    const { ctx, W, H } = this, level = game.level, S = 1.6, view = game.viewTarget(), me = game.local;
+    ctx.save();
+    ctx.setTransform(S, 0, 0, S, 0, 0);
+    const at = (x, y, h, fn) => { const p = w3.project(x, y, h); if (p.visible) fn(p.sx / S, p.sy / S, p.dist); };
+    const prompt = (x, y, h, text) => at(x, y, h, (sx, sy) => drawPrompt(ctx, sx, sy, text));
+    if (me.alive) {
+      if (game.nearLocker >= 0) { const lk = level.lockers[game.nearLocker]; prompt(lk.x, lk.y - 12, 2.15, 'E  숨기'); }
+      if (game.nearNote && !game.noteOpen) prompt(level.note.x, level.note.y, 0.35, 'E  쪽지');
+      if (game.nearSecret) prompt(level.secret.x, level.secret.y - 20, 2.2, 'E  ...?');
+      if (game.nearNpc) prompt(game.nearNpc.x, game.nearNpc.y, 2.1, 'E  말 걸기');
+      if (game.nearNoclip) { const e = level.exitIdx; prompt((e % level.map.w) * TS + TS / 2, ((e / level.map.w) | 0) * TS + TS / 2, 2.2, 'E  노클립'); }
+    }
+    // 이름표: '이름 숨김' 모드면 살아 있는 동안엔 가린다
+    if (!(me.alive && game.modes?.hideNames !== false)) {
+      for (const p of game.remotes.values()) {
+        if (!p.alive || p.hidden || p === view || !hasLOS(game.map, view.x, view.y, p.x, p.y)) continue;
+        at(p.x, p.y, 2.0, (sx, sy, dist) => drawNameTag(ctx, { name: p.name, x: sx, y: sy + 54 }, clamp(1.3 - dist / 12, 0.3, 1)));
+      }
+    }
+    for (const m of game.monsters) if (m.bubble && m.bubble.t > 0 && hasLOS(game.map, view.x, view.y, m.x, m.y)) at(m.x, m.y, 2.4, (sx, sy) => drawBubble(ctx, sx, sy, tr(m.bubble.text), Math.min(1, m.bubble.t), 0));
+    for (const p of game.allPlayers()) {
+      if (!p.bubble || !p.alive || p === view) continue;
+      if (hasLOS(game.map, view.x, view.y, p.x, p.y)) at(p.x, p.y, 2.1, (sx, sy) => drawBubble(ctx, sx, sy, p.bubble.text, Math.min(1, p.bubble.t), 0));
+    }
+    ctx.restore();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (me.alive && !game.cine) {
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, 2, 0, Math.PI * 2); ctx.fill();          // 조준점
+      if (!w3.locked && !w3.touch && !game.paused) {
+        ctx.font = '22px VT323, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; const t = tr('클릭해서 시점 조작'), w = ctx.measureText(t).width + 24;
+        ctx.fillRect(W / 2 - w / 2, H / 2 + 30, w, 32);
+        ctx.fillStyle = '#f0dc8c'; ctx.fillText(t, W / 2, H / 2 + 46);
+      }
+    }
+  }
+
   drawNightFx(game) {
     const { ctx, W, H } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);

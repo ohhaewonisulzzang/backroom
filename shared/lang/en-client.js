@@ -56,6 +56,7 @@ export default {
   '밸브': 'Valve',
   'E  말 걸기': 'E  Talk',
   'E  쪽지': 'E  Note',
+  'E  숨기': 'E  Hide',
   'E  터뜨리기': 'E  Pop',
   'E  게임': 'E  Play',
   'E  퍼즐': 'E  Puzzle',

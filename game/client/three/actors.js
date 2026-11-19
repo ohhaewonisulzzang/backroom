@@ -187,6 +187,7 @@ export class ActorLayer {
         a = m.type === 'howler' ? makeHowler() : makeHazmat(SUIT_HEX[m.color] || SUIT_HEX.default, true);
         a.userData.phase = 0; a.userData.last = { x: m.x, y: m.y };
         this.addXray(a);
+        a.traverse(o => { if (o.isMesh && o !== a.userData.xray) o.castShadow = true; });
         this.group.add(a); this.monsters.set(m.id, a);
       }
       const d = Math.hypot(m.x - view.x, m.y - view.y);
@@ -213,6 +214,7 @@ export class ActorLayer {
         a = makeHazmat(SUIT_HEX[p.color] || SUIT_HEX.default, false);
         a.userData.color = p.color; a.userData.phase = 0; a.userData.last = { x: p.x, y: p.y };
         this.addXray(a);
+        a.traverse(o => { if (o.isMesh && o !== a.userData.xray) o.castShadow = true; });
         this.group.add(a); this.players.set(p.id, a);
       }
       const show = !p.hidden && p.status !== 'escaped';

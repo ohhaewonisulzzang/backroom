@@ -72,6 +72,7 @@ export function buildWorld(level, quality) {
     const mesh = new THREE.Mesh(b.build(), m);
     mesh.name = name;
     mesh.matrixAutoUpdate = false;
+    mesh.receiveShadow = true;           // 품질 '높음'의 손전등 그림자
     group.add(mesh);
   }
   return {
