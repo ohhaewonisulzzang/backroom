@@ -97,12 +97,8 @@ export class Renderer {
     const vw = W / scale, vh = H / scale;
 
     // ---- 시야 (타일 가시성, 부드럽게) / 손전등 ----
-    const fog = !!game.modes?.thickFog || !!level.info?.haze;   // '짙은 안개' 모드: 시야 절반 / 흐릿한 강: 안개
-    const fogK = game.modes?.thickFog ? 0.5 : 0.65;
-    this.lights.viewScale = fog ? fogK : 1;
-    this.lights.updateVisibility(view, dt, game.explored, this.freshLevel);
-    this.lights.blackoutK = game.blackoutK || 0;
-    this.freshLevel = false;
+    this.prepareView(game, dt);
+    const fog = !!game.modes?.thickFog || !!level.info?.haze, fogK = game.modes?.thickFog ? 0.5 : 0.65;
     const bright = !!game.test?.fullbright;
     const nightVision = game.nightVisionT > 0;     // 야간 투시경: 어둠도 벽도 뚫고 시야 범위 안이 다 보인다
     const seen = e => {
@@ -280,6 +276,30 @@ export class Renderer {
     }
 
     if (game.horde && game.deathT <= 0) this.drawHordeEdge(game);
+    this.renderOverlay(game, dt);
+  }
+
+  /**
+   * 시야(타일 가시성)·탐험한 칸(미니맵) 갱신. 2D render 와 3D(Renderer3D) 가 매 프레임 부른다.
+   */
+  prepareView(game, dt) {
+    const level = game.level;
+    const fog = !!game.modes?.thickFog || !!level.info?.haze;   // '짙은 안개' 모드: 시야 절반 / 흐릿한 강: 안개
+    const fogK = game.modes?.thickFog ? 0.5 : 0.65;
+    this.lights.viewScale = fog ? fogK : 1;
+    this.lights.updateVisibility(game.viewTarget(), dt, game.explored, this.freshLevel);
+    this.lights.blackoutK = game.blackoutK || 0;
+    this.freshLevel = false;
+  }
+
+  /**
+   * 화면 고정 그림: 밤·사망 연출·정신력·숨기 시점·섬광·후처리·HUD·점프스케어·시네마틱·일시정지.
+   * 2D 는 월드를 그린 뒤 이어서, 3D 는 three.js 화면 위의 투명 캔버스에 이것만 그린다 (opts.three = true).
+   * opts.world3d = { project(x, y, heightM) } 이면 월드 위 표시(E 안내·이름표·말풍선·조준점)도 그린다 (Task 7)
+   */
+  renderOverlay(game, dt, opts = {}) {
+    const { ctx, W, H } = this, level = game.level;
+    if (opts.three) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); }
     this.drawNightFx(game);
     if (game.deathT > 0) drawDeathOverlay(this, game);
     else {
@@ -291,7 +311,7 @@ export class Renderer {
       if (hp === 'table' || hp === 'desk') this.drawTableView(game, hp === 'desk'); else this.drawLockerView(game);
     }
     if (game.flashT > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(255,255,248,${(game.flashT / 0.35) * 0.75})`; ctx.fillRect(0, 0, W, H); }
-    this.drawPostFx(game);
+    if (!opts.three) this.drawPostFx(game);    // 3D 는 three 후처리(PostFx)가 그레인·비네트를 낸다
     if (game.deathT <= 0) this.hud.draw(ctx, game, W, H, dt);
     if (game.scare && game.deathT <= 0) this.drawGameScare(game);   // 게임 중 점프스케어 (HUD 까지 덮는다)
     if (game.cine) { this.drawCinematic(game); this.drawSkipHint(game); }

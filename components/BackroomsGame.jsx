@@ -30,6 +30,7 @@ const colorHex = c => (COLORS.find(x => x[0] === c) || COLORS[0])[2];
  */
 export default function BackroomsGame() {
   const canvasRef = useRef(null);
+  const canvas3dRef = useRef(null);                 // Level 0 3D 화면 (three.js WebGL). 2D 캔버스가 그 위에서 HUD 오버레이가 된다
   const engineRef = useRef(null);
   const audioUnlocked = useRef(false);
   const [overlay, setOverlay] = useState({ kind: 'menu', screen: 'main', error: '' });
@@ -88,7 +89,7 @@ export default function BackroomsGame() {
     // 엔진은 브라우저 전용(canvas, WebAudio) → 클라이언트에서만 동적 import
     import('../game/client/engine.js').then(({ startGame }) => {
       if (disposed) return;
-      engineRef.current = startGame({ canvas: canvasRef.current, ui });
+      engineRef.current = startGame({ canvas: canvasRef.current, canvas3d: canvas3dRef.current, ui });
       if (process.env.NODE_ENV !== 'production') window.__backrooms = engineRef.current;   // 개발 중 브라우저 자동 확인용
       engineRef.current.applySettings(loadSettings());
     });
@@ -117,6 +118,7 @@ export default function BackroomsGame() {
 
   return (
     <div onPointerDown={unlock} onKeyDown={unlock}>
+      <canvas id="game3d" ref={canvas3dRef} />
       <canvas id="game" ref={canvasRef} />
       {overlay.kind === 'menu' && (
         <MainMenu screen={overlay.screen} error={overlay.error} nav={nav} engine={engine} withWarning={withWarning}

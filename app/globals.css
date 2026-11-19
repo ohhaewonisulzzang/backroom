@@ -14,7 +14,11 @@ html, body {
   color: var(--yellow);
   user-select: none;
 }
-canvas#game { display: block; cursor: crosshair; image-rendering: pixelated; touch-action: none; }
+canvas#game { display: block; position: relative; cursor: crosshair; image-rendering: pixelated; touch-action: none; }
+/* Level 0 3D 화면: 2D 캔버스(#game, 투명 오버레이) 아래에 깔린다 */
+canvas#game3d { display: none; position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
+canvas#game3d.on { display: block; }
+canvas#game.over3d { cursor: none; }
 
 #overlay {
   position: fixed; inset: 0;

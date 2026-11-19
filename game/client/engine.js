@@ -16,10 +16,11 @@ import { BESTIARY } from './bestiary.js';
 import { DEATH_DURATION, addGore } from './deaths.js';
 import { discoverLevel } from './bestiary.js';
 import { GESTURES } from './sprites.js';
-import { facingPan } from './three/units.js';
+import { facingPan, shouldUse3D } from './three/units.js';
 
 /** startGame() 에서 채워지는 런타임 의존성. UI 는 React 쪽 어댑터. */
 let renderer = null, net = null, UI = null;
+let renderer3d = null, canvas3d = null, canvas2d = null;   // Level 0 3D 화면 (WebGL 을 쓸 수 있을 때만)
 
 /** 클라이언트 게임 상태. 권위 있는 상태(열쇠, 사망, 괴물)는 서버 이벤트로만 바뀐다. */
 const RAINBOW = 5;   // 정신력이 50% 아래로 떨어질 때 무지개 환각이 이어지는 시간(초)
@@ -182,6 +183,7 @@ const Game = {
     this.monster = null;
     this.duckLight = null; Sound.duck(1);
     renderer.setLevel(this.level);
+    this.level3dDirty = true;                    // 3D 화면이면 다음 프레임에 새 레벨을 짓는다
 
     this.elapsed = 0; this.deathT = 0; this.pendingRoundEnd = null; this.spectateId = null;
     const v = this.viewTarget();
@@ -1086,9 +1088,33 @@ const handlers = {
  * React 컴포넌트에서 호출. 캔버스와 UI 어댑터를 받아 게임 루프를 시작하고 제어 핸들을 돌려준다.
  * ui: { showMenu({error, screen}), showLobby(state), showInfo({...}), showRoundEnd(data), hide(), toggleTest() }
  */
-export function startGame({ canvas, ui }) {
+/**
+ * 이번 프레임을 3D 로 그릴지 정하고, 바뀌는 순간 캔버스·포인터 잠금·레벨을 맞춘다.
+ * 3D: Level 0 + 설정 '3D 화면' + WebGL (컨텍스트를 잃으면 2D 로)
+ */
+function sync3D() {
+  const want = Game.phase === 'game' && !!Game.level && !!renderer3d && !renderer3d.lost && shouldUse3D(Game.levelIndex, Game.settings, true);
+  if (want !== Game.view3D) {
+    Game.view3D = want;
+    canvas3d?.classList.toggle('on', want);
+    canvas2d?.classList.toggle('over3d', want);
+    if (!want) Input.unlockPointer();
+    else Game.level3dDirty = true;
+  }
+  if (want && Game.level3dDirty) { Game.level3dDirty = false; renderer3d.setLevel(Game.level); }
+}
+
+export function startGame({ canvas, canvas3d: c3d, ui }) {
   UI = ui;
   renderer = new Renderer(canvas);
+  canvas2d = canvas; canvas3d = c3d || null;
+  if (canvas3d) {
+    import('./three/renderer3d.js').then(m => {
+      if (!m.webglAvailable()) return;
+      try { renderer3d = new m.Renderer3D(canvas3d, renderer); Game.renderer3d = renderer3d; }
+      catch (e) { console.warn('3D 화면을 켤 수 없다:', e); renderer3d = null; }
+    });
+  }
   net = new NetClient(handlers);
   Game.phase = 'menu';
   Game.initMenu();
@@ -1198,8 +1224,9 @@ export function startGame({ canvas, ui }) {
   const frame = now => {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    sync3D();
     Game.update(dt);
-    if (Game.phase === 'game') renderer.render(Game, dt);
+    if (Game.phase === 'game') { if (Game.view3D) renderer3d.render(Game, dt); else renderer.render(Game, dt); }
     else if (Game.phase === 'ending') renderer.renderEnding(Game, dt);
     else if (Game.menu) renderer.renderMenu(Game, dt);
     raf = requestAnimationFrame(frame);
@@ -1292,6 +1319,7 @@ export function startGame({ canvas, ui }) {
       net.disconnect();
       Input.dispose();
       renderer.dispose();
+      renderer3d?.dispose(); renderer3d = null; Game.view3D = false;
       Sound.setDrone(0); Sound.stopBgm();
       Game.phase = 'menu';
       Game.local = null;
