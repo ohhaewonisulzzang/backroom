@@ -2,6 +2,8 @@
 //   node test/mission.mjs
 import { GameRoom } from '../server/GameRoom.js';
 import { LEVELS } from '../shared/config.js';
+import { generateLevel, MANILA_CHANCE } from '../shared/map.js';
+import { mulberry32 } from '../shared/utils.js';
 
 let failed = 0;
 const check = (cond, label) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`); if (!cond) failed++; };
@@ -121,28 +123,53 @@ function makeRoom(level) {
   clearInterval(room.timer);
 }
 
-// 7) 엔딩: 동료가 죽은 채 남겨졌으면 배드, 모두 정신력이 바닥이면 광기, 아니면 노멀. Level 0 숨겨진 문 → 히든
+// 7) 엔딩: 3999 탈출은 늘 노멀 (배드·광기 엔딩은 없앴다). Level 0 숨겨진 문(0.06% 확률) → 히든
 {
-  const { room, evs, p } = makeRoom(LEVELS.findIndex(L => L.final));
-  p.status = 'escaped'; p.sanity = 80;
-  check(room.pickEnding() === 'good', '엔딩: 멀쩡히 탈출 → 노멀');
-  p.sanity = 10;
-  check(room.pickEnding() === 'madness', '엔딩: 탈출한 사람 모두 정신력 20 미만 → 광기');
-  p.sanity = 80; room.statOf('p1').deaths = 15;
-  check(room.pickEnding() === 'bad', '엔딩: 총 사망 15번 이상 → 배드');
-  room.statOf('p1').deaths = 0;
+  const { room, p } = makeRoom(LEVELS.findIndex(L => L.final));
+  p.status = 'escaped'; p.sanity = 10; room.statOf('p1').deaths = 20;
   room.players.set('p2', { id: 'p2', name: 'B', status: 'dead', sanity: 100, inv: [] });
-  check(room.pickEnding() === 'bad', '엔딩: 동료가 죽은 채 남겨지면 → 배드');
+  check(room.pickEnding() === 'good', '엔딩: 정신력이 바닥이든, 많이 죽었든, 동료가 남겨졌든 → 노멀');
   room.players.delete('p2');
   clearInterval(room.timer);
+  // 마닐라 룸 문은 시드의 0.06% 에서만 생긴다
+  let hits = 0, seedWith = -1;
+  for (let seed = 0; seed < 200000; seed++) if (mulberry32(seed ^ 0x4d4e4c41)() < MANILA_CHANCE) { hits++; if (seedWith < 0) seedWith = seed; }
+  check(MANILA_CHANCE === 0.0006 && hits > 60 && hits < 190, `마닐라 룸 문이 생기는 시드 비율 ≈ 0.06% (${(hits / 2000).toFixed(3)}%)`);
+  let none = 0;
+  for (let seed = 1; seed <= 40; seed++) if (!generateLevel(seed, 0).secret || mulberry32(seed ^ 0x4d4e4c41)() < MANILA_CHANCE) none++;
+  check(none === 40, '보통 시드의 Level 0 에는 숨겨진 문이 없다');
   const r0 = makeRoom(0);
-  const s = r0.room.level.secret;
-  check(!!s, 'Level 0 에 숨겨진 마닐라 룸 문이 있다');
+  const s = generateLevel(seedWith, 0).secret;
+  check(!!s, `문이 생기는 시드(${seedWith})의 Level 0 에는 숨겨진 마닐라 룸 문이 있다`);
+  r0.room.level.secret = s;
   r0.p.x = s.x; r0.p.y = s.y;
   r0.room.onManila('p1');
   const done = r0.evs.find(([e]) => e === 'gameComplete');
   check(done && done[1].ending === 'manila', '숨겨진 문에서 E → 히든 엔딩 (마닐라 룸)');
   clearInterval(r0.room.timer);
+}
+
+// 7.5) 익사자: 보트 위에서 가만히 있으면 발밑에서 솟아난다 (손전등도 안 통한다)
+{
+  const { room, evs, p } = makeRoom(LV('THE HAZED RIVER'));
+  const map = room.map, TS = 48, my = map.h >> 1, c = t => t * TS + TS / 2;
+  room.monsterGrace = 0;
+  p.x = c(9); p.y = c(my); room.onBoat('p1');
+  p.x += 3 * TS; p.lastMoveAt = Date.now() - 5000; p.flashlight = true;
+  const m = room.monsters.find(x => x.type === 'drowned');
+  for (const x of room.monsters) if (x !== m) { x.state = 'sink'; x.timer = 99; }
+  m.state = 'lurk';
+  for (let k = 0; k < 30; k++) room.updateBoatIdle(0.1, Date.now());
+  check(m.state === 'surface' && m.prey === p && Math.hypot(m.x - p.x, m.y - p.y) < 1 && evs.some(([e, d]) => e === 'entityEvent' && d.kind === 'emerge' && d.target === 'p1'),
+    '익사자: 보트에서 2.5초 가만히 있으면 바로 발밑에서 솟아난다');
+  p.angle = Math.atan2(m.y - p.y, m.x - p.x);
+  m.update(0.05, room);
+  check(m.state === 'surface', '익사자: 발밑에서 솟아난 것은 손전등으로 못 쫓는다');
+  const { room: r2, p: p2 } = makeRoom(LV('THE HAZED RIVER'));
+  p2.x = c(9); p2.y = c(my); r2.onBoat('p1');
+  for (let k = 0; k < 30; k++) { p2.lastMoveAt = Date.now(); r2.updateBoatIdle(0.1, Date.now()); }
+  check(!r2.monsters.some(x => x.state === 'surface'), '익사자: 계속 저으면 발밑에서 솟아나지 않는다');
+  clearInterval(room.timer); clearInterval(r2.timer);
 }
 
 // 8) 모드: 사진작가 / 단 하나 / 제한 시간 / 영구 사망 / 평온 / 달리기 금지
@@ -194,6 +221,20 @@ function makeRoom(level) {
   room.modes.noSprint = true; room.startRound(false);
   A.lastUpdate = Date.now() - 100; room.onState('a', { x: A.x, y: A.y, angle: 0, sprinting: true });
   check(!A.sprinting, '달리기 금지: 서버가 달리기를 끈다');
+  clearInterval(room.timer);
+}
+
+// 9) 새 모드: 불안한 시작 / 생존 키트 / 시끄러운 발걸음
+{
+  const { room, p } = makeRoom(1);
+  room.startRound(false);
+  p.lastUpdate = Date.now() - 200; room.onState('p1', { x: p.x + 4, y: p.y, angle: 0 });
+  const quiet = p.noise;
+  room.modes.anxious = true; room.modes.starterKit = true; room.modes.loudSteps = true; room.startRound(false);
+  check(p.sanity === 50, '불안한 시작: 정신력 50 으로 시작');
+  check(p.inv.some(it => it?.type === 'almondWater') && p.inv.some(it => it?.type === 'flare'), '생존 키트: 아몬드 워터와 조명탄을 받는다');
+  p.lastUpdate = Date.now() - 200; room.onState('p1', { x: p.x + 4, y: p.y, angle: 0 });
+  check(quiet > 0 && Math.abs(p.noise - quiet * 1.5) < 0.01, `시끄러운 발걸음: 발소리 반경 1.5배 (${quiet} → ${p.noise})`);
   clearInterval(room.timer);
 }
 

@@ -13,7 +13,6 @@ const invFree = p => p.inv.findIndex((x, i) => !x && i < (p.slots ?? CONFIG.INVE
 /** 빈칸 중 가장 앞 칸에 넣는다. 가득 차면 false */
 const invAdd = (p, it) => { const i = invFree(p); if (i < 0) return false; p.inv[i] = it; return true; };
 const MIMIC_EVERY = [18, 40];   // 엔티티 목소리 흉내 간격(초, 무작위)
-const ENDING_RULES = { BAD_DEATHS: 15, MAD_SANITY: 20 };   // 배드 엔딩: 총 사망 횟수 / 광기 엔딩: 탈출한 사람 모두 이 정신력 미만
 
 /**
  * 하나의 방(=하나의 레벨 인스턴스). 서버 권위로 관리하는 것:
@@ -267,6 +266,9 @@ export class GameRoom {
       if (M.oneItem) for (let i = 1; i < p.inv.length; i++) p.inv[i] = null;
       if (M.photographer && !p.inv.some(it => it?.type === 'camera' && it.inf)) { const i = invFree(p); if (i >= 0) p.inv[i] = { type: 'camera', uses: 1, inf: true }; }
       if (M.permaDeath && p.perma) p.status = 'dead';
+      if (M.anxious) p.sanity = MODE_RULES.ANXIOUS;                   // '불안한 시작' 모드
+      if (M.starterKit && !this.run) for (const type of ['almondWater', 'flare']) invAdd(p, { type, uses: ITEM_TYPES[type].uses, ...(M.oneItem ? { inf: true } : {}) });   // '생존 키트' 모드
+      p.boatStillT = 0;
     }
     const L = LEVELS[this.levelIndex];
     const subjects = Object.keys(L.entities || {}).filter(t => L.entities[t] > 0 && !MODE_RULES.PHOTO_SKIP.includes(t));
@@ -438,7 +440,7 @@ export class GameRoom {
     const list = status => [...this.players.values()].filter(p => p.status === status).map(p => p.name);
     const escaped = list('escaped');
     if (escaped.length && LEVELS[this.levelIndex].final) {
-      // 마지막 레벨 탈출 → 엔딩 (배드 / 광기 / 노멀). 멀티는 대기방으로, 혼자 하기는 끝
+      // 마지막 레벨 탈출 → 노멀 엔딩. 멀티는 대기방으로, 혼자 하기는 끝
       this.completeGame(this.pickEnding(), escaped, list('dead'));
       return;
     }
@@ -462,20 +464,10 @@ export class GameRoom {
   }
 
   /**
-   * 3999 탈출 엔딩 고르기:
-   *  bad     — 동료 중 누가 죽은 채 남겨졌거나, 이번 판 총 사망이 BAD_DEATHS 번 이상 ("끝나지 않는 복도")
-   *  madness — 탈출한 사람 모두 정신력이 MAD_SANITY 미만 ("무지개 너머")
-   *  good    — 그 밖
-   * (히든 엔딩 manila 는 Level 0 의 숨겨진 문에서 onManila 로)
+   * 3999 탈출 엔딩: 늘 노멀 엔딩 (good).
+   * (히든 엔딩 manila 는 Level 0 에 아주 드물게(MANILA_CHANCE) 생기는 숨겨진 문에서 onManila 로)
    */
-  pickEnding() {
-    if (this.forceEnding) { const e = this.forceEnding; this.forceEnding = null; return e; }
-    const all = [...this.players.values()], deaths = [...this.stats.values()].reduce((t, s) => t + (s.deaths || 0), 0);
-    if (all.some(p => p.status === 'dead') || deaths >= ENDING_RULES.BAD_DEATHS) return 'bad';
-    const out = all.filter(p => p.status === 'escaped');
-    if (out.length && out.every(p => p.sanity < ENDING_RULES.MAD_SANITY)) return 'madness';
-    return 'good';
-  }
+  pickEnding() { return 'good'; }
   /** 게임 끝 → 엔딩. 레벨 0 으로 되돌리고 멀티는 대기방으로 */
   completeGame(ending, escaped, dead = []) {
     this.levelIndex = 0; this.cleared = new Set();
@@ -486,6 +478,27 @@ export class GameRoom {
     if (!this.solo) this.emitLobby();
     this.log(`GAME COMPLETE (${ending})`);
   }
+  /**
+   * 익사자: 보트를 탄 채 가만히 있으면(drowned.idle 초) 익사자가 스토커처럼 바로 발밑(보트 밑)에서 솟아난다.
+   * 손이 올라오는 동안(emerge 초) 저어서 벗어나지 못하면 끌려 들어간다. 바로 밑이라 손전등도 소용없다
+   */
+  updateBoatIdle(dt, now) {
+    const C = CONFIG.ENTITY.drowned;
+    const drowned = this.monsters.filter(m => m.type === 'drowned');
+    if (!drowned.length) return;
+    for (const p of this.players.values()) {
+      if (!p.alive || p.hidden || !p.boat || p.god) { p.boatStillT = 0; continue; }
+      if (Monster.isMoving(p, now, 400)) { p.boatStillT = 0; continue; }
+      if ((p.boatStillT = (p.boatStillT || 0) + dt) < C.idle) continue;
+      if (drowned.some(m => m.prey === p && (m.state === 'surface' || m.state === 'grab'))) continue;   // 이미 붙잡히는 중
+      const free = drowned.filter(m => m.state === 'lurk' || m.state === 'stalk')
+        .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+      if (!free) continue;
+      p.boatStillT = 0;
+      free.emergeUnder(p, this);
+    }
+  }
+
   /** 히든 엔딩: Level 0 의 숨겨진 마닐라 룸 문 앞에서 E */
   onManila(id) {
     const p = this.players.get(id), s = this.level?.secret;
@@ -566,7 +579,7 @@ export class GameRoom {
 
     const now = Date.now();
     const elapsed = Math.min(1, (now - p.lastUpdate) / 1000);
-    const maxStep = CONFIG.PLAYER.SPRINT * elapsed * 1.5 + 32;
+    const maxStep = CONFIG.PLAYER.SPRINT * (this.modes.quickFeet ? MODE_RULES.QUICK : 1) * elapsed * 1.5 + 32;   // '가벼운 발' 모드
     const moved = Math.hypot(s.x - p.x, s.y - p.y);
     // 도착 칸이 벽이거나, 이동 경로가 벽을 뚫고 지나가면 거부 (벽 통과 치트 방지)
     // 걸어 다니면 깊은 물이, 보트를 타고 있으면 땅이 벽이다
@@ -582,7 +595,7 @@ export class GameRoom {
     if (moved >= 1) p.lastMoveAt = now;     // 복도 감독: 멈춰 서 있는지 판단
     // 발소리: 움직이고 있으면 들리는 반경 (웅크리면 0) — 파티고어가 듣는다
     const H = CONFIG.ENTITY.partygoer;
-    p.noise = moved < 1 ? 0 : p.crouching ? 0 : p.sprinting ? H.hearSprint : H.hearWalk;
+    p.noise = (moved < 1 ? 0 : p.crouching ? 0 : p.sprinting ? H.hearSprint : H.hearWalk) * (this.modes.loudSteps ? MODE_RULES.LOUD : 1);   // '시끄러운 발걸음' 모드
     this.checkPickups(p);
   }
 
@@ -966,7 +979,7 @@ export class GameRoom {
       }
       case 'tpSecret': {   // 히든 엔딩 문 앞으로 (Level 0 에서만)
         const s = this.level.secret;
-        if (!s) return reply('이 레벨엔 숨겨진 문이 없다 (Level 0 만)');
+        if (!s) return reply('이 레벨엔 숨겨진 문이 없다 (Level 0 에 0.06% 확률로만 생긴다)');
         teleport(s.x, s.y);
         return reply('숨겨진 문 앞');
       }
@@ -1028,10 +1041,9 @@ export class GameRoom {
         this.monsters.push(m);
         return reply(`${arg} 소환 (3~5칸 거리)`);
       }
-      case 'ending': {   // 엔딩 바로 보기: 마지막 레벨에서 살아 있는 사람 모두 탈출 처리 (arg: good | bad | madness | manila)
+      case 'ending': {   // 엔딩 바로 보기: 마지막 레벨에서 살아 있는 사람 모두 탈출 처리 (arg: good | manila)
         if (this.phase !== 'playing') return reply('라운드가 끝난 상태');
         if (arg === 'manila') { this.completeGame('manila', [p.name]); return reply('엔딩'); }
-        if (['good', 'bad', 'madness'].includes(arg)) this.forceEnding = arg;
         this.levelIndex = LEVELS.findIndex(L => L.final);
         for (const q of this.players.values()) if (q.alive) { q.status = 'escaped'; this.emit('playerEscaped', { id: q.id }); }
         this.checkRoundEnd();
@@ -1076,7 +1088,7 @@ export class GameRoom {
       if (this.noises.length) this.noises = this.noises.filter(n => n.until > now);
       if (this.monsterGrace > 0) this.monsterGrace -= dt;
       else for (const m of this.monsters) { m.modeMul = (this.modes.fastEntities ? 1.25 : 1) * (this.modes.slowEntities ? 0.75 : 1); m.update(dt, this); }   // '엔티티 가속' / '엔티티 감속' 모드
-      if (this.monsterGrace <= 0) { this.updateMission(dt, now); this.updateNight(dt); this.updateBlackout(dt); this.updateMimic(dt); }
+      if (this.monsterGrace <= 0) { this.updateMission(dt, now); this.updateNight(dt); this.updateBlackout(dt); this.updateMimic(dt); this.updateBoatIdle(dt, now); }
       // 안내를 마친 파티 푸퍼는 사라진다
       if (this.monsters.some(m => m.gone)) {
         for (const m of this.monsters) if (m.gone) this.onEntityEvent(m, 'poof');

@@ -1,4 +1,4 @@
-import { CONFIG, TS, MISSION, levelLabel, levelInfo, missionKind } from '../../shared/config.js';
+import { CONFIG, TS, MISSION, levelLabel, levelInfo, missionKind, MODE_RULES } from '../../shared/config.js';
 import { clamp, mulberry32 } from '../../shared/utils.js';
 import { castRay } from '../../shared/physics.js';
 import { LightSystem } from './lighting.js';
@@ -195,6 +195,7 @@ export class Renderer {
       // 시츠: 벽을 통과해 다니므로 벽 속에 있어도 가까우면 희미하게 비친다
       if (m.type === 'sheet') a = Math.max(a, 0.45 * Math.max(0, 1 - Math.hypot(m.x - view.x, m.y - view.y) / (TS * 6)));
       if (m.type === 'burrower' && map.isSolid(Math.floor(m.x / TS), Math.floor(m.y / TS))) continue;   // 벽 밑을 파고 지나갈 땐 안 보인다
+      if (game.modes?.ghostEntities) a *= Math.max(0, Math.min(1, (MODE_RULES.GHOST - Math.hypot(m.x - view.x, m.y - view.y)) / (TS * 1.5)));   // '보이지 않는 공포' 모드
       if (a <= 0) continue;
       shownMonsters.push({ m, a });
       actors.push({ y: m.y, draw: () => drawMonster(ctx, m, game.time, a) });
@@ -292,6 +293,7 @@ export class Renderer {
     if (game.flashT > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(255,255,248,${(game.flashT / 0.35) * 0.75})`; ctx.fillRect(0, 0, W, H); }
     this.drawPostFx(game);
     if (game.deathT <= 0) this.hud.draw(ctx, game, W, H, dt);
+    if (game.scare && game.deathT <= 0) this.drawGameScare(game);   // 게임 중 점프스케어 (HUD 까지 덮는다)
     if (game.cine) { this.drawCinematic(game); this.drawSkipHint(game); }
     if (game.paused) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H); }
   }
@@ -692,6 +694,19 @@ export class Renderer {
       ctx.fillStyle = ['rgba(255,40,80,0.8)', 'rgba(40,255,200,0.8)', 'rgba(80,120,255,0.8)', 'rgba(255,255,255,0.9)', 'rgba(0,0,0,0.9)'][i % 5];
       ctx.fillRect(Math.round(bx - bw / 2 + (rng() - 0.5) * 10), Math.round(by), Math.round(bw), Math.round(bh));
     }
+  }
+
+  /** 게임 중 점프스케어: 붉은 화면 + 괴물 얼굴이 덜덜 떨며 커진다 (game.scare = { type, t, dur }) */
+  drawGameScare(game) {
+    const { ctx, W, H } = this, s = game.scare, u = s.t / s.dur;
+    const a = Math.min(1, (s.dur - s.t) / 0.15);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = `rgba(${40 + Math.random() * 50},0,0,${0.85 * a})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = a;
+    drawJumpscareSprite(ctx, s.type, game.time, W / 2 + (Math.random() - 0.5) * 60, H / 2 + (Math.random() - 0.5) * 60, Math.min(W, H) * (0.75 + u * 0.55));
+    ctx.globalAlpha = 1;
   }
 
   drawJumpscare(game) {

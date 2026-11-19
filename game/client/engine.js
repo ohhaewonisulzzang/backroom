@@ -26,7 +26,9 @@ const Game = {
   phase: 'menu',              // menu | connecting | lobby | game
   menu: null,                 // 메인 메뉴 배경 장면 (천천히 떠도는 카메라)
   lobby: null,
-  settings: { volume: 0.7, shake: true, menuScares: true, deathScares: true, gore: true },
+  settings: { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true },
+  scare: null, scareCd: 0, nextScare: 30,   // 게임 중 점프스케어 { type, t, dur } / 다음까지 최소 간격 / 환각 점프스케어 타이머
+  boatIdleT: 0, boatWarned: false,          // 보트 위에서 가만히 있던 시간 (익사자가 발밑에서 솟아나기 전 경고)
   paused: false,              // ESC 메뉴가 열려 있음 (입력 차단)
   cine: null,                 // 시네마틱 { type: intro|awake|escape|ending, t, dur, data }
   pendingLobby: null,         // 엔딩이 끝난 뒤 보여줄 대기방
@@ -398,13 +400,14 @@ const Game = {
     } else if (p.alive && p.hidden && this.roundPhase === 'playing') {
       net.sendState(p, dt);                        // 숨어 있는 동안은 제자리 (서버도 이동을 무시)
     } else if (p.alive && this.roundPhase === 'playing') {
-      updateLocalPlayer(p, dt, this.map, this.cam, renderer.scale, { infinite: !!this.horde || !!this.modes.infiniteStamina, noSprint: !!this.modes.noSprint });   // 질주 레벨 / '무한 스태미나' / '달리기 금지' 모드
+      updateLocalPlayer(p, dt, this.map, this.cam, renderer.scale, { infinite: !!this.horde || !!this.modes.infiniteStamina, noSprint: !!this.modes.noSprint, speedMul: this.modes.quickFeet ? MODE_RULES.QUICK : 1 });   // 질주 레벨 / '무한 스태미나' / '달리기 금지' 모드
       net.sendState(p, dt);
     }
     for (const rp of this.remotes.values()) rp.interpolate(dt);
     for (const m of this.monsters) m.interpolate(dt);
 
     this.updateHallucinations(dt);
+    this.updateScares(dt);
     if (this.machineT > 0) this.machineT -= dt;
     // 하이드로리티스: 초록 물에 서 있으면 시야가 어두워진다 (판정은 서버)
     if (this.level.info.toxic) {
@@ -503,6 +506,42 @@ const Game = {
       this.cam.x = view.x - vw / 2 + (this.cine.data.fromX || 0) * (1 - e);
       this.cam.y = view.y - vh / 2 + (this.cine.data.fromY || 0) * (1 - e);
     }
+  },
+
+  /**
+   * 게임 중 점프스케어: 괴물 얼굴이 화면 가득 번쩍 튀어나온다 (설정 '게임 중 점프스케어' 로 끌 수 있다).
+   *  - 괴물이 나를 발견했을 때 (가끔), 스토커/익사자가 내 발밑에서 솟아날 때 (항상)
+   *  - 정신력이 40% 아래면 가끔 환각으로, '점프스케어 폭주' 모드면 정신력과 상관없이 자주
+   * 또 보트 위에서 가만히 있으면 익사자가 솟아나기 전에 경고한다.
+   */
+  updateScares(dt) {
+    if (this.scare && (this.scare.t += dt) >= this.scare.dur) this.scare = null;
+    if (this.scareCd > 0) this.scareCd -= dt;
+    const p = this.local;
+    if (!p?.alive || this.roundPhase !== 'playing' || this.cine || this.deathT > 0 || (this.paused && this.solo)) { this.boatIdleT = 0; return; }
+    if (p.boat && !p.hidden && this.monsters.some(m => m.type === 'drowned')) {
+      this.boatIdleT = p.moving ? 0 : this.boatIdleT + dt;
+      if (this.boatIdleT === 0) this.boatWarned = false;
+      else if (this.boatIdleT > 1.2 && !this.boatWarned) {
+        this.boatWarned = true;
+        Sound.splash(0.35, true); Sound.whisper(0.6);
+        UI.notify?.(t('발밑의 물이 소용돌이친다 — 계속 저어라!'));
+      }
+    } else { this.boatIdleT = 0; this.boatWarned = false; }
+    const S = CONFIG.SANITY, s = p.sanity ?? S.MAX, fest = !!this.modes.scareFest, low = S.MAX * 0.4;
+    if (!fest && s >= low) { this.nextScare = Math.max(this.nextScare, 20); return; }
+    if ((this.nextScare -= dt) > 0) return;
+    this.nextScare = fest ? 12 + Math.random() * 20 : 25 + Math.random() * 45 * (s / low);
+    const pool = [...new Set(this.monsters.map(m => m.type))].filter(ty => !MODE_RULES.PHOTO_SKIP.includes(ty));
+    this.jumpscare(!pool.length || Math.random() < 0.4 ? 'smiler' : pool[Math.floor(Math.random() * pool.length)], 0.45);
+  },
+  /** 점프스케어 하나 띄우기. force = 최소 간격 무시 (발밑에서 솟아날 때) */
+  jumpscare(type, dur = 0.55, force = false) {
+    if (this.settings.gameScares === false || this.deathT > 0) return;
+    if (this.scareCd > 0 && !force) return;
+    this.scare = { type, t: 0, dur }; this.scareCd = 6;
+    Sound.menuScare();
+    this.shake = Math.max(this.shake, 14);
   },
 
   /**
@@ -776,6 +815,8 @@ const handlers = {
     if (targetId !== Game.myId) return;
     Sound.alert(type);
     Game.shake = Math.max(Game.shake, 7);
+    // 나를 발견했다: 가끔 얼굴이 화면 가득 튀어나온다 ('점프스케어 폭주' 모드면 자주). 스토커는 솟아날 때 이미 했다
+    if (type !== 'shadow' && !MODE_RULES.PHOTO_SKIP.includes(type) && Math.random() < (Game.modes.scareFest ? 0.7 : 0.35)) Game.jumpscare(type);
   },
   onEntityEvent(e) {
     const m = Game.monsters.find(x => x.id === e.id);
@@ -842,7 +883,7 @@ const handlers = {
         if (near > 0) { Sound.snapShut(Math.max(0.4, near)); Game.shake = Math.max(Game.shake, 9 * near); }
         break;
       case 'form':        // 그림자가 누군가의 발밑에서 솟아난다 (그 사람에게 크게)
-        if (e.target === Game.myId) { Sound.whisper(1); Sound.tone(140, 70, 1.6, 0.14, 'sine'); Game.shake = Math.max(Game.shake, 5); UI.notify?.(t('발밑에서 무언가 솟아난다 — 계속 움직여라')); }
+        if (e.target === Game.myId) { Sound.whisper(1); Sound.tone(140, 70, 1.6, 0.14, 'sine'); Game.shake = Math.max(Game.shake, 5); UI.notify?.(t('발밑에서 무언가 솟아난다 — 계속 움직여라')); Game.jumpscare('shadow', 0.5, true); }
         else if (near > 0) Sound.whisper(near * 0.6);
         break;
       case 'fade':        // 그림자가 흩어진다
@@ -871,6 +912,14 @@ const handlers = {
         break;
       case 'rise':        // 익사자: 보트 옆으로 손이 올라온다 — 손전등을 비추거나 피해라
         if (near > 0) { Sound.splash(Math.max(0.4, near), true); Game.shake = Math.max(Game.shake, 5 * near); }
+        break;
+      case 'emerge':      // 익사자가 가만히 있던 보트 바로 밑에서 솟아난다 — 당장 저어서 벗어나라
+        if (e.target === Game.myId) {
+          Sound.splash(1, true); Sound.splash(0.8, true); Sound.tone(90, 40, 0.9, 0.22, 'sawtooth');
+          Game.shake = Math.max(Game.shake, 12);
+          UI.notify?.(t('발밑에서 무언가 솟아난다 — 계속 움직여라'));
+          Game.jumpscare('drowned', 0.55, true);
+        } else if (near > 0) Sound.splash(Math.max(0.4, near), true);
         break;
       case 'grab':        // 익사자가 끌어당긴다
         if (near > 0) { Sound.splash(Math.max(0.5, near), true); Sound.tone(90, 40, 0.6, 0.2 * near, 'sawtooth'); }

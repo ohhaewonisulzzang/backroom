@@ -1,4 +1,4 @@
-import { humanPreview, drawJumpscareSprite } from './sprites.js';
+import { humanPreview } from './sprites.js';
 import { Sound } from './sound.js';
 import { SUIT_HEX } from '../../shared/config.js';
 import { drawScene, makeStoryCast, lineText, castName } from './story.js';
@@ -14,22 +14,20 @@ import { t as tr } from '../../shared/i18n.js';
  *
  * 엔딩 종류 (서버가 gameComplete.ending 으로 정한다):
  *  good    노멀 엔딩 — 위 그대로
- *  bad     배드 엔딩 "끝나지 않는 복도" — 남겨진 동료는 문으로 걸어 나오지 못하고, 돌아온 복도의 벽이 다시 노랗게 변한다
- *  madness 광기 엔딩 "무지개 너머" — 돌아온 복도가 무지개색으로 일그러지고 스마일러가 비친다
  *  manila  히든 엔딩 "마닐라 룸" — Level 0 의 숨겨진 문. A·B 장면 대신 아무것도 들어오지 못하는 누런 방
  */
 export const ENDING = { DUR: 38, A: 9.5, B: 19.5, C: 31 };
-export const ENDING_KINDS = ['good', 'bad', 'madness', 'manila'];
-const ENDING_NAME = { good: 'NORMAL ENDING', bad: 'BAD ENDING', madness: 'MADNESS ENDING', manila: 'HIDDEN ENDING' };
-const ENDING_SUB = { good: '집으로', bad: '끝나지 않는 복도', madness: '무지개 너머', manila: '마닐라 룸' };
-const ENDING_STAMP = { good: ['탈출 성공', '#d23a2a'], bad: ['돌아오지 못함', '#8a8a8a'], madness: ['정신 붕괴', '#c040c0'], manila: ['숨겨진 방', '#c8a040'] };
+export const ENDING_KINDS = ['good', 'manila'];
+const ENDING_NAME = { good: 'NORMAL ENDING', manila: 'HIDDEN ENDING' };
+const ENDING_SUB = { good: '집으로', manila: '마닐라 룸' };
+const ENDING_STAMP = { good: ['탈출 성공', '#d23a2a'], manila: ['숨겨진 방', '#c8a040'] };
 const ENDING_STORE = 'backrooms.endings';
 /** 본 엔딩 기록 (이 브라우저) — 몇 개 찾았는지 */
 function recordEnding(kind) {
   try {
     const seen = new Set(JSON.parse(localStorage.getItem(ENDING_STORE) || '[]'));
     seen.add(kind); localStorage.setItem(ENDING_STORE, JSON.stringify([...seen]));
-    return seen.size;
+    return ENDING_KINDS.filter(k => seen.has(k)).length;   // 예전에 있던 엔딩(배드·광기) 기록은 세지 않는다
   } catch { return 1; }
 }
 
@@ -73,23 +71,11 @@ export function makeEndingData(stats, myId, fallbackColor, players, ending = 'go
       { t: 3.6, who: solo ? null : buddy, pitch: 1.25, text: solo ? '' : '돌아왔어... 진짜로 돌아왔어!' },
       { t: 6.0, who: holder, pitch: 0.9, text: solo ? '{name}?! 너 어디 있었던 거야?' : '...카메라, 아직 녹화 중이었네.', vars: solo ? { name: cast.me.name } : undefined },
     ],
-    bad: [
-      { t: 1.2, who: cast.me, pitch: 1.0, text: '...돌아온 거 맞지?' },
-      { t: 4.0, who: cast.me, pitch: 0.95, text: '잠깐... 벽이 왜 노래지는 거야?' },
-      { t: 7.0, who: cast.me, pitch: 0.9, text: '아니야... 아니야, 아니야—' },
-    ],
-    madness: [
-      { t: 1.2, who: cast.me, pitch: 1.3, text: '하하... 돌아왔다. 돌아왔어!' },
-      { t: 4.2, who: cast.me, pitch: 1.45, text: '다들 웃고 있네. 다들... 웃고 있어.' },
-      { t: 7.2, who: cast.me, pitch: 1.6, text: '나도 웃어야지.' },
-    ],
     manila: [],
   };
   const script = [{ t: 0.4, sfx: 'camBeep' }, ...lines[kind]].filter(e => e.sfx || e.text);
-  // 배드 엔딩: 남겨진 사람(탈출 못 한 사람)은 문으로 걸어 나오지 못한다
-  const walkers = kind === 'bad' && escaped?.length ? list.filter(s => escaped.includes(s.name)) : list;
   return {
-    kind, found: recordEnding(kind), walkers: walkers.length ? walkers : list,
+    kind, found: recordEnding(kind), walkers: list,
     me, players: list, cast, script, date: `${M[now.getMonth()]} ${String(now.getDate()).padStart(2, '0')} ${now.getFullYear()}`,
     playTime: stats?.playTime || 0, deaths: list.reduce((t, s) => t + s.deaths, 0),
   };
@@ -108,10 +94,6 @@ export function playEndingEvents(cine, prevT) {
     if (at(5.2)) { Sound.tone(220, 880, 1.2, 0.06, 'sine'); Sound.tone(330, 990, 1.4, 0.04, 'triangle', 0.2); }   // 문이 열리는 빛
     if (at(8.2)) Sound.noclip();
   }
-  if (d.kind === 'bad' && at(ENDING.A + 4)) { Sound.flickerTick(1); Sound.setHum?.(0.6); }
-  if (d.kind === 'bad' && at(ENDING.B - 1.5)) Sound.howl?.(0.5);
-  if (d.kind === 'madness' && at(ENDING.A + 3)) Sound.trip?.(6);
-  if (d.kind === 'madness' && at(ENDING.A + 8)) Sound.giggle(1);
   for (const e of d.script) {                                         // B 장면 대사
     const x = ENDING.A + e.t;
     if (!at(x)) continue;
@@ -120,7 +102,6 @@ export function playEndingEvents(cine, prevT) {
   }
   if (d.kind !== 'manila' && at(ENDING.B - 0.9)) { Sound.flickerTick(1); Sound.tone(60, 60, 0.5, 0.1, 'sawtooth'); }   // ...형광등?
   if (at(ENDING.B - 0.3)) { Sound.hushVoice(); if (d.kind !== 'manila') Sound.staticBurst(0.4, 0.7); }
-  if (d.kind === 'bad' && at(ENDING.B + 0.2)) Sound.setHum?.(0);
   // C: 줄마다 타자 소리, 마지막에 도장
   const rowT = k => ENDING.B + 2.4 + k * 1.1;
   for (let k = 0; k < d.players.length + 2; k++) if (at(rowT(k))) { Sound.click(); Sound.tone(900, 900, 0.04, 0.05, 'square'); }
@@ -204,22 +185,12 @@ function drawExitWalk(r, t, d) {
 // ---------------------------------------------------------------- B: 폐건물로 돌아옴 (캠코더 화면)
 function drawReturn(r, game, lt, d) {
   const { ctx, W, H } = r;
-  // drawScene 시간 (9.6 전: 벽은 회색, 사람들이 복도를 걷는다). 배드 엔딩은 그 뒤(벽이 노래지고 일그러지기 직전)까지 간다
-  const st = d.kind === 'bad' ? Math.min(14.3, 4 + lt * 1.05) : Math.min(9.4, lt * 0.95);
-  drawScene(r, game, st, { cast: d.cast, script: d.kind === 'bad' ? d.script.map(e => ({ ...e, t: e.t + 4 })) : d.script, date: d.date });
-  if (d.kind === 'madness') {                             // 광기: 색이 무지개로 돌고, 스마일러 얼굴이 번쩍 비친다
-    const k = clamp01(lt / 6);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const hue = (lt * 300) % 360, gr = ctx.createLinearGradient(0, 0, W, H);
-    for (let i = 0; i <= 6; i++) gr.addColorStop(i / 6, `hsl(${(hue + i * 60) % 360},100%,50%)`);
-    ctx.globalCompositeOperation = 'color'; ctx.globalAlpha = 0.85 * k; ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
-    if (Math.random() < 0.08 + k * 0.2) drawJumpscareSprite(ctx, 'smiler', lt, Math.random() * W, Math.random() * H, Math.min(W, H) * (0.15 + Math.random() * 0.3));
-    if (lt > 8) { const m = clamp01((lt - 8) / 1.5); ctx.globalAlpha = m; drawJumpscareSprite(ctx, 'smiler', lt, W / 2, H / 2, Math.min(W, H) * (0.4 + m * 0.8)); ctx.globalAlpha = 1; }
-  }
+  // drawScene 시간 (9.6 전: 벽은 회색, 사람들이 복도를 걷는다)
+  const st = Math.min(9.4, lt * 0.95);
+  drawScene(r, game, st, { cast: d.cast, script: d.script, date: d.date });
   // 처음엔 하얀 빛이 걷힌다
   if (lt < 1.2) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(255,253,240,${1 - lt / 1.2})`; ctx.fillRect(0, 0, W, H); }
-  // 끝에: 아주 잠깐 노란 형광등빛이 번쩍 — 정말 나온 걸까? (배드 엔딩은 이미 노랗다)
+  // 끝에: 아주 잠깐 노란 형광등빛이 번쩍 — 정말 나온 걸까?
   const end = ENDING.B - ENDING.A;
   if (d.kind === 'good' && lt > end - 0.9 && lt < end - 0.75) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(214,194,106,0.7)'; ctx.fillRect(0, 0, W, H); }
   if (lt > end - 0.35) {

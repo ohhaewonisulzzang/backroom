@@ -3,6 +3,9 @@ import { mulberry32 } from './utils.js';
 import { hasLOS } from './physics.js';
 import { generatePuzzle } from './puzzles.js';
 
+/** 히든 엔딩(마닐라 룸) 문이 Level 0 에 생길 확률: 0.06% */
+export const MANILA_CHANCE = 0.0006;
+
 export class GameMap {
   constructor(w, h, seed, layout = 'maze', puddles = 0, roads = 0) {
     this.w = w; this.h = h;
@@ -396,9 +399,10 @@ export function generateLevel(seed, levelIndex = 0) {
     }
   }
 
-  // 히든 엔딩 (Level 0 만): 시작점에서 아주 먼 막다른 곳(3면이 벽, 북쪽이 벽)에 숨겨진 마닐라 룸 문
+  // 히든 엔딩 (Level 0 만, MANILA_CHANCE = 0.06% 확률로만 생긴다): 시작점에서 아주 먼 막다른 곳(3면이 벽, 북쪽이 벽)에 숨겨진 마닐라 룸 문
+  //   시드로 정하므로 서버와 클라이언트가 같은 결과를 본다
   let secret = null;
-  if (levelIndex === 0) {
+  if (levelIndex === 0 && mulberry32(seed ^ 0x4d4e4c41)() < MANILA_CHANCE) {
     const dead = map.floorCells.filter(i => {
       const x = i % map.w, y = (i / map.w) | 0;
       if (map.tiles[i] !== T.FLOOR || dist[i] < 30 || i === exitIdx || !map.isSolid(x, y - 1)) return false;

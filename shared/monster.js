@@ -846,6 +846,13 @@ export class Monster {
     }
     if (!this.trail.length && budget > 0) this.moveToward(p.x, p.y, speed, dt, map);
   }
+  /** 익사자: 보트 위에서 가만히 있는 사람의 바로 발밑(보트 밑)에서 솟아난다 — 손이 올라오고(emerge 초) 그다음 끌어당긴다 */
+  emergeUnder(p, game) {
+    this.x = p.x; this.y = p.y; this.prey = p; this.path = []; this.lostT = 0;
+    this.lastSeen = { x: p.x, y: p.y };
+    this.state = 'surface'; this.timer = this.cfg.emerge; this.under = true;
+    game.onEntityEvent(this, 'emerge', { target: p.id });
+  }
   /** 그림자: 숨지 않은 가장 가까운 사람의 발밑에서 솟아나기 시작 */
   formOn(game) {
     const { target } = this.nearestPlayer(game);
@@ -992,7 +999,8 @@ export class Monster {
     const C = this.cfg, map = game.map, now = Date.now();
     const water = (x, y) => map.get(x, y) === T.DEEP;
     const lit = this.state === 'surface' || this.state === 'stalk' ? this.litBy(game) : null;
-    if (lit && lit.d > TS * 0.8) { this.state = 'sink'; this.timer = C.sinkLit; this.prey = null; this.path = []; game.onEntityEvent(this, 'sinkLit'); return; }
+    // 발밑에서 솟아난 익사자(under)는 손전등으로 못 쫓는다
+    if (lit && lit.d > TS * 0.8 && !this.under) { this.state = 'sink'; this.timer = C.sinkLit; this.prey = null; this.path = []; game.onEntityEvent(this, 'sinkLit'); return; }
     if (this.state === 'surface') {
       this.timer -= dt;
       if (this.prey) this.angle = Math.atan2(this.prey.y - this.y, this.prey.x - this.x);
@@ -1003,7 +1011,7 @@ export class Monster {
       this.timer -= dt;
       const p = this.prey;
       if (p && p.alive && p.boat && Math.hypot(p.x - this.x, p.y - this.y) < C.reach * 1.8) this.moveToward(p.x, p.y, C.lunge, dt, map);
-      if (this.timer <= 0) { this.state = 'sink'; this.timer = C.sink; this.prey = null; }
+      if (this.timer <= 0) { this.state = 'sink'; this.timer = C.sink; this.prey = null; this.under = false; }
       return;
     }
     if (this.state === 'sink') { this.timer -= dt; if (this.timer <= 0) { this.state = 'lurk'; this.path = []; } return; }

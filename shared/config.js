@@ -137,8 +137,9 @@ export const CONFIG = {
     //   (세게 저으면 멀리서, 보통은 hear, 웅크려 조용히 저으면 hearQuiet 안에서만). 보트 strike 거리까지 오면
     //   surface 초 동안 손이 먼저 올라오고(예고) → grab 초 동안 끌어당긴다(reach) → sink 초 동안 가라앉는다.
     //   손전등을 비추면 바로 가라앉는다 (sinkLit 초). 땅 위나 보트에서 내린 사람은 건드리지 못한다
+    //   보트 위에서 idle 초 동안 가만히 있으면 스토커처럼 바로 발밑에서 솟아난다 (emerge 초 동안 손이 올라온다 — 그 사이 저어서 벗어나라)
     drowned:     { roam: 50, swim: 108, hear: 6 * 48, hearFast: 10 * 48, hearQuiet: 2.2 * 48, strike: 1.5 * 48,
-                   surface: 0.9, grab: 0.8, sink: 2.2, sinkLit: 3, reach: 1.1 * 48, lunge: 150 },
+                   surface: 0.9, grab: 0.8, sink: 2.2, sinkLit: 3, reach: 1.1 * 48, lunge: 150, idle: 2.5, emerge: 1.1 },
   },
 
   // 감정 표현 (, 키) — 목소리도 소리라서 귀가 밝은 엔티티는 듣는다
@@ -489,6 +490,12 @@ export const randomSuit = () => PLAYER_COLORS[Math.floor(Math.random() * PLAYER_
  *  battery      — 손전등 배터리가 닳는다 (끄면 충전된다)
  *  entityRadar  — 미니맵에 가까운 괴물이 빨간 점으로 보인다
  *  calm         — 정신력이 줄지 않는다
+ *  scareFest    — 게임 중 점프스케어가 훨씬 자주 튀어나온다 (정신력과 상관없이)
+ *  anxious      — 레벨마다 정신력 MODE_RULES.ANXIOUS 로 시작한다
+ *  starterKit   — 레벨마다 아몬드 워터와 조명탄을 하나씩 받는다 (가방에 빈칸이 있으면)
+ *  quickFeet    — 이동 속도(걷기·달리기·웅크리기·노 젓기)가 MODE_RULES.QUICK 배
+ *  loudSteps    — 발소리가 MODE_RULES.LOUD 배 멀리 퍼진다
+ *  ghostEntities— 괴물이 MODE_RULES.GHOST 거리 안에 들어와야 보인다
  */
 export const MODES = [
   { id: 'mimic', name: '목소리 흉내', desc: '엔티티가 녹음된 목소리를 흉내 낸다', on: true },
@@ -518,6 +525,12 @@ export const MODES = [
   { id: 'battery', name: '손전등 배터리', desc: '손전등 배터리가 닳는다. 끄면 천천히 충전된다', on: false },
   { id: 'entityRadar', name: '괴물 레이더', desc: '미니맵에 가까운 괴물이 빨간 점으로 보인다', on: false },
   { id: 'calm', name: '평온', desc: '정신력이 줄지 않는다', on: false },
+  { id: 'scareFest', name: '점프스케어 폭주', desc: '게임 중 점프스케어가 훨씬 자주 튀어나온다', on: false },
+  { id: 'anxious', name: '불안한 시작', desc: '레벨마다 정신력 50% 로 시작한다', on: false },
+  { id: 'starterKit', name: '생존 키트', desc: '레벨마다 아몬드 워터와 조명탄을 하나씩 받는다', on: false },
+  { id: 'quickFeet', name: '가벼운 발', desc: '이동 속도가 20% 빨라진다', on: false },
+  { id: 'loudSteps', name: '시끄러운 발걸음', desc: '발소리가 1.5배 멀리 퍼진다', on: false },
+  { id: 'ghostEntities', name: '보이지 않는 공포', desc: '괴물이 4칸 안으로 들어와야 보인다', on: false },
 ];
 /** 모드 숫자 (MODES 참고) */
 export const MODE_RULES = {
@@ -527,5 +540,9 @@ export const MODE_RULES = {
   PHOTO_SKIP: ['wanderer', 'partyPooper'],   // 사진작가: 찍어도 인정 안 되는 엔티티 (해치지 않는 것)
   BATTERY: { drain: 45, charge: 30, min: 20 },   // 손전등 배터리: 다 닳는 시간 / 다 차는 시간(초) / 다시 켤 수 있는 최소(%)
   RADAR: 15 * 48,           // 괴물 레이더 범위
+  ANXIOUS: 50,              // 불안한 시작: 레벨 시작 정신력
+  QUICK: 1.2,               // 가벼운 발: 이동 속도 배수
+  LOUD: 1.5,                // 시끄러운 발걸음: 발소리 반경 배수
+  GHOST: 4 * 48,            // 보이지 않는 공포: 괴물이 보이기 시작하는 거리
 };
 export const defaultModes = () => Object.fromEntries(MODES.map(m => [m.id, !!m.on]));

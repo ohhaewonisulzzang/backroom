@@ -5,7 +5,7 @@ import { Sound } from './sound.js';
 import { angleDiff } from '../../shared/utils.js';
 
 /** 로컬 플레이어 입력 처리 (클라이언트 예측 이동). 서버는 결과 위치를 검증한다. */
-/** opts.infinite = 스태미나 무한 (질주 레벨) */
+/** opts.infinite = 스태미나 무한 (질주 레벨), opts.noSprint = 달리기 금지, opts.speedMul = 이동 속도 배수 */
 export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   const C = CONFIG.PLAYER;
   let ix = 0, iy = 0;
@@ -37,8 +37,9 @@ export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   const R = CONFIG.RIVER;
   const speed = p.boat ? (p.crouching ? R.ROW_QUIET : p.sprinting ? R.ROW_FAST : R.ROW)                  // 보트: 조용히 / 세게 / 보통 젓기
     : (p.crouching ? C.CROUCH : p.sprinting ? C.SPRINT : C.WALK) * slow * rush;
+  const speedMul = opts.speedMul || 1;   // '가벼운 발' 모드
   const bx = p.x, by = p.y;
-  moveEntity(p, ix * speed * dt, iy * speed * dt, C.RADIUS, passMap(map, p.boat));   // 걸으면 깊은 물이, 보트면 땅이 벽
+  moveEntity(p, ix * speed * speedMul * dt, iy * speed * speedMul * dt, C.RADIUS, passMap(map, p.boat));   // 걸으면 깊은 물이, 보트면 땅이 벽
   const moved = Math.hypot(p.x - bx, p.y - by);
   p.moving = moved > 0.1;
   p.walkPhase += moved * 0.15;

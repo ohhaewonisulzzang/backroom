@@ -15,7 +15,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* 저장 불가 환경 무시 */ } },
 };
 const loadSettings = () => {
-  const def = { volume: 0.7, shake: true, menuScares: true, deathScares: true, gore: true };
+  const def = { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true };
   try { return { ...def, ...JSON.parse(store.get('backrooms.settings') || '{}') }; }
   catch { return def; }
 };
@@ -481,6 +481,7 @@ function SettingsForm({ settings, onSettings, onBack, engine }) {
           <label className="check"><input type="checkbox" checked={settings.shake !== false} onChange={e => onSettings({ shake: e.target.checked })} /> {t('화면 흔들림')}</label>
           <label className="check"><input type="checkbox" checked={settings.menuScares !== false} onChange={e => onSettings({ menuScares: e.target.checked })} /> {t('메인 화면 점프스케어')}</label>
           <label className="check"><input type="checkbox" checked={settings.deathScares !== false} onChange={e => onSettings({ deathScares: e.target.checked })} /> {t('사망 점프스케어')}</label>
+          <label className="check"><input type="checkbox" checked={settings.gameScares !== false} onChange={e => onSettings({ gameScares: e.target.checked })} /> {t('게임 중 점프스케어')}</label>
           <label className="check"><input type="checkbox" checked={settings.gore !== false} onChange={e => onSettings({ gore: e.target.checked })} /> {t('잔인한 연출')}</label>
         </>
       )}
@@ -820,8 +821,6 @@ function TestPanel({ onCmd, onClose }) {
           <B cmd="tpPuzzle">{t('퍼즐로 이동')}</B>
           <B cmd="tpExit">{t('출구로 이동')}</B>
           <B cmd="ending" arg="good">{t('엔딩 보기')}</B>
-          <B cmd="ending" arg="bad">{t('배드 엔딩')}</B>
-          <B cmd="ending" arg="madness">{t('광기 엔딩')}</B>
           <B cmd="ending" arg="manila">{t('히든 엔딩')}</B>
           <B cmd="tpSecret">{t('숨겨진 문으로')}</B>
         </div>}
