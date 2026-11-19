@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { toM, yawFromAngle, EYE_H, EYE_CROUCH } from './units.js';
+import { buildWorld } from './world.js';
 
 /** WebGL 을 쓸 수 있는가 (못 쓰면 엔진이 2D 로만 그린다) */
 export function webglAvailable() {
@@ -33,6 +34,8 @@ export class Renderer3D {
     this.scene.background = new THREE.Color(0x0a0904);
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 60);
     this.camera.rotation.order = 'YXZ';
+    this.ambient = new THREE.AmbientLight(0xfff4dc, 1.0);   // 기본 밝기는 구워 둔 형광등 밝기(lightTex)가 정한다
+    this.scene.add(this.ambient, this.camera);
     this.eye = EYE_H;
     this.level = null;
     this.levelGroup = null;               // 레벨마다 새로 짓는 것 (setLevel 에서 dispose)
@@ -62,17 +65,14 @@ export class Renderer3D {
     this.disposeLevel();
     this.level = level;
     const g = this.levelGroup = new THREE.Group();
-    // 임시 바닥 (Task 4 에서 진짜 월드로 바뀐다)
-    const { w, h } = level.map;
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(toM(w * 48), toM(h * 48)), new THREE.MeshBasicMaterial({ color: 0x5a5030 }));
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(toM(w * 48) / 2, 0, toM(h * 48) / 2);
-    g.add(floor);
+    this.world = buildWorld(level, this.quality);
+    g.add(this.world.group);
     this.scene.fog = new THREE.FogExp2(0x1a1608, 0.11);
     this.scene.add(g);
   }
 
   disposeLevel() {
+    this.world?.dispose(); this.world = null;
     if (!this.levelGroup) return;
     this.scene.remove(this.levelGroup);
     this.levelGroup.traverse(o => {
@@ -97,6 +97,7 @@ export class Renderer3D {
     if (this.lost) return;
     this.setQuality(game.settings?.quality);
     this.placeCamera(game, dt);
+    this.scene.fog.density = game.modes?.thickFog ? 0.2 : 0.11;   // '짙은 안개' 모드
     this.gl.render(this.scene, this.camera);
     this.overlay.prepareView(game, dt);
     this.overlay.renderOverlay(game, dt, { three: true });
