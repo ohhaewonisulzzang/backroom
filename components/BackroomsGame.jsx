@@ -335,8 +335,12 @@ function TouchControls({ engine }) {
         onChange={(x, y, len) => { const t = T(); if (!t) return; t.active = true; t.move.x = x; t.move.y = y; t.sprint = len > 0.92; }}
         onEnd={() => { const t = T(); if (!t) return; t.move.x = 0; t.move.y = 0; t.sprint = false; }} />
       <TouchStick side="right"
-        onChange={(x, y, len) => { const t = T(); if (!t) return; t.active = true; if (len > 0.2) t.aim = Math.atan2(y, x); }}
-        onEnd={() => { const t = T(); if (t) t.aim = null; }} />
+        onChange={(x, y, len) => {
+          const t = T(); if (!t) return; t.active = true;
+          if (engine()?.view3D) { t.look.x = len > 0.15 ? x : 0; t.look.y = len > 0.15 ? y : 0; }   // 3D(1인칭): 오른쪽 스틱 = 둘러보기
+          else if (len > 0.2) t.aim = Math.atan2(y, x);
+        }}
+        onEnd={() => { const t = T(); if (!t) return; t.aim = null; t.look.x = 0; t.look.y = 0; }} />
       <div className="touch-top">
         <Btn action="chat" label={t('채팅')} />
         {engine()?.voice?.enabled && <Btn action="mic" label={t('마이크')} />}

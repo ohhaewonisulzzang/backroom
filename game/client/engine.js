@@ -1276,6 +1276,8 @@ export function startGame({ canvas, canvas3d: c3d, ui }) {
       Sound.setHum(on ? 0.3 : 1);
     },
     get isSolo() { return Game.solo; },
+    /** 지금 3D(1인칭) 화면인가 — 터치 오른쪽 스틱이 조준 대신 둘러보기가 된다 */
+    get view3D() { return Game.view3D; },
     /** 터치 조작 (휴대폰/태블릿) */
     touch: Input.touch,
     press(code) { Input.press(code); },
