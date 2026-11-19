@@ -6,7 +6,7 @@ import { mulberry32 } from '../../../shared/utils.js';
  *  - 벽지: 누런 바탕, 세로 줄무늬·잔무늬, 얼룩, 아래쪽 습기 자국
  *  - 카펫: 축축한 갈색 잔털 노이즈, 짙은 얼룩
  *  - 천장: 석고 천장 타일 격자·구멍
- * 모든 재질은 구워 둔 형광등 밝기(lightTex: 타일당 1텍셀)를 월드 xz 로 샘플해 곱한다.
+ * 모든 재질은 구워 둔 형광등 밝기(lightTex: 타일당 1텍셀)를 월드 xz 로 샘플해 자체 발광으로 더한다.
  */
 const rgb = (r, g, b, a = 1) => `rgba(${r | 0},${g | 0},${b | 0},${a})`;
 
@@ -103,7 +103,8 @@ function bakeLight(mat, lightTex, map) {
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWorldL = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform sampler2D uLight;\nuniform vec2 uMap;\nvarying vec3 vWorldL;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\n{ float L = texture2D(uLight, vWorldL.xz * uMap).r; diffuseColor.rgb *= max(0.04, L * 1.15); }');
+      // 형광등 밝기는 자체 발광으로 더한다 → 손전등·실시간 조명은 그 위에 그대로 더해진다 (어두운 구역에서도 손전등이 먹힌다)
+      .replace('#include <emissive_fragment>', '#include <emissive_fragment>\n{ float L = texture2D(uLight, vWorldL.xz * uMap).r; totalEmissiveRadiance += diffuseColor.rgb * max(0.0, L * 1.05); }');
   };
   mat.customProgramCacheKey = () => 'bakeLight';
   return mat;

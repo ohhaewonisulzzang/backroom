@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { toM, yawFromAngle, EYE_H, EYE_CROUCH } from './units.js';
 import { buildWorld } from './world.js';
+import { LightRig } from './lights.js';
 
 /** WebGL 을 쓸 수 있는가 (못 쓰면 엔진이 2D 로만 그린다) */
 export function webglAvailable() {
@@ -34,7 +35,7 @@ export class Renderer3D {
     this.scene.background = new THREE.Color(0x0a0904);
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 60);
     this.camera.rotation.order = 'YXZ';
-    this.ambient = new THREE.AmbientLight(0xfff4dc, 1.0);   // 기본 밝기는 구워 둔 형광등 밝기(lightTex)가 정한다
+    this.ambient = new THREE.AmbientLight(0xfff4dc, 0.05);  // 벽·바닥 밝기는 구워 둔 형광등 밝기(lightTex)가 정한다. 이건 아주 옅은 바탕빛
     this.scene.add(this.ambient, this.camera);
     this.eye = EYE_H;
     this.level = null;
@@ -67,11 +68,13 @@ export class Renderer3D {
     const g = this.levelGroup = new THREE.Group();
     this.world = buildWorld(level, this.quality);
     g.add(this.world.group);
+    this.rig = new LightRig(this.scene, this.camera, level, this.world.lightTex, this.quality, this.overlay.lights.flickers);
     this.scene.fog = new THREE.FogExp2(0x1a1608, 0.11);
     this.scene.add(g);
   }
 
   disposeLevel() {
+    this.rig?.dispose(); this.rig = null;
     this.world?.dispose(); this.world = null;
     if (!this.levelGroup) return;
     this.scene.remove(this.levelGroup);
@@ -98,6 +101,11 @@ export class Renderer3D {
     this.setQuality(game.settings?.quality);
     this.placeCamera(game, dt);
     this.scene.fog.density = game.modes?.thickFog ? 0.2 : 0.11;   // '짙은 안개' 모드
+    const nearLamps = this.rig ? this.rig.update(game, dt) : 0;
+    game.hum3D = Math.min(1, 0.35 + nearLamps * 0.25);              // 형광등 아래일수록 웅웅 소리가 크다 (엔진이 setHum 에 곱한다)
+    const nv = game.nightVisionT > 0;                                 // 야간 투시경: 어둠 속도 보이게 바탕빛을 크게
+    this.ambient.intensity = game.test?.fullbright ? 3 : nv ? 2.2 : 0.05;
+    if (nv) this.scene.fog.density *= 0.35;
     this.gl.render(this.scene, this.camera);
     this.overlay.prepareView(game, dt);
     this.overlay.renderOverlay(game, dt, { three: true });

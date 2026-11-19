@@ -185,13 +185,27 @@ export const Sound = {
 
   setDrone(v) { if (this.ctx) this.droneGain.gain.setTargetAtTime(v * 0.25, this.ctx.currentTime, 0.25); },
 
+  /**
+   * 방향 소리 (3D): fn 안에서 시작한 소리는 pan(−1 왼쪽 .. +1 오른쪽) 으로 나간다.
+   * 2D 에서는 쓰지 않는다 (좌우 없이 그대로).
+   */
+  panned(pan, fn) {
+    if (!this.ctx || !this.ctx.createStereoPanner || !Number.isFinite(pan)) { fn(); return; }
+    const p = this.ctx.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, pan));
+    p.connect(this.master);
+    const prev = this.out;
+    this.out = p;
+    try { fn(); } finally { this.out = prev; }
+    setTimeout(() => { try { p.disconnect(); } catch { /* 이미 끊김 */ } }, 6000);   // 소리가 다 끝난 뒤 정리
+  },
   noise(freq, dur, vol, when = 0) {
     if (!this.ctx) return;
     const c = this.ctx, t = c.currentTime + when;
     const s = c.createBufferSource(); s.buffer = this.noiseBuf;
     const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 1.2;
     const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    s.connect(f); f.connect(g); g.connect(this.master); s.start(t); s.stop(t + dur + 0.02);
+    s.connect(f); f.connect(g); g.connect(this.out || this.master); s.start(t); s.stop(t + dur + 0.02);
   },
   tone(f1, f2, dur, vol, type = 'sine', when = 0) {
     if (!this.ctx) return;
@@ -199,7 +213,7 @@ export const Sound = {
     const o = c.createOscillator(), g = c.createGain();
     o.type = type; o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(f2, t + dur);
     g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.02);
+    o.connect(g); g.connect(this.out || this.master); o.start(t); o.stop(t + dur + 0.02);
   },
 
   step(sprint) { this.noise(sprint ? 520 : 340, 0.07, sprint ? 0.13 : 0.06); },

@@ -489,10 +489,12 @@ const Game = {
     else F.intensity = 0.95 + Math.random() * 0.05;
 
     // 천장 형광등 깜빡임 + 소리 (꺼질 때 / 켜질 때 따로)
-    this.flickerSounds(renderer.updateLights(dt), view, 1);
+    const toggled = renderer.updateLights(dt);
+    if (this.view3D) for (const tg of toggled) Sound.panned(facingPan(tg.l.x - view.x, tg.l.y - view.y, view.angle), () => this.flickerSounds([tg], view, 1));   // 3D: 등이 있는 쪽에서
+    else this.flickerSounds(toggled, view, 1);
     // 오프닝 중엔 형광등 소리가 벽이 노래질 때만 들린다
     const st = this.cine?.type === 'story' ? this.cine.t : -1;
-    Sound.setHum(st >= 0 ? (st > 12.2 && st < 17.6 ? 0.8 : 0) : view.alive ? 1 : 0.6);
+    Sound.setHum((st >= 0 ? (st > 12.2 && st < 17.6 ? 0.8 : 0) : view.alive ? 1 : 0.6) * (this.view3D ? this.hum3D ?? 1 : 1));   // 3D: 가까운 형광등 수에 따라
     // Level 0 형광등 백색소음 (오프닝에선 벽이 노래질 때부터)
     const lobby = this.level?.info?.theme === 'lobby';
     Sound.setHiss(st >= 0 ? (st > 12.2 && st < 17.6 ? 0.7 : 0) : lobby ? (view.alive ? 1 : 0.6) : 0);
@@ -826,6 +828,9 @@ const handlers = {
     if (type !== 'shadow' && !MODE_RULES.PHOTO_SKIP.includes(type) && Math.random() < (Game.modes.scareFest ? 0.7 : 0.35)) Game.jumpscare(type);
   },
   onEntityEvent(e) {
+    // 3D: 엔티티 소리는 바라보는 방향 기준 좌우에서 들린다
+    const v = Game.viewTarget();
+    if (Game.view3D && v && !e.panned) { Sound.panned(facingPan(e.x - v.x, e.y - v.y, v.angle), () => handlers.onEntityEvent({ ...e, panned: true })); return; }
     const m = Game.monsters.find(x => x.id === e.id);
     const view = Game.viewTarget();
     const near = view ? clamp(1 - Math.hypot(e.x - view.x, e.y - view.y) / (TS * 12), 0, 1) : 0;
