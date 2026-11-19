@@ -15,7 +15,8 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* 저장 불가 환경 무시 */ } },
 };
 const loadSettings = () => {
-  const def = { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true };
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;   // 태블릿은 그래픽 품질 기본 '낮음'
+  const def = { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true, threeD: true, quality: coarse ? 'low' : 'medium', mouseSens: 1 };
   try { return { ...def, ...JSON.parse(store.get('backrooms.settings') || '{}') }; }
   catch { return def; }
 };
@@ -483,6 +484,15 @@ function SettingsForm({ settings, onSettings, onBack, engine }) {
           <label className="check"><input type="checkbox" checked={settings.deathScares !== false} onChange={e => onSettings({ deathScares: e.target.checked })} /> {t('사망 점프스케어')}</label>
           <label className="check"><input type="checkbox" checked={settings.gameScares !== false} onChange={e => onSettings({ gameScares: e.target.checked })} /> {t('게임 중 점프스케어')}</label>
           <label className="check"><input type="checkbox" checked={settings.gore !== false} onChange={e => onSettings({ gore: e.target.checked })} /> {t('잔인한 연출')}</label>
+          <label className="check"><input type="checkbox" checked={settings.threeD !== false} onChange={e => onSettings({ threeD: e.target.checked })} /> {t('3D 화면')}</label>
+          <label>{t('그래픽 품질')}
+            <select value={settings.quality || 'medium'} onChange={e => onSettings({ quality: e.target.value })}>
+              {[['low', '낮음'], ['medium', '중간'], ['high', '높음']].map(([k, n]) => <option key={k} value={k}>{t(n)}</option>)}
+            </select>
+          </label>
+          <label>{t('마우스 감도')} {(settings.mouseSens ?? 1).toFixed(1)}
+            <input type="range" min="0.2" max="3" step="0.1" value={settings.mouseSens ?? 1} onChange={e => onSettings({ mouseSens: Number(e.target.value) })} />
+          </label>
         </>
       )}
       {tab === 'voice' && <VoiceSettings engine={engine} />}

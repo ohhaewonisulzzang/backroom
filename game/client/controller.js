@@ -3,9 +3,13 @@ import { moveEntity, passMap } from '../../shared/physics.js';
 import { Input } from './input.js';
 import { Sound } from './sound.js';
 import { angleDiff } from '../../shared/utils.js';
+import { fpMoveVector, PITCH_MAX } from './three/units.js';
 
 /** 로컬 플레이어 입력 처리 (클라이언트 예측 이동). 서버는 결과 위치를 검증한다. */
-/** opts.infinite = 스태미나 무한 (질주 레벨), opts.noSprint = 달리기 금지, opts.speedMul = 이동 속도 배수 */
+/**
+ * opts.infinite = 스태미나 무한 (질주 레벨), opts.noSprint = 달리기 금지, opts.speedMul = 이동 속도 배수
+ * opts.firstPerson = 1인칭(3D): 마우스 이동량(opts.look = { dx, dy, sens })으로 돌고, W 는 바라보는 방향으로 간다
+ */
 export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   const C = CONFIG.PLAYER;
   let ix = 0, iy = 0;
@@ -38,6 +42,14 @@ export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   const speed = p.boat ? (p.crouching ? R.ROW_QUIET : p.sprinting ? R.ROW_FAST : R.ROW)                  // 보트: 조용히 / 세게 / 보통 젓기
     : (p.crouching ? C.CROUCH : p.sprinting ? C.SPRINT : C.WALK) * slow * rush;
   const speedMul = opts.speedMul || 1;   // '가벼운 발' 모드
+  if (opts.firstPerson) {
+    // 1인칭: 시점 회전 (마우스 이동량 / 터치 오른쪽 스틱) → 입력을 바라보는 방향 기준으로 돌린다
+    const L = opts.look || { dx: 0, dy: 0 }, k = 0.0022 * (L.sens ?? 1);
+    p.angle += L.dx * k;
+    p.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, (p.pitch || 0) - L.dy * k));
+    if (T.active) { p.angle += T.look.x * 2.6 * dt; p.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, (p.pitch || 0) - T.look.y * 1.8 * dt)); }
+    const v = fpMoveVector(ix, iy, p.angle); ix = v.x; iy = v.y;
+  }
   const bx = p.x, by = p.y;
   moveEntity(p, ix * speed * speedMul * dt, iy * speed * speedMul * dt, C.RADIUS, passMap(map, p.boat));   // 걸으면 깊은 물이, 보트면 땅이 벽
   const moved = Math.hypot(p.x - bx, p.y - by);
@@ -46,6 +58,7 @@ export function updateLocalPlayer(p, dt, map, cam, scale, opts = {}) {
   p.stepAcc += moved;
   if (p.stepAcc > (p.sprinting ? 46 : 36)) { p.stepAcc = 0; if (p.boat) Sound.splash(p.crouching ? 0.06 : p.sprinting ? 0.3 : 0.16); else if (!p.crouching) Sound.step(p.sprinting); }   // 보트: 노 젓는 물소리
 
+  if (opts.firstPerson) return;   // 1인칭은 위에서 이미 돌았다
   if (T.active) {
     // 터치: 오른쪽 스틱으로 비추는 방향. 스틱을 놓고 있으면 걷는 방향으로 부드럽게 돌아간다 (서 있으면 그대로)
     if (T.aim !== null) p.angle = T.aim;

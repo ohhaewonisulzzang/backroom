@@ -51,7 +51,10 @@ export const Input = {
    *  aim   : 오른쪽 스틱으로 비추는 방향(라디안), 손을 떼면 null → 이동 방향을 따라간다
    *  crouch: 웅크리기 토글
    */
-  touch: { active: false, move: { x: 0, y: 0 }, aim: null, sprint: false, crouch: false },
+  touch: { active: false, move: { x: 0, y: 0 }, aim: null, look: { x: 0, y: 0 }, sprint: false, crouch: false },
+  /** 1인칭(3D): 포인터 잠금 중 마우스 이동량 누적 (엔진이 프레임마다 읽고 비운다) */
+  look: { dx: 0, dy: 0 },
+  locked: false, lockEl: null, lockLostHandlers: [], unlocking: false,
 
   listeners: [],
   mouseDown: false, mouseDownHandlers: [], mouseUpHandlers: [],
@@ -90,12 +93,39 @@ export const Input = {
     // 마우스를 실제로 움직이면 마우스 조준으로 돌아온다 (터치가 흉내 내는 mousemove 는 무시)
     on('pointermove', e => {
       if (e.pointerType !== 'mouse') return;
+      if (this.locked) { this.look.dx += e.movementX || 0; this.look.dy += e.movementY || 0; this.touch.active = false; return; }
       this.mouse.x = e.clientX; this.mouse.y = e.clientY;
       this.touch.active = false;
     });
   },
 
+  /**
+   * 포인터 잠금 (1인칭 시점). 브라우저는 잠금을 푸는 첫 ESC 를 keydown 으로 주지 않으므로,
+   * 사용자 동작(ESC·포커스 잃음)으로 풀리면 onLockLost 핸들러를 부른다 (엔진이 일시정지 메뉴를 연다).
+   */
+  lockPointer(el) {
+    if (this.locked || !el?.requestPointerLock) return;
+    if (!this.lockEl) {
+      document.addEventListener('pointerlockchange', this.onLockChange = () => {
+        const now = document.pointerLockElement === this.lockEl;
+        if (this.locked && !now && !this.unlocking) { this.lockLostAt = performance.now(); this.lockLostHandlers.forEach(fn => fn()); }
+        this.locked = now; this.unlocking = false;
+        this.look.dx = this.look.dy = 0;
+      });
+    }
+    this.lockEl = el;
+    try { const r = el.requestPointerLock(); r?.catch?.(() => {}); } catch { /* 잠금 불가 (iframe 등) */ }
+  },
+  unlockPointer() {
+    if (!this.locked) return;
+    this.unlocking = true;
+    document.exitPointerLock?.();
+  },
+  onLockLost(fn) { this.lockLostHandlers.push(fn); },
+
   dispose() {
+    if (this.onLockChange) document.removeEventListener('pointerlockchange', this.onLockChange);
+    this.lockEl = null; this.lockLostHandlers = [];
     for (const [type, fn] of this.listeners) removeEventListener(type, fn);
     this.listeners = [];
     this.handlers.clear();
@@ -119,7 +149,7 @@ export const Input = {
 
   resetTouch() {
     const t = this.touch;
-    t.move.x = t.move.y = 0; t.aim = null; t.sprint = false;
+    t.move.x = t.move.y = 0; t.aim = null; t.look.x = t.look.y = 0; t.sprint = false;
   },
 
   onPress(code, fn) {

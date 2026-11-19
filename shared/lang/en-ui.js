@@ -67,6 +67,13 @@ export default {
   '메인 화면 점프스케어': 'Main menu jump scares',
   '사망 점프스케어': 'Death jump scares',
   '잔인한 연출': 'Gore',
+  '3D 화면': '3D view',
+  '그래픽 품질': 'Graphics quality',
+  '낮음': 'Low',
+  '중간': 'Medium',
+  '높음': 'High',
+  '마우스 감도': 'Mouse sensitivity',
+  '클릭해서 시점 조작': 'Click to look around',
 
   // 보이스 챗
   '마이크 장치': 'Mic device',

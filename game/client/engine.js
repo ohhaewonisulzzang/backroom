@@ -16,6 +16,7 @@ import { BESTIARY } from './bestiary.js';
 import { DEATH_DURATION, addGore } from './deaths.js';
 import { discoverLevel } from './bestiary.js';
 import { GESTURES } from './sprites.js';
+import { facingPan } from './three/units.js';
 
 /** startGame() 에서 채워지는 런타임 의존성. UI 는 React 쪽 어댑터. */
 let renderer = null, net = null, UI = null;
@@ -26,7 +27,8 @@ const Game = {
   phase: 'menu',              // menu | connecting | lobby | game
   menu: null,                 // 메인 메뉴 배경 장면 (천천히 떠도는 카메라)
   lobby: null,
-  settings: { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true },
+  settings: { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true, threeD: true, quality: 'medium', mouseSens: 1 },
+  view3D: false,              // 이번 프레임을 3D(Level 0, three.js)로 그리는가 — 1인칭 조작도 이걸 따른다
   scare: null, scareCd: 0, nextScare: 30,   // 게임 중 점프스케어 { type, t, dur } / 다음까지 최소 간격 / 환각 점프스케어 타이머
   boatIdleT: 0, boatWarned: false,          // 보트 위에서 가만히 있던 시간 (익사자가 발밑에서 솟아나기 전 경고)
   paused: false,              // ESC 메뉴가 열려 있음 (입력 차단)
@@ -400,7 +402,9 @@ const Game = {
     } else if (p.alive && p.hidden && this.roundPhase === 'playing') {
       net.sendState(p, dt);                        // 숨어 있는 동안은 제자리 (서버도 이동을 무시)
     } else if (p.alive && this.roundPhase === 'playing') {
-      updateLocalPlayer(p, dt, this.map, this.cam, renderer.scale, { infinite: !!this.horde || !!this.modes.infiniteStamina, noSprint: !!this.modes.noSprint, speedMul: this.modes.quickFeet ? MODE_RULES.QUICK : 1 });   // 질주 레벨 / '무한 스태미나' / '달리기 금지' 모드
+      updateLocalPlayer(p, dt, this.map, this.cam, renderer.scale, { infinite: !!this.horde || !!this.modes.infiniteStamina, noSprint: !!this.modes.noSprint, speedMul: this.modes.quickFeet ? MODE_RULES.QUICK : 1,
+        firstPerson: this.view3D, look: { dx: Input.look.dx, dy: Input.look.dy, sens: this.settings.mouseSens ?? 1 } });
+      Input.look.dx = Input.look.dy = 0;   // 질주 레벨 / '무한 스태미나' / '달리기 금지' 모드
       net.sendState(p, dt);
     }
     for (const rp of this.remotes.values()) rp.interpolate(dt);
@@ -611,7 +615,8 @@ const Game = {
       let cutoff = 16000 * Math.pow(0.85, Math.max(0, tiles - FULL));                 // 10칸에서 약 3.7kHz
       if (g > 0 && this.map && !hasLOS(this.map, me.x, me.y, sp.x, sp.y)) { g *= 0.6; cutoff *= 0.5; }
       if (sp.hidden || me.hidden) { g *= 0.8; cutoff *= 0.6; }
-      return { gain: g, pan: Math.max(-0.8, Math.min(0.8, dx / (TS * 6))), cutoff: Math.max(800, cutoff) };
+      const pan = this.view3D ? facingPan(dx, sp.y - me.y, me.angle) * 0.8 : Math.max(-0.8, Math.min(0.8, dx / (TS * 6)));   // 3D: 바라보는 방향 기준 좌우
+      return { gain: g, pan, cutoff: Math.max(800, cutoff) };
     });
   },
 
@@ -1108,7 +1113,12 @@ export function startGame({ canvas, ui }) {
     else { Game.lastUseSlot = Game.held; net.useItem(Game.held); }
   };
   const useEnd = () => { Game.useDown = false; Game.useHold = null; };
-  Input.onMouseDown(useStart);
+  Input.onMouseDown(() => {
+    if (Game.view3D && !Game.paused && !Input.locked && Game.phase === 'game') { Input.lockPointer(canvas); return; }   // 1인칭: 첫 클릭은 시점 잠금
+    useStart();
+  });
+  // 1인칭: ESC·Alt+Tab 으로 포인터 잠금이 풀리면 일시정지 메뉴 (브라우저가 그 ESC 를 keydown 으로 주지 않는다)
+  Input.onLockLost(() => { if (Game.phase === 'game' && Game.view3D && !Game.paused) UI.togglePause?.(); });
   Input.onMouseUp(useEnd);
   const dropSlot = i => {
     if (Game.modes.oneItem && Game.inv[i]) { Game.msg(t('버릴 수 없다 (단 하나 모드)'), 1.5); return; }
@@ -1119,6 +1129,7 @@ export function startGame({ canvas, ui }) {
   };
   Input.onPress('Escape', () => {
     if (Game.phase !== 'game') return;
+    if (performance.now() - (Input.lockLostAt || 0) < 400) return;   // 포인터 잠금을 푼 ESC 가 keydown 으로도 오는 브라우저: 메뉴를 두 번 토글하지 않게
     if (Game.emoteOpen) { Game.emoteOpen = false; return; }
     if (Game.puzzleOpen >= 0) { Game.closePuzzle(); return; }
     if (Game.valveOpen >= 0) { Game.closeValve(); return; }
@@ -1228,6 +1239,7 @@ export function startGame({ canvas, ui }) {
       if (Game.phase !== 'game') return;
       Game.paused = !!on;
       Input.keys.clear();
+      if (on) Input.unlockPointer();
       if (Game.solo) net.pause(Game.paused);
       Sound.setHum(on ? 0.3 : 1);
     },
