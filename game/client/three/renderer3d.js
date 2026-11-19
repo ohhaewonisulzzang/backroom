@@ -74,7 +74,8 @@ export class Renderer3D {
   }
 
   /** 레벨 짓기. 이전 레벨의 지오메트리·재질·텍스처는 모두 해제한다 */
-  setLevel(level) {
+  setLevel(level, quality) {
+    if (quality) this.setQuality(quality);   // 실시간 조명 개수·그림자는 레벨을 지을 때 정해지므로 품질을 먼저 맞춘다
     this.disposeLevel();
     this.level = level;
     const g = this.levelGroup = new THREE.Group();

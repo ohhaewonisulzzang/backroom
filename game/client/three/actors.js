@@ -217,7 +217,7 @@ export class ActorLayer {
         a.traverse(o => { if (o.isMesh && o !== a.userData.xray) o.castShadow = true; });
         this.group.add(a); this.players.set(p.id, a);
       }
-      const show = !p.hidden && p.status !== 'escaped';
+      const show = !p.hidden && p.status !== 'escaped' && p !== view;   // 관전 중이면 그 사람의 몸은 카메라 자리라 그리지 않는다
       a.visible = show;
       a.userData.xray.visible = show && nv && Math.hypot(p.x - view.x, p.y - view.y) < range;
       if (!show) continue;

@@ -305,7 +305,7 @@ const Game = {
 
     if (this.deathT > 0) {
       this.deathT -= dt;
-      if (this.deathT <= 0 && this.pendingRoundEnd) { UI.showRoundEnd(this.pendingRoundEnd); this.pendingRoundEnd = null; }
+      if (this.deathT <= 0 && this.pendingRoundEnd) { this.showRoundEnd(this.pendingRoundEnd); this.pendingRoundEnd = null; }
     }
     if (this.roundPhase === 'playing' && !(this.paused && this.solo)) { this.elapsed += dt; this.totalTime += dt; this.levelTime = (this.levelTime || 0) + dt; }   // 혼자 하기 일시정지 중엔 시간도 멈춤
     // '손전등 배터리' 모드: 켜 두면 닳고, 끄면 충전된다. 다 닳으면 저절로 꺼지고 min% 까지 차야 다시 켤 수 있다
@@ -404,14 +404,15 @@ const Game = {
     } else if (p.alive && p.hidden && this.roundPhase === 'playing') {
       net.sendState(p, dt);                        // 숨어 있는 동안은 제자리 (서버도 이동을 무시)
     } else if (p.alive && this.roundPhase === 'playing') {
-      updateLocalPlayer(p, dt, this.map, this.cam, renderer.scale, { infinite: !!this.horde || !!this.modes.infiniteStamina, noSprint: !!this.modes.noSprint, speedMul: this.modes.quickFeet ? MODE_RULES.QUICK : 1,
+      updateLocalPlayer(p, dt, this.map, this.cam, renderer.scale, { infinite: !!this.horde || !!this.modes.infiniteStamina, noSprint: !!this.modes.noSprint, speedMul: this.modes.quickFeet ? MODE_RULES.QUICK : 1,   // 질주 레벨 / '무한 스태미나' / '달리기 금지' / '가벼운 발' 모드
         firstPerson: this.view3D, look: { dx: Input.look.dx, dy: Input.look.dy, sens: this.settings.mouseSens ?? 1 } });
-      Input.look.dx = Input.look.dy = 0;   // 질주 레벨 / '무한 스태미나' / '달리기 금지' 모드
+      Input.look.dx = Input.look.dy = 0;
       net.sendState(p, dt);
     }
     for (const rp of this.remotes.values()) rp.interpolate(dt);
     for (const m of this.monsters) m.interpolate(dt);
 
+    Input.look.dx = Input.look.dy = 0;            // 움직일 수 없던 동안(숨기·채팅·관전·인트로) 쌓인 마우스 이동은 버린다
     this.updateHallucinations(dt);
     this.updateScares(dt);
     if (this.machineT > 0) this.machineT -= dt;
@@ -625,9 +626,12 @@ const Game = {
   },
 
   // ------------------------------------------------------------ 채팅
+  /** 라운드 결과 화면: 1인칭이면 마우스 잠금을 풀어 버튼을 누를 수 있게 */
+  showRoundEnd(d) { Input.unlockPointer(); UI.showRoundEnd(d); },
   openChat() {
     if (this.chatOpen || (this.phase !== 'game' && this.phase !== 'lobby') || this.puzzleOpen >= 0 || this.valveOpen >= 0) return;
     this.chatOpen = true;
+    Input.unlockPointer();                       // 1인칭: 글을 쓰는 동안은 마우스를 풀어 둔다
     Input.keys.clear();
     UI.openChat?.();
   },
@@ -707,7 +711,7 @@ const handlers = {
     Game.loadRound(d);
     Game.phase = 'game';
     if (d.phase === 'ended') {
-      UI.showRoundEnd({ restartIn: d.restartIn });
+      Game.showRoundEnd({ restartIn: d.restartIn });
     } else {
       UI.hide();
     }
@@ -949,7 +953,7 @@ const handlers = {
     Game.roundPhase = 'ended';
     d = { ...d, nextLevelName: d.nextLevel !== undefined ? `${t(levelLabel(d.nextLevel))} — ${t(levelInfo(d.nextLevel).name)}` : null };
     if (Game.deathT > 0) Game.pendingRoundEnd = d;
-    else UI.showRoundEnd(d);
+    else Game.showRoundEnd(d);
   },
   /** 누군가 퍼즐을 틀림 → 단말기 경보 */
   onPuzzleAlarm({ index, by, x, y }) {
@@ -1106,7 +1110,7 @@ function sync3D() {
     if (!want) Input.unlockPointer();
     else Game.level3dDirty = true;
   }
-  if (want && Game.level3dDirty) { Game.level3dDirty = false; renderer3d.setLevel(Game.level); }
+  if (want && Game.level3dDirty) { Game.level3dDirty = false; renderer3d.setLevel(Game.level, Game.settings.quality); }
 }
 
 export function startGame({ canvas, canvas3d: c3d, ui }) {
@@ -1149,7 +1153,7 @@ export function startGame({ canvas, canvas3d: c3d, ui }) {
     useStart();
   });
   // 1인칭: ESC·Alt+Tab 으로 포인터 잠금이 풀리면 일시정지 메뉴 (브라우저가 그 ESC 를 keydown 으로 주지 않는다)
-  Input.onLockLost(() => { if (Game.phase === 'game' && Game.view3D && !Game.paused) UI.togglePause?.(); });
+  Input.onLockLost(() => { if (Game.phase === 'game' && Game.view3D && !Game.paused && Game.roundPhase === 'playing' && !Game.chatOpen) UI.togglePause?.(); });
   Input.onMouseUp(useEnd);
   const dropSlot = i => {
     if (Game.modes.oneItem && Game.inv[i]) { Game.msg(t('버릴 수 없다 (단 하나 모드)'), 1.5); return; }
@@ -1231,13 +1235,19 @@ export function startGame({ canvas, canvas3d: c3d, ui }) {
     last = now;
     sync3D();
     Game.update(dt);
-    if (Game.phase === 'game') { if (Game.view3D) renderer3d.render(Game, dt); else renderer.render(Game, dt); }
+    if (Game.phase === 'game') {
+      if (Game.view3D) {
+        // 3D 그리기에서 예외(이상한 GPU, 컨텍스트 소실 중 내부 오류)가 나면 멈추지 않고 다음 프레임부터 2D 로
+        try { renderer3d.render(Game, dt); }
+        catch (e) { console.warn('3D 화면 오류 — 2D 로 돌아간다:', e); renderer3d.lost = true; renderer.render(Game, dt); }
+      } else renderer.render(Game, dt);
+    }
     else if (Game.phase === 'ending') renderer.renderEnding(Game, dt);
     else if (Game.menu) renderer.renderMenu(Game, dt);
     raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
-  window.Game = Game; Game.renderer = renderer; // 디버그용
+  window.Game = Game; Game.renderer = renderer; Game.input = Input; // 디버그용 (브라우저 자동 확인)
 
   return {
     /** 첫 클릭 때 오디오 켜기 (브라우저 정책상 사용자 입력 이후에만 가능) */
