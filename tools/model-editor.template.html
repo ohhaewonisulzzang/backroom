@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>백룸 모델 편집기</title>
+<!-- 이 파일은 tools/build-model-editor.mjs 가 만든다. 직접 고치지 말고 tools/model-editor.template.html 을 고친 뒤 다시 만들 것 -->
+<style>
+  :root { --bg: #14120c; --panel: #1d1a12; --line: #3a3322; --text: #e6d9a8; --dim: #9a8c5c; --accent: #e7b92e; --danger: #d0503a; --ok: #6fbf5f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, "Malgun Gothic", sans-serif; overflow: hidden; }
+  #app { display: grid; grid-template-columns: 250px 1fr 330px; grid-template-rows: auto 1fr; height: 100%; }
+  header { grid-column: 1 / 4; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0 10px 0 0; color: var(--accent); }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow: auto; padding: 8px; }
+  aside.right { border-right: 0; border-left: 1px solid var(--line); }
+  #view { position: relative; overflow: hidden; }
+  #view canvas { display: block; }
+  #hint { position: absolute; left: 10px; bottom: 8px; color: var(--dim); font-size: 12px; pointer-events: none; text-shadow: 0 1px 2px #000; }
+  #stats { position: absolute; right: 10px; top: 8px; color: var(--dim); font-size: 12px; pointer-events: none; text-align: right; }
+  button, select, input, textarea { font: inherit; color: var(--text); background: #26221a; border: 1px solid var(--line); border-radius: 4px; }
+  button { padding: 4px 9px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #4a3c10; border-color: var(--accent); color: #fff3c4; font-weight: 600; }
+  button.danger { border-color: #6a2a1e; }
+  button.on { background: #3a3218; border-color: var(--accent); }
+  select, input { padding: 3px 5px; }
+  input[type=number] { width: 64px; }
+  input[type=color] { width: 40px; height: 24px; padding: 0 2px; }
+  textarea { width: 100%; resize: vertical; padding: 5px; min-height: 54px; }
+  h2 { font-size: 12px; color: var(--accent); margin: 12px 0 6px; text-transform: none; letter-spacing: 0.02em; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+  h2:first-child { margin-top: 0; }
+  .row { display: flex; gap: 5px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+  .row label { color: var(--dim); min-width: 52px; }
+  .vec input { width: 60px; }
+  #parts { list-style: none; margin: 0; padding: 0; }
+  #parts li { padding: 2px 6px; border-radius: 3px; cursor: pointer; display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; }
+  #parts li:hover { background: #2a2518; }
+  #parts li.sel { background: #4a3c10; color: #fff3c4; }
+  #parts li .g { color: var(--dim); font-size: 11px; }
+  #parts li.noted::after { content: '✎'; color: var(--accent); margin-left: 4px; }
+  #parts li.changed .n { color: #9fd58f; }
+  #parts li.added .n { color: #8fc8ff; }
+  .groupHead { color: var(--dim); font-size: 11px; margin: 6px 0 2px; }
+  .mat { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
+  .mat span { flex: 1; }
+  .tag { font-size: 10px; color: var(--dim); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; }
+  .muted { color: var(--dim); font-size: 12px; }
+  #toast { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); background: #2d4a1e; color: #e8ffd8; padding: 7px 14px; border-radius: 5px; display: none; z-index: 9; box-shadow: 0 4px 16px #000a; }
+  #toast.err { background: #5a2018; color: #ffe0d8; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; width: min(720px, 92vw); }
+  dialog textarea { min-height: 300px; font: 12px/1.35 ui-monospace, Consolas, monospace; }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>백룸 모델 편집기</h1>
+    <select id="modelSel" title="고칠 모델"></select>
+    <span class="sep"></span>
+    <button id="btnWalk" title="걷는 모습 보기">걷기</button>
+    <button id="btnSeed" title="chance(확률) 부품이 다르게 붙은 모습">다른 모습</button>
+    <button id="btnLight" title="밝게 보기 / 게임처럼 어둡게">밝게 보기</button>
+    <button id="btnRef" class="on" title="키 1.75m 기준 막대와 바닥 격자">기준선</button>
+    <span class="sep"></span>
+    <button id="btnUndo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>
+    <button id="btnRedo" title="다시 하기 (Ctrl+Y)">↷</button>
+    <span class="sep"></span>
+    <button id="btnCopy" class="primary" title="고친 점 + 메모를 복사 → Claude 에게 붙여 넣기">Claude에게 줄 내용 복사</button>
+    <button id="btnSave" title="전체 모델 데이터를 .json 파일로 저장">파일로 저장</button>
+    <button id="btnLoad" title=".json 파일 불러오기">불러오기</button>
+    <input id="fileIn" type="file" accept=".json,application/json" hidden>
+    <button id="btnReset" class="danger" title="모든 수정을 버리고 처음 상태로">처음 상태로</button>
+  </header>
+
+  <aside>
+    <h2>부품 <span class="muted" id="partCount"></span></h2>
+    <div class="row"><input id="search" placeholder="부품 이름 찾기" style="width:100%"></div>
+    <div class="row">
+      <button id="btnAdd" title="새 부품 추가 (선택한 부품 옆에)">+ 추가</button>
+      <button id="btnDup" title="복제 (Ctrl+D)">복제</button>
+      <button id="btnMirror" title="좌우 반대쪽에 대칭 복제">좌우 대칭</button>
+      <button id="btnDel" class="danger" title="삭제 (Delete)">삭제</button>
+    </div>
+    <ul id="parts"></ul>
+  </aside>
+
+  <div id="view">
+    <div id="stats"></div>
+    <div id="hint">왼쪽 드래그: 돌려 보기 · 오른쪽 드래그: 옮기기 · 휠: 확대 · 부품 클릭: 선택 · W/E/R: 이동/회전/크기 손잡이 · Esc: 선택 해제</div>
+  </div>
+
+  <aside class="right">
+    <div id="partPanel"></div>
+    <h2>재질 (색)</h2>
+    <div id="mats"></div>
+    <h2>모델</h2>
+    <div id="modelPanel"></div>
+    <h2>메모 — 수정할 점</h2>
+    <div class="muted">여기 적은 내용도 "Claude에게 줄 내용 복사"에 같이 들어간다.</div>
+    <label class="muted">이 모델 전체</label>
+    <textarea id="noteModel" placeholder="예: 하울러 팔이 너무 길다, 머리를 더 길쭉하게…"></textarea>
+    <label class="muted">전체 (모든 모델)</label>
+    <textarea id="noteAll" placeholder="예: 전체적으로 더 기괴하게, 색을 더 어둡게…"></textarea>
+  </aside>
+</div>
+<div id="toast"></div>
+<dialog id="copyDlg">
+  <div class="row" style="justify-content:space-between"><b>Claude 에게 붙여 넣을 내용</b><button id="dlgClose">닫기</button></div>
+  <div class="muted">자동 복사가 막혔으면 아래를 전부 선택(Ctrl+A)해서 복사(Ctrl+C)하세요.</div>
+  <textarea id="dlgText" readonly></textarea>
+</dialog>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+// ---------------------------------------------------------------- 게임과 같은 모델 빌더 (game/client/three/models/build.js)
+const BUILD_SRC = /*__BUILD_JS__*/'';
+const B = await import(URL.createObjectURL(new Blob([BUILD_SRC], { type: 'text/javascript' })));
+// 처음 상태 (game/client/three/models/level0.json)
+const BASE = /*__MODELS_JSON__*/{};
+const BASE_STAMP = /*__STAMP__*/'';
+const STORE = 'backrooms.modelEditor.v1';
+
+const clone = o => JSON.parse(JSON.stringify(o));
+const $ = id => document.getElementById(id);
+const SHAPES = { box: ['폭', '높이', '깊이'], sphere: ['반지름'], capsule: ['반지름', '길이'], cylinder: ['위 반지름', '아래 반지름', '높이'], cone: ['반지름', '높이'], torus: ['반지름', '굵기'] };
+const SHAPE_KO = { box: '상자', sphere: '구', capsule: '캡슐', cylinder: '원기둥', cone: '원뿔', torus: '고리' };
+const GROUP_KO = { root: '몸 전체', torso: '몸통', head: '머리', armL: '왼팔', armR: '오른팔', legL: '왼다리', legR: '오른다리' };
+const MODEL_KO = { howler: '하울러', player: '플레이어 (방호복)', wanderer: '방랑자' };
+
+// ---------------------------------------------------------------- 상태 (브라우저에 자동 저장)
+let S;
+function freshState() { return { stamp: BASE_STAMP, data: clone(BASE), notes: { all: '', models: {}, parts: {} }, model: Object.keys(BASE.models)[0] }; }
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
+  S = saved && saved.data && saved.stamp === BASE_STAMP ? saved : null;
+  if (saved && saved.stamp !== BASE_STAMP) setTimeout(() => toast('게임 쪽 모델이 바뀌어서 새 버전으로 시작한다 (이전 작업은 "불러오기"로 열 수 있게 파일로 저장해 두었으면 그걸 쓰세요)', true), 500);
+} catch { S = null; }
+if (!S) S = freshState();
+const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch { /* 저장 불가 */ } };
+const spec = () => S.data.models[S.model];
+let sel = -1;                 // 선택한 부품 번호 (spec().parts)
+let seed = 1, walking = false, bright = true, showRef = true;
+const undo = [], redo = [];
+function snapshot() { undo.push(JSON.stringify(S.data)); if (undo.length > 200) undo.shift(); redo.length = 0; }
+function commit() { save(); rebuild(); renderLists(); }
+
+// ---------------------------------------------------------------- 3D 화면
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+view.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 50);
+camera.position.set(1.6, 1.6, -2.6);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.target.set(0, 1.0, 0); orbit.enableDamping = true;
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setSize(0.8);
+scene.add(gizmo.getHelper ? gizmo.getHelper() : gizmo);
+gizmo.addEventListener('dragging-changed', e => { orbit.enabled = !e.value; if (e.value) snapshot(); else { save(); renderLists(); renderPartPanel(); } });
+gizmo.addEventListener('objectChange', () => {   // 손잡이로 옮긴 결과를 부품 데이터로
+  const m = gizmo.object, p = m?.userData.part; if (!p) return;
+  const a = pivotAbs(p.in);
+  p.pos = [m.position.x + a[0], m.position.y + a[1], m.position.z + a[2]].map(r3);
+  const rot = [m.rotation.x, m.rotation.y, m.rotation.z].map(v => r3(v * 180 / Math.PI));
+  if (rot.some(v => v !== 0)) p.rot = rot; else delete p.rot;
+  const sc = [m.scale.x, m.scale.y, m.scale.z].map(r3);
+  if (sc.some(v => v !== 1)) p.scale = sc; else delete p.scale;
+  selBox.setFromObject(m);
+  renderPartPanel(true);
+});
+const r3 = v => Math.round(v * 1000) / 1000;
+const pivotAbs = g => (!g || g === 'root' ? [0, 0, 0] : spec().pivots?.[g] || [0, 0, 0]);
+
+// 조명: 밝게 보기 / 게임처럼 (어두운 복도 + 형광등 + 손전등 느낌)
+const hemi = new THREE.HemisphereLight(0xfff6e0, 0x3a3222, 1.6);
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(-2, 4, -3);
+const rim = new THREE.DirectionalLight(0xffe8b0, 0.8); rim.position.set(2, 2, 3);
+const lamp = new THREE.PointLight(0xfff2c8, 6, 8, 2); lamp.position.set(0, 2.6, -0.6);
+const ambDark = new THREE.AmbientLight(0xfff4dc, 0.08);
+scene.add(hemi, key, rim, lamp, ambDark);
+function applyLight() {
+  hemi.visible = key.visible = rim.visible = bright;
+  lamp.visible = ambDark.visible = !bright;
+  scene.background = new THREE.Color(bright ? 0x2a2620 : 0x0a0904);
+  scene.fog = bright ? null : new THREE.FogExp2(0x1a1608, 0.18);
+  $('btnLight').textContent = bright ? '밝게 보기' : '게임처럼';
+  $('btnLight').classList.toggle('on', !bright);
+}
+// 기준선: 바닥 격자, 1.75m 막대(플레이어 키), 1m 눈금
+const refGroup = new THREE.Group();
+const grid = new THREE.GridHelper(4, 16, 0x6a5c30, 0x3a3320); refGroup.add(grid);
+const stick = new THREE.Mesh(new THREE.BoxGeometry(0.02, 1.75, 0.02), new THREE.MeshBasicMaterial({ color: 0x4fa0ff }));
+stick.position.set(-0.7, 0.875, 0); refGroup.add(stick);
+for (const y of [1, 2]) { const t = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.008, 0.008), new THREE.MeshBasicMaterial({ color: 0x4fa0ff })); t.position.set(-0.7, y, 0); refGroup.add(t); }
+const front = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.12, 8), new THREE.MeshBasicMaterial({ color: 0xff7040 }));
+front.rotation.x = -Math.PI / 2; front.position.set(0, 0.02, -0.55); refGroup.add(front);   // 앞쪽 표시 (-z)
+scene.add(refGroup);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), new THREE.MeshLambertMaterial({ color: 0x6a5a34 }));
+floor.rotation.x = -Math.PI / 2; floor.position.y = -0.001; scene.add(floor);
+
+let modelObj = null;
+const selBox = new THREE.Box3Helper(new THREE.Box3(), 0x4fd0ff);
+scene.add(selBox);
+function rebuild() {
+  if (modelObj) { scene.remove(modelObj); modelObj.traverse(o => { o.geometry?.dispose(); }); }
+  const sp = spec();
+  modelObj = B.buildModel(THREE, sp, { seed, tint: sp.materials?.suit?.color, faded: S.model === 'wanderer', Material: THREE.MeshStandardMaterial });
+  modelObj.traverse(o => { if (o.material && !o.material.userData.glow && o.material.roughness !== undefined) { o.material.roughness = 0.85; o.material.metalness = 0.0; } });
+  scene.add(modelObj);
+  attachSel();
+  const n = modelObj.userData.parts.length;
+  $('stats').innerHTML = `${MODEL_KO[S.model] || S.model} · 붙은 부품 ${n} / ${sp.parts.length} · 키 ${sp.height}m · 모습 ${seed}`;
+}
+function meshOfSel() { return sel < 0 ? null : modelObj.userData.parts.find(m => m.userData.part === spec().parts[sel]) || null; }
+function attachSel() {
+  const m = meshOfSel();
+  if (m) { gizmo.attach(m); selBox.visible = true; selBox.box.setFromObject(m); }
+  else { gizmo.detach(); selBox.visible = false; }
+}
+
+// 클릭으로 부품 고르기
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4 || gizmo.dragging) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObjects(modelObj.userData.parts, false)[0];
+  select(hit ? spec().parts.indexOf(hit.object.userData.part) : -1);
+});
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+let t = 0, last = performance.now();
+renderer.setAnimationLoop(now => {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (walking && modelObj && !gizmo.dragging) { t += dt; B.poseWalk(modelObj, t * 7, 1); if (selBox.visible) { const m = meshOfSel(); if (m) selBox.box.setFromObject(m); } }
+  orbit.update();
+  renderer.render(scene, camera);
+});
+
+// ---------------------------------------------------------------- 왼쪽: 부품 목록
+const baseParts = () => new Map((BASE.models[S.model]?.parts || []).map(p => [p.id, JSON.stringify(p)]));
+function renderLists() {
+  const sp = spec(), q = $('search').value.trim().toLowerCase(), base = baseParts();
+  const ul = $('parts'); ul.innerHTML = '';
+  $('partCount').textContent = `(${sp.parts.length})`;
+  const byGroup = {};
+  sp.parts.forEach((p, i) => { if (q && !p.id.toLowerCase().includes(q)) return; (byGroup[p.in || 'root'] ||= []).push([p, i]); });
+  for (const g of B.GROUPS) {
+    if (!byGroup[g]) continue;
+    const h = document.createElement('li'); h.className = 'groupHead'; h.textContent = `${GROUP_KO[g]} (${g})`; ul.append(h);
+    for (const [p, i] of byGroup[g]) {
+      const li = document.createElement('li');
+      const b = base.get(p.id);
+      li.className = (i === sel ? 'sel ' : '') + (!b ? 'added ' : b !== JSON.stringify(p) ? 'changed ' : '') + (S.notes.parts[S.model]?.[p.id] ? 'noted' : '');
+      li.innerHTML = `<span class="n"></span><span class="g"></span>`;
+      li.firstChild.textContent = p.id; li.lastChild.textContent = SHAPE_KO[p.shape] + (p.chance !== undefined && p.chance < 1 ? ` ${Math.round(p.chance * 100)}%` : '');
+      li.onclick = () => select(i);
+      ul.append(li);
+    }
+  }
+  renderMats(); renderModelPanel(); renderPartPanel();
+  $('noteModel').value = S.notes.models[S.model] || '';
+  $('noteAll').value = S.notes.all || '';
+}
+function select(i) {
+  sel = i;
+  attachSel(); renderLists();
+  const li = document.querySelector('#parts li.sel'); li?.scrollIntoView({ block: 'nearest' });
+}
+
+// ---------------------------------------------------------------- 오른쪽: 부품 속성
+function numInput(val, step, onChange, w) {
+  const el = document.createElement('input'); el.type = 'number'; el.step = step; el.value = val;
+  if (w) el.style.width = w;
+  el.onfocus = () => snapshot();
+  el.oninput = () => { const v = parseFloat(el.value); if (Number.isFinite(v)) onChange(v); };
+  el.onchange = () => { save(); renderLists(); };
+  return el;
+}
+function vecRow(label, arr, n, step, onChange, labels) {
+  const row = document.createElement('div'); row.className = 'row vec';
+  const lb = document.createElement('label'); lb.textContent = label; row.append(lb);
+  for (let k = 0; k < n; k++) {
+    const wrap = document.createElement('span');
+    if (labels) { const s = document.createElement('span'); s.className = 'muted'; s.textContent = labels[k] + ' '; wrap.append(s); }
+    wrap.append(numInput(arr[k] ?? 0, step, v => { arr[k] = v; onChange(); }));
+    row.append(wrap);
+  }
+  return row;
+}
+function renderPartPanel(onlyValues) {
+  const box = $('partPanel'), sp = spec(), p = sp.parts[sel];
+  if (onlyValues && p && document.activeElement && box.contains(document.activeElement)) return;
+  box.innerHTML = '';
+  const h = document.createElement('h2'); h.textContent = p ? `부품: ${p.id}` : '부품 (화면이나 목록에서 고르세요)'; box.append(h);
+  if (!p) return;
+  const live = () => { rebuildKeepSel(); };
+  // 이름
+  let row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = '<label>이름</label>';
+  const nameIn = document.createElement('input'); nameIn.value = p.id; nameIn.style.width = '170px';
+  nameIn.onchange = () => {
+    const v = nameIn.value.trim(); if (!v || sp.parts.some((q, i) => i !== sel && q.id === v)) { toast('같은 이름이 이미 있다', true); nameIn.value = p.id; return; }
+    snapshot(); const notes = S.notes.parts[S.model]; if (notes?.[p.id]) { notes[v] = notes[p.id]; delete notes[p.id]; }
+    p.id = v; commit();
+  };
+  row.append(nameIn); box.append(row);
+  // 모양 / 부위 / 재질
+  row = document.createElement('div'); row.className = 'row';
+  const mk = (label, opts, val, on) => { const l = document.createElement('label'); l.textContent = label; const s = document.createElement('select'); for (const [k, n] of opts) { const o = document.createElement('option'); o.value = k; o.textContent = n; s.append(o); } s.value = val; s.onchange = () => { snapshot(); on(s.value); commit(); }; row.append(l, s); };
+  mk('모양', Object.keys(SHAPES).map(k => [k, SHAPE_KO[k]]), p.shape, v => { p.shape = v; const need = SHAPES[v].length; p.size = Array.from({ length: need }, (_, k) => p.size[k] ?? 0.05); });
+  box.append(row); row = document.createElement('div'); row.className = 'row';
+  mk('부위', B.GROUPS.map(g => [g, GROUP_KO[g]]), p.in || 'root', v => { p.in = v; });
+  box.append(row); row = document.createElement('div'); row.className = 'row';
+  mk('재질', Object.keys(sp.materials).map(k => [k, k]), p.mat, v => { p.mat = v; });
+  box.append(row);
+  // 크기·위치·회전·비율
+  box.append(vecRow('크기(m)', p.size, SHAPES[p.shape].length, 0.005, live, SHAPES[p.shape]));
+  box.append(vecRow('위치(m)', p.pos, 3, 0.005, live, ['x', 'y', 'z']));
+  p.rot ||= [0, 0, 0];
+  box.append(vecRow('회전(°)', p.rot, 3, 1, live, ['x', 'y', 'z']));
+  p.scale ||= [1, 1, 1];
+  box.append(vecRow('비율', p.scale, 3, 0.05, live, ['x', 'y', 'z']));
+  // 색 (재질 색 대신)
+  row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = '<label>색</label>';
+  const col = document.createElement('input'); col.type = 'color'; col.value = p.color || sp.materials[p.mat]?.color || '#888888';
+  col.onfocus = () => snapshot();
+  col.oninput = () => { p.color = col.value; live(); };
+  col.onchange = () => { save(); renderLists(); };
+  const clr = document.createElement('button'); clr.textContent = p.color ? '재질 색으로' : '(재질 색 사용 중)'; clr.disabled = !p.color;
+  clr.onclick = () => { snapshot(); delete p.color; commit(); };
+  row.append(col, clr); box.append(row);
+  // 확률
+  row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = '<label>확률</label>';
+  const ch = document.createElement('input'); ch.type = 'range'; ch.min = 0; ch.max = 100; ch.value = Math.round((p.chance ?? 1) * 100); ch.style.width = '130px';
+  const chv = document.createElement('span'); chv.className = 'muted'; chv.textContent = `${ch.value}% (모습마다 이 확률로 붙는다)`;
+  ch.onfocus = () => snapshot();
+  ch.oninput = () => { const v = ch.value / 100; if (v >= 1) delete p.chance; else p.chance = v; chv.textContent = `${ch.value}% (모습마다 이 확률로 붙는다)`; live(); };
+  ch.onchange = () => { save(); renderLists(); };
+  row.append(ch, chv); box.append(row);
+  // 이 부품 메모
+  const nl = document.createElement('label'); nl.className = 'muted'; nl.textContent = '이 부품 수정할 점'; box.append(nl);
+  const ta = document.createElement('textarea'); ta.placeholder = '예: 이 갈비뼈를 더 튀어나오게…';
+  ta.value = S.notes.parts[S.model]?.[p.id] || '';
+  ta.oninput = () => { (S.notes.parts[S.model] ||= {}); if (ta.value.trim()) S.notes.parts[S.model][p.id] = ta.value; else delete S.notes.parts[S.model][p.id]; save(); };
+  ta.onchange = () => renderLists();
+  box.append(ta);
+  // 0 회전/1 비율은 데이터에서 뺀다
+  if (p.rot.every(v => v === 0)) delete p.rot;
+  if (p.scale.every(v => v === 1)) delete p.scale;
+}
+function rebuildKeepSel() {
+  const p = spec().parts[sel];
+  if (p) { if (p.rot && p.rot.every(v => v === 0)) delete p.rot; if (p.scale && p.scale.every(v => v === 1)) delete p.scale; }
+  save(); rebuild();
+}
+
+// 재질
+function renderMats() {
+  const box = $('mats'), sp = spec(); box.innerHTML = '';
+  for (const [name, m] of Object.entries(sp.materials)) {
+    const row = document.createElement('div'); row.className = 'mat';
+    const c = document.createElement('input'); c.type = 'color'; c.value = m.color;
+    c.onfocus = () => snapshot();
+    c.oninput = () => { m.color = c.value; save(); rebuild(); };
+    const n = document.createElement('span'); n.textContent = name;
+    const used = sp.parts.filter(p => p.mat === name).length;
+    const tags = [m.glow ? '빛남' : '', m.tint ? '플레이어 색' : '', `${used}개`].filter(Boolean).map(x => `<span class="tag">${x}</span>`).join(' ');
+    n.innerHTML += ' ' + tags;
+    row.append(c, n); box.append(row);
+  }
+  const add = document.createElement('button'); add.textContent = '+ 재질 추가';
+  add.onclick = () => { const nm = prompt('새 재질 이름 (영문)'); if (!nm || sp.materials[nm]) return; snapshot(); sp.materials[nm] = { color: '#888888' }; commit(); };
+  box.append(add);
+}
+// 모델: 키, 자세, 회전축
+function renderModelPanel() {
+  const box = $('modelPanel'), sp = spec(); box.innerHTML = '';
+  let row = document.createElement('div'); row.className = 'row';
+  const l = document.createElement('label'); l.textContent = '키(m)'; row.append(l, numInput(sp.height, 0.05, v => { sp.height = v; save(); rebuild(); })); box.append(row);
+  const pose = sp.pose || {};
+  const setPose = (k, v) => { sp.pose = { ...(sp.pose || {}), [k]: v }; if (!sp.pose.torsoLean && !sp.pose.headTilt) delete sp.pose; save(); rebuild(); };
+  row = document.createElement('div'); row.className = 'row';
+  const l2 = document.createElement('label'); l2.textContent = '숙임(°)';
+  row.append(l2, numInput(pose.torsoLean || 0, 1, v => setPose('torsoLean', v), '54px'));
+  const l3 = document.createElement('label'); l3.textContent = '고개(°)';
+  row.append(l3, numInput(pose.headTilt || 0, 1, v => setPose('headTilt', v), '54px'));
+  box.append(row);
+  const hp = document.createElement('div'); hp.className = 'muted'; hp.textContent = '회전축 (걸을 때 팔다리가 도는 점, 서 있는 자세 기준 좌표)'; box.append(hp);
+  for (const g of B.GROUPS.slice(1)) {
+    sp.pivots[g] ||= [0, 0, 0];
+    box.append(vecRow(GROUP_KO[g], sp.pivots[g], 3, 0.01, () => { save(); rebuild(); }, ['x', 'y', 'z']));
+  }
+}
+
+// ---------------------------------------------------------------- 편집 동작
+function uniqueId(base) { const ids = new Set(spec().parts.map(p => p.id)); let i = 1, id = base; while (ids.has(id)) id = `${base}${++i}`; return id; }
+$('btnAdd').onclick = () => {
+  snapshot();
+  const sp = spec(), ref = sp.parts[sel];
+  const p = { id: uniqueId('new'), shape: 'box', size: [0.05, 0.05, 0.05], pos: ref ? [ref.pos[0] + 0.06, ref.pos[1], ref.pos[2]] : [0, 1, 0], mat: ref?.mat || Object.keys(sp.materials)[0], in: ref?.in || 'root' };
+  sp.parts.push(p); sel = sp.parts.length - 1; commit(); attachSel();
+};
+$('btnDup').onclick = () => {
+  const sp = spec(), p = sp.parts[sel]; if (!p) return;
+  snapshot(); const c = clone(p); c.id = uniqueId(p.id.replace(/\d+$/, '') || p.id); c.pos = [c.pos[0] + 0.03, c.pos[1], c.pos[2]];
+  sp.parts.splice(sel + 1, 0, c); sel++; commit(); attachSel();
+};
+$('btnMirror').onclick = () => {
+  const sp = spec(), p = sp.parts[sel]; if (!p) return;
+  snapshot(); const c = clone(p);
+  const swap = s => s.replace(/L(?=\d*_?\d*$)/, '\u0000').replace(/R(?=\d*_?\d*$)/, 'L').replace('\u0000', 'R');
+  c.id = uniqueId(swap(p.id) === p.id ? `${p.id}M` : swap(p.id));
+  c.pos = [-c.pos[0], c.pos[1], c.pos[2]];
+  if (c.rot) c.rot = [c.rot[0], -c.rot[1], -c.rot[2]];
+  if (c.in === 'armL' || c.in === 'armR' || c.in === 'legL' || c.in === 'legR') c.in = c.in.endsWith('L') ? c.in.slice(0, -1) + 'R' : c.in.slice(0, -1) + 'L';
+  sp.parts.splice(sel + 1, 0, c); sel++; commit(); attachSel();
+};
+$('btnDel').onclick = () => {
+  const sp = spec(); if (sel < 0) return;
+  snapshot(); sp.parts.splice(sel, 1); sel = Math.min(sel, sp.parts.length - 1); commit(); attachSel();
+};
+function doUndo() { if (!undo.length) return; redo.push(JSON.stringify(S.data)); S.data = JSON.parse(undo.pop()); sel = Math.min(sel, spec().parts.length - 1); commit(); }
+function doRedo() { if (!redo.length) return; undo.push(JSON.stringify(S.data)); S.data = JSON.parse(redo.pop()); commit(); }
+$('btnUndo').onclick = doUndo; $('btnRedo').onclick = doRedo;
+addEventListener('keydown', e => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); doRedo(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && !typing) { e.preventDefault(); $('btnDup').click(); }
+  else if (typing) return;
+  else if (e.key === 'Delete') $('btnDel').click();
+  else if (e.key === 'Escape') select(-1);
+  else if (e.key === 'w' || e.key === 'W') gizmo.setMode('translate');
+  else if (e.key === 'e' || e.key === 'E') gizmo.setMode('rotate');
+  else if (e.key === 'r' || e.key === 'R') gizmo.setMode('scale');
+});
+$('search').oninput = renderLists;
+$('noteModel').oninput = e => { S.notes.models[S.model] = e.target.value; save(); };
+$('noteAll').oninput = e => { S.notes.all = e.target.value; save(); };
+$('btnWalk').onclick = () => { walking = !walking; $('btnWalk').classList.toggle('on', walking); if (!walking) rebuild(); };
+$('btnSeed').onclick = () => { seed = (seed % 9999) + 1; rebuild(); };
+$('btnLight').onclick = () => { bright = !bright; applyLight(); };
+$('btnRef').onclick = () => { showRef = !showRef; refGroup.visible = showRef; $('btnRef').classList.toggle('on', showRef); };
+
+// 모델 고르기
+const ms = $('modelSel');
+for (const k of Object.keys(S.data.models)) { const o = document.createElement('option'); o.value = k; o.textContent = MODEL_KO[k] || k; ms.append(o); }
+ms.value = S.model;
+ms.onchange = () => { S.model = ms.value; sel = -1; save(); rebuild(); renderLists(); frame(); };
+function frame() { const h = spec().height || 1.75; orbit.target.set(0, h * 0.55, 0); camera.position.set(h * 0.9, h * 0.85, -h * 1.45); }
+
+// ---------------------------------------------------------------- 내보내기: Claude 에게 줄 내용
+/** 처음 상태와 비교한 바뀐 점 (부품은 이름으로 비교) */
+function diff() {
+  const out = {};
+  for (const [name, m] of Object.entries(S.data.models)) {
+    const b = BASE.models[name], d = {};
+    if (!b) { out[name] = { newModel: m }; continue; }
+    for (const k of ['height', 'pose', 'pivots']) if (JSON.stringify(m[k] ?? null) !== JSON.stringify(b[k] ?? null)) d[k] = m[k];
+    const mats = {};
+    for (const [k, v] of Object.entries(m.materials)) if (JSON.stringify(v) !== JSON.stringify(b.materials[k])) mats[k] = v;
+    if (Object.keys(mats).length) d.materials = mats;
+    const bp = new Map(b.parts.map(p => [p.id, p])), mp = new Map(m.parts.map(p => [p.id, p]));
+    const changed = [], added = [], removed = [];
+    for (const p of m.parts) { const o = bp.get(p.id); if (!o) added.push(p); else if (JSON.stringify(o) !== JSON.stringify(p)) changed.push(p); }
+    for (const p of b.parts) if (!mp.has(p.id)) removed.push(p.id);
+    if (changed.length) d.changed = changed;
+    if (added.length) d.added = added;
+    if (removed.length) d.removed = removed;
+    if (Object.keys(d).length) out[name] = d;
+  }
+  return out;
+}
+function exportText() {
+  const N = S.notes, lines = ['[백룸 모델 편집 결과]', `기준: level0.json ${BASE_STAMP}`, ''];
+  if (N.all?.trim()) lines.push('■ 전체 메모', N.all.trim(), '');
+  for (const name of Object.keys(S.data.models)) {
+    const mn = N.models[name]?.trim(), pn = Object.entries(N.parts[name] || {}).filter(([, v]) => v.trim());
+    if (!mn && !pn.length) continue;
+    lines.push(`■ ${MODEL_KO[name] || name} (${name})`);
+    if (mn) lines.push(mn);
+    for (const [id, v] of pn) lines.push(`  - 부품 ${id}: ${v.trim()}`);
+    lines.push('');
+  }
+  const d = diff();
+  lines.push(Object.keys(d).length ? '■ 직접 고친 데이터 (처음 상태와 다른 것만)' : '■ 직접 고친 데이터: 없음');
+  if (Object.keys(d).length) lines.push('```json', JSON.stringify(d), '```');
+  return lines.join('\n');
+}
+$('btnCopy').onclick = async () => {
+  const text = exportText();
+  try { await navigator.clipboard.writeText(text); toast(`복사했다 (${Math.round(text.length / 1024 * 10) / 10}KB) — Claude 에게 붙여 넣으세요`); }
+  catch { $('dlgText').value = text; $('copyDlg').showModal(); $('dlgText').select(); }
+};
+$('dlgClose').onclick = () => $('copyDlg').close();
+$('btnSave').onclick = () => {
+  const blob = new Blob([JSON.stringify({ ...S.data, notes: S.notes, stamp: BASE_STAMP }, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'backrooms-models.json'; a.click();
+  toast('backrooms-models.json 으로 저장했다 (다운로드 폴더). 이 파일 위치를 Claude 에게 알려 줘도 된다');
+};
+$('btnLoad').onclick = () => $('fileIn').click();
+$('fileIn').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    if (!j.models) throw new Error('models 가 없다');
+    snapshot();
+    S.data = { version: j.version || 1, models: j.models };
+    if (j.notes) S.notes = j.notes;
+    if (!S.data.models[S.model]) S.model = Object.keys(S.data.models)[0];
+    sel = -1; commit(); toast('불러왔다');
+  } catch (err) { toast(`불러오기 실패: ${err.message}`, true); }
+  e.target.value = '';
+};
+$('btnReset').onclick = () => {
+  if (!confirm('모든 수정과 메모를 버리고 처음 상태로 돌아갈까요? (되돌리기로 한 번 복구할 수 있다)')) return;
+  snapshot(); const keep = S.model; S = freshState(); S.model = keep; sel = -1; commit();
+};
+let toastT = 0;
+function toast(msg, err) { const el = $('toast'); el.textContent = msg; el.className = err ? 'err' : ''; el.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => { el.style.display = 'none'; }, 3200); }
+
+applyLight(); resize(); rebuild(); renderLists(); frame();
+window.__editor = { S, spec, select, exportText, rebuild };   // 자동 확인용
+</script>
+</body>
+</html>

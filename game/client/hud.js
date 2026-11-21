@@ -3,6 +3,7 @@ import { Input, keyLabel } from './input.js';
 import { itemIcon } from './sprites.js';
 import { BESTIARY, typesInLevel } from './bestiary.js';
 import { t as tr, getLang } from '../../shared/i18n.js';
+import { compassGoal, relativeBearing } from './compass.js';
 
 const fmtTime = t => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
@@ -461,24 +462,15 @@ export class Hud {
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   }
 
-  /** 나침반: 플레이어 위에 가장 가까운 열쇠(다 모았으면 출구) 방향 화살표 */
+  /**
+   * 나침반: 화면 가운데 둘레에 목표(compass.js) 방향 화살표.
+   * 2D(위에서 내려다봄)는 지도 방향 그대로, 1인칭(3D)은 바라보는 방향 기준 (화면 위 = 정면, 오른쪽 = 오른쪽, 아래 = 뒤)
+   */
   drawCompass(ctx, game, W, H) {
-    const p = game.local, map = game.map;
-    let tx, ty;
-    const o = game.obj;
-    const nearest = list => { let best = Infinity; for (const k of list) { const d = Math.hypot(k.x - p.x, k.y - p.y); if (d < best) { best = d; tx = k.x; ty = k.y; } } };
-    if (game.exitUnlocked || o?.type === 'survive') { const e = game.level.exitIdx; tx = (e % map.w) * TS + TS / 2; ty = ((e / map.w) | 0) * TS + TS / 2; }
-    else if (o?.type === 'deliver') {
-      const held = o.parts.filter(pt => pt.s === 1 && pt.c === game.myId).length, ground = o.parts.filter(pt => pt.s === 0);
-      if (held >= MISSION.CARRY || (held && !ground.length)) nearest([game.level.depot]); else nearest(ground);
-    }
-    else if (o?.type === 'activate') nearest(game.level.stations.filter((st, i) => (o.prog[i] || 0) < 1));
-    else {
-      let best = Infinity;
-      for (const k of game.keys) { if (k.collected) continue; const d = Math.hypot(k.x - p.x, k.y - p.y); if (d < best) { best = d; tx = k.x; ty = k.y; } }
-    }
-    if (tx === undefined) return;
-    const a = Math.atan2(ty - p.y, tx - p.x), cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.16;
+    const p = game.local, goal = compassGoal(game);
+    if (!goal) return;
+    const a = game.view3D ? relativeBearing(p, goal) - Math.PI / 2 : Math.atan2(goal.y - p.y, goal.x - p.x);
+    const cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.16;
     const alpha = Math.min(1, game.compassT / 2) * (0.75 + Math.sin(game.time * 6) * 0.2);
     ctx.save();
     ctx.translate(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.rotate(a);

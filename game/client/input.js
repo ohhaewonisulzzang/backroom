@@ -12,6 +12,7 @@ export const ACTIONS = [
   ['slot1', '아이템 1', 'Digit1'], ['slot2', '아이템 2', 'Digit2'], ['slot3', '아이템 3', 'Digit3'], ['slot4', '아이템 4', 'Digit4'],
   ['drop', '버리기 (손에 든 아이템)', 'KeyG'], ['emote', '감정 표현', 'Comma'], ['chat', '채팅', 'Enter'], ['mic', '마이크', 'KeyM'],
   ['skip', '관전 / 건너뛰기(길게)', 'Space'],
+  ['cursor', '마우스 커서 풀기 / 잠그기 (3D)', 'KeyN'],
 ];
 export const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(([a, , k]) => [a, k]));
 /** 바꿀 수 없는 보조 키 (방향키 이동, 오른쪽 Shift) */
@@ -93,10 +94,22 @@ export const Input = {
     // 마우스를 실제로 움직이면 마우스 조준으로 돌아온다 (터치가 흉내 내는 mousemove 는 무시)
     on('pointermove', e => {
       if (e.pointerType !== 'mouse') return;
-      if (this.locked) { this.look.dx += e.movementX || 0; this.look.dy += e.movementY || 0; this.touch.active = false; return; }
+      if (this.locked) { this.addLook(e.movementX || 0, e.movementY || 0); this.touch.active = false; return; }
       this.mouse.x = e.clientX; this.mouse.y = e.clientY;
       this.touch.active = false;
     });
+  },
+
+  /**
+   * 포인터 잠금 중 마우스 이동량 더하기. 크롬(특히 윈도우)은 가끔 이벤트 하나에 수백 px 짜리 엉뚱한 값을 준다
+   * (잠금 직후, 창 가장자리, 일부 마우스 드라이버) → 시점이 휙 "순간이동" 한다.
+   * 최근 평균 이동량보다 터무니없이 크고 절대값도 큰 이벤트 하나는 버린다. 진짜 빠른 휙 돌리기는 여러 이벤트로 나뉘어 오므로 평균이 같이 커져서 통과한다
+   */
+  addLook(dx, dy) {
+    const m = Math.hypot(dx, dy), avg = this.lookAvg || 0;
+    if (m > 120 && m > avg * 8 + 40) { this.lookSpikes = (this.lookSpikes || 0) + 1; this.lookAvg = avg * 0.9 + m * 0.02; return; }
+    this.lookAvg = avg * 0.85 + m * 0.15;
+    this.look.dx += dx; this.look.dy += dy;
   },
 
   /**
@@ -110,11 +123,16 @@ export const Input = {
         const now = document.pointerLockElement === this.lockEl;
         if (this.locked && !now && !this.unlocking) { this.lockLostAt = performance.now(); this.lockLostHandlers.forEach(fn => fn()); }
         this.locked = now; this.unlocking = false;
-        this.look.dx = this.look.dy = 0;
+        this.look.dx = this.look.dy = 0; this.lookAvg = 0;
       });
     }
     this.lockEl = el;
-    try { const r = el.requestPointerLock(); r?.catch?.(() => {}); } catch { /* 잠금 불가 (iframe 등) */ }
+    // unadjustedMovement: OS 마우스 가속을 거치지 않은 원시 이동량 (크롬·엣지). 지원 안 하면 보통 잠금으로 다시
+    const plain = () => { try { const r = el.requestPointerLock(); r?.catch?.(() => {}); } catch { /* 잠금 불가 (iframe 등) */ } };
+    try {
+      const r = el.requestPointerLock({ unadjustedMovement: true });
+      if (r?.catch) r.catch(e => { if (e?.name === 'NotSupportedError') plain(); });
+    } catch { plain(); }
   },
   unlockPointer() {
     if (!this.locked) return;

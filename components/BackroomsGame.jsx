@@ -16,7 +16,7 @@ const store = {
 };
 const loadSettings = () => {
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;   // 태블릿은 그래픽 품질 기본 '낮음'
-  const def = { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true, threeD: true, quality: coarse ? 'low' : 'medium', mouseSens: 1 };
+  const def = { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true, threeD: true, quality: coarse ? 'low' : 'medium', mouseSens: 1, fpsCap: 0, showFps: false };
   try { return { ...def, ...JSON.parse(store.get('backrooms.settings') || '{}') }; }
   catch { return def; }
 };
@@ -493,9 +493,17 @@ function SettingsForm({ settings, onSettings, onBack, engine }) {
           <label className="check"><input type="checkbox" checked={settings.threeD !== false} onChange={e => onSettings({ threeD: e.target.checked })} /> {t('3D 화면')}</label>
           <label>{t('그래픽 품질')}
             <select value={settings.quality || 'medium'} onChange={e => onSettings({ quality: e.target.value })}>
-              {[['low', '낮음'], ['medium', '중간'], ['high', '높음']].map(([k, n]) => <option key={k} value={k}>{t(n)}</option>)}
+              {[['low', '낮음'], ['medium', '중간'], ['high', '높음'], ['ultra', '울트라 (레이 트레이싱)']].map(([k, n]) => <option key={k} value={k}>{t(n)}</option>)}
             </select>
           </label>
+          {settings.quality === 'ultra' && <p className="dim">{t('울트라는 빛을 레이 트레이싱한다 (부드러운 그림자·간접광). 성능 좋은 그래픽 카드가 필요하고, 못 쓰는 컴퓨터에서는 높음으로 그린다.')}<br />
+            {t('윈도우 크롬·엣지 기본 설정(Direct3D)에서는 쓸 수 없다. chrome://flags 에서 Choose ANGLE graphics backend 를 OpenGL 로 바꾸면 켜진다. 켤 때 몇 초 멈춘다.')}</p>}
+          <label>{t('프레임 한도')}
+            <select value={settings.fpsCap || 0} onChange={e => onSettings({ fpsCap: Number(e.target.value) })}>
+              {[0, 30, 60, 120, 144, 165, 240].map(n => <option key={n} value={n}>{n ? `${n} FPS` : t('제한 없음 (모니터 주사율)')}</option>)}
+            </select>
+          </label>
+          <label className="check"><input type="checkbox" checked={!!settings.showFps} onChange={e => onSettings({ showFps: e.target.checked })} /> {t('FPS 표시')}</label>
           <label>{t('마우스 감도')} {(settings.mouseSens ?? 1).toFixed(1)}
             <input type="range" min="0.2" max="3" step="0.1" value={settings.mouseSens ?? 1} onChange={e => onSettings({ mouseSens: Number(e.target.value) })} />
           </label>
@@ -515,7 +523,7 @@ function ControlsText({ onBack, engine }) {
       <div className="ctrl-grid">
         {[[`${K('up')}${K('left')}${K('down')}${K('right')}`, '이동'], [t('마우스'), '조준'], [K('sprint'), '달리기'], [K('crouch'), '웅크리기'],
           [K('flashlight'), '손전등'], [K('interact'), '상호작용'], [`${K('slot1')}~${K('slot4')}`, '아이템'], [`${K('drop')}+${t('아이템')}`, '버리기'],
-          [K('emote'), '감정 표현'], [K('chat'), '채팅'], [K('mic'), '마이크'], [K('skip'), '관전'], ['ESC', '메뉴']].map(([k, a]) => (
+          [K('emote'), '감정 표현'], [K('chat'), '채팅'], [K('mic'), '마이크'], [K('skip'), '관전'], [K('cursor'), '마우스 커서 풀기'], ['ESC', '메뉴']].map(([k, a]) => (
           <div key={a} className="ctrl-row"><b>{k}</b><span>{t(a)}</span></div>
         ))}
       </div>

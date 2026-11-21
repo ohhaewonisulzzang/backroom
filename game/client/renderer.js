@@ -664,6 +664,7 @@ export class Renderer {
       if (game.nearSecret) prompt(level.secret.x, level.secret.y - 20, 2.2, 'E  ...?');
       if (game.nearNpc) prompt(game.nearNpc.x, game.nearNpc.y, 2.1, 'E  말 걸기');
       if (game.nearNoclip) { const e = level.exitIdx; prompt((e % level.map.w) * TS + TS / 2, ((e / level.map.w) | 0) * TS + TS / 2, 2.2, 'E  노클립'); }
+      if (game.nearPuzzle >= 0 && game.puzzleOpen < 0) { const k = game.keys[game.nearPuzzle]; prompt(k.x, k.y, 1.55, 'E  퍼즐'); }   // 퍼즐 단말기 (Level 1)
     }
     // 이름표: '이름 숨김' 모드면 살아 있는 동안엔 가린다
     if (!(me.alive && game.modes?.hideNames !== false)) {

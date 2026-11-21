@@ -1,0 +1,9436 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>백룸 모델 편집기</title>
+<!-- 이 파일은 tools/build-model-editor.mjs 가 만든다. 직접 고치지 말고 tools/model-editor.template.html 을 고친 뒤 다시 만들 것 -->
+<style>
+  :root { --bg: #14120c; --panel: #1d1a12; --line: #3a3322; --text: #e6d9a8; --dim: #9a8c5c; --accent: #e7b92e; --danger: #d0503a; --ok: #6fbf5f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, "Malgun Gothic", sans-serif; overflow: hidden; }
+  #app { display: grid; grid-template-columns: 250px 1fr 330px; grid-template-rows: auto 1fr; height: 100%; }
+  header { grid-column: 1 / 4; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0 10px 0 0; color: var(--accent); }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow: auto; padding: 8px; }
+  aside.right { border-right: 0; border-left: 1px solid var(--line); }
+  #view { position: relative; overflow: hidden; }
+  #view canvas { display: block; }
+  #hint { position: absolute; left: 10px; bottom: 8px; color: var(--dim); font-size: 12px; pointer-events: none; text-shadow: 0 1px 2px #000; }
+  #stats { position: absolute; right: 10px; top: 8px; color: var(--dim); font-size: 12px; pointer-events: none; text-align: right; }
+  button, select, input, textarea { font: inherit; color: var(--text); background: #26221a; border: 1px solid var(--line); border-radius: 4px; }
+  button { padding: 4px 9px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #4a3c10; border-color: var(--accent); color: #fff3c4; font-weight: 600; }
+  button.danger { border-color: #6a2a1e; }
+  button.on { background: #3a3218; border-color: var(--accent); }
+  select, input { padding: 3px 5px; }
+  input[type=number] { width: 64px; }
+  input[type=color] { width: 40px; height: 24px; padding: 0 2px; }
+  textarea { width: 100%; resize: vertical; padding: 5px; min-height: 54px; }
+  h2 { font-size: 12px; color: var(--accent); margin: 12px 0 6px; text-transform: none; letter-spacing: 0.02em; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+  h2:first-child { margin-top: 0; }
+  .row { display: flex; gap: 5px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+  .row label { color: var(--dim); min-width: 52px; }
+  .vec input { width: 60px; }
+  #parts { list-style: none; margin: 0; padding: 0; }
+  #parts li { padding: 2px 6px; border-radius: 3px; cursor: pointer; display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; }
+  #parts li:hover { background: #2a2518; }
+  #parts li.sel { background: #4a3c10; color: #fff3c4; }
+  #parts li .g { color: var(--dim); font-size: 11px; }
+  #parts li.noted::after { content: '✎'; color: var(--accent); margin-left: 4px; }
+  #parts li.changed .n { color: #9fd58f; }
+  #parts li.added .n { color: #8fc8ff; }
+  .groupHead { color: var(--dim); font-size: 11px; margin: 6px 0 2px; }
+  .mat { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
+  .mat span { flex: 1; }
+  .tag { font-size: 10px; color: var(--dim); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; }
+  .muted { color: var(--dim); font-size: 12px; }
+  #toast { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); background: #2d4a1e; color: #e8ffd8; padding: 7px 14px; border-radius: 5px; display: none; z-index: 9; box-shadow: 0 4px 16px #000a; }
+  #toast.err { background: #5a2018; color: #ffe0d8; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; width: min(720px, 92vw); }
+  dialog textarea { min-height: 300px; font: 12px/1.35 ui-monospace, Consolas, monospace; }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>백룸 모델 편집기</h1>
+    <select id="modelSel" title="고칠 모델"></select>
+    <span class="sep"></span>
+    <button id="btnWalk" title="걷는 모습 보기">걷기</button>
+    <button id="btnSeed" title="chance(확률) 부품이 다르게 붙은 모습">다른 모습</button>
+    <button id="btnLight" title="밝게 보기 / 게임처럼 어둡게">밝게 보기</button>
+    <button id="btnRef" class="on" title="키 1.75m 기준 막대와 바닥 격자">기준선</button>
+    <span class="sep"></span>
+    <button id="btnUndo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>
+    <button id="btnRedo" title="다시 하기 (Ctrl+Y)">↷</button>
+    <span class="sep"></span>
+    <button id="btnCopy" class="primary" title="고친 점 + 메모를 복사 → Claude 에게 붙여 넣기">Claude에게 줄 내용 복사</button>
+    <button id="btnSave" title="전체 모델 데이터를 .json 파일로 저장">파일로 저장</button>
+    <button id="btnLoad" title=".json 파일 불러오기">불러오기</button>
+    <input id="fileIn" type="file" accept=".json,application/json" hidden>
+    <button id="btnReset" class="danger" title="모든 수정을 버리고 처음 상태로">처음 상태로</button>
+  </header>
+
+  <aside>
+    <h2>부품 <span class="muted" id="partCount"></span></h2>
+    <div class="row"><input id="search" placeholder="부품 이름 찾기" style="width:100%"></div>
+    <div class="row">
+      <button id="btnAdd" title="새 부품 추가 (선택한 부품 옆에)">+ 추가</button>
+      <button id="btnDup" title="복제 (Ctrl+D)">복제</button>
+      <button id="btnMirror" title="좌우 반대쪽에 대칭 복제">좌우 대칭</button>
+      <button id="btnDel" class="danger" title="삭제 (Delete)">삭제</button>
+    </div>
+    <ul id="parts"></ul>
+  </aside>
+
+  <div id="view">
+    <div id="stats"></div>
+    <div id="hint">왼쪽 드래그: 돌려 보기 · 오른쪽 드래그: 옮기기 · 휠: 확대 · 부품 클릭: 선택 · W/E/R: 이동/회전/크기 손잡이 · Esc: 선택 해제</div>
+  </div>
+
+  <aside class="right">
+    <div id="partPanel"></div>
+    <h2>재질 (색)</h2>
+    <div id="mats"></div>
+    <h2>모델</h2>
+    <div id="modelPanel"></div>
+    <h2>메모 — 수정할 점</h2>
+    <div class="muted">여기 적은 내용도 "Claude에게 줄 내용 복사"에 같이 들어간다.</div>
+    <label class="muted">이 모델 전체</label>
+    <textarea id="noteModel" placeholder="예: 하울러 팔이 너무 길다, 머리를 더 길쭉하게…"></textarea>
+    <label class="muted">전체 (모든 모델)</label>
+    <textarea id="noteAll" placeholder="예: 전체적으로 더 기괴하게, 색을 더 어둡게…"></textarea>
+  </aside>
+</div>
+<div id="toast"></div>
+<dialog id="copyDlg">
+  <div class="row" style="justify-content:space-between"><b>Claude 에게 붙여 넣을 내용</b><button id="dlgClose">닫기</button></div>
+  <div class="muted">자동 복사가 막혔으면 아래를 전부 선택(Ctrl+A)해서 복사(Ctrl+C)하세요.</div>
+  <textarea id="dlgText" readonly></textarea>
+</dialog>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+// ---------------------------------------------------------------- 게임과 같은 모델 빌더 (game/client/three/models/build.js)
+const BUILD_SRC = "/**\r\n * 데이터(부품 목록)로 3D 모델을 짓는다. 게임(actors.js)과 모델 편집기(tools/model-editor.html)가 같은 코드를 쓴다.\r\n *  - three 는 인자로 받는다 (편집기는 CDN 의 three, 게임은 번들의 three)\r\n *  - 이 파일은 import 가 없어야 한다 (편집기 HTML 에 그대로 끼워 넣는다 — tools/build-model-editor.mjs)\r\n *\r\n * 모델 데이터 (game/client/three/models/level0.json):\r\n *  {\r\n *    name, height(m), kind,\r\n *    pivots: { torso: [x,y,z], head: [...], armL, armR, legL, legR }   // 회전축 (서 있는 자세, 모델 기준 좌표). -z 가 앞\r\n *    materials: { 이름: { color: '#hex', emissive?: '#hex', glow?: true, tint?: true } }\r\n *       glow: 빛나는 재질 (안개·조명 무시, 눈 등) / tint: 플레이어 옷 색으로 바뀌는 재질\r\n *    pose?: { torsoLean: 앞으로 숙임(°), headTilt: 고개 숙임(°) }\r\n *    parts: [{ id, shape, size, pos, rot?, scale?, mat, color?, in?, chance?, note? }]\r\n *       shape: box [w,h,d] / sphere [r] / capsule [r, 길이] / cylinder [위r, 아래r, 높이] / cone [r, 높이] / torus [R, 굵기]\r\n *       pos: 서 있는 자세의 모델 기준 좌표(m), rot: 도(°) [x,y,z], scale: [x,y,z]\r\n *       in: 붙는 부위 (root | torso | head | armL | armR | legL | legR) — 그 부위가 걸을 때 같이 움직인다\r\n *       chance: 0..1 — 이 확률로만 붙는다 (같은 시드면 같은 모습). 생김새를 다양하게\r\n *  }\r\n */\r\n\r\n/** 시드 난수 (mulberry32) */\r\nexport function seededRandom(seed) {\r\n  let a = (seed >>> 0) || 1;\r\n  return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };\r\n}\r\n/** 문자열 → 시드 */\r\nexport function seedOf(s) { let h = 2166136261; for (const c of String(s ?? '')) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; }\r\n\r\nconst GROUP_PARENT = { torso: 'root', legL: 'root', legR: 'root', head: 'torso', armL: 'torso', armR: 'torso' };\r\nexport const GROUPS = ['root', 'torso', 'head', 'armL', 'armR', 'legL', 'legR'];\r\n\r\n/** 부품 하나의 지오메트리 */\r\nexport function partGeometry(THREE, p) {\r\n  const s = p.size || [0.1, 0.1, 0.1];\r\n  switch (p.shape) {\r\n    case 'sphere': return new THREE.SphereGeometry(s[0], 12, 9);\r\n    case 'capsule': return new THREE.CapsuleGeometry(s[0], s[1] ?? 0.1, 4, 10);\r\n    case 'cylinder': return new THREE.CylinderGeometry(s[0], s[1] ?? s[0], s[2] ?? 0.1, 12);\r\n    case 'cone': return new THREE.ConeGeometry(s[0], s[1] ?? 0.1, 10);\r\n    case 'torus': return new THREE.TorusGeometry(s[0], s[1] ?? 0.02, 8, 18);\r\n    default: return new THREE.BoxGeometry(s[0], s[1] ?? s[0], s[2] ?? s[0]);\r\n  }\r\n}\r\n\r\n/** 색 문자열을 밝기·채도 조정 (faded: 빛바램) */\r\nfunction adjustColor(THREE, hex, faded) {\r\n  const c = new THREE.Color(hex);\r\n  if (faded) { const hsl = {}; c.getHSL(hsl); c.setHSL(hsl.h, hsl.s * 0.45, hsl.l * 0.75); }\r\n  return c;\r\n}\r\n\r\n/**\r\n * 모델 짓기.\r\n * opts: {\r\n *   tint: '#hex'   — tint 재질(옷)의 색 (플레이어 색)\r\n *   faded: bool    — 모든 색을 빛바래게 (방랑자)\r\n *   seed: number   — chance 부품 고르기\r\n *   merge: bool    — 부위·재질별로 메시를 하나로 합친다 (게임용, 그리기 호출 수 줄이기). 편집기는 false (부품을 골라야 하므로)\r\n *   mergeGeometries: fn — three/examples BufferGeometryUtils.mergeGeometries (merge 일 때 필요)\r\n *   Material: 재질 클래스 (기본 MeshLambertMaterial)\r\n * }\r\n * 반환: THREE.Group. userData = { limbs: { armL, armR, legL, legR }, torso, head, eyes, eyeMat, height, kind, parts: [mesh...] }\r\n */\r\nexport function buildModel(THREE, spec, opts = {}) {\r\n  const rng = seededRandom(opts.seed ?? 1);\r\n  const Mat = opts.Material || THREE.MeshLambertMaterial;\r\n  const root = new THREE.Group();\r\n  root.name = spec.name || 'model';\r\n  const pv = spec.pivots || {};\r\n  const abs = g => (g === 'root' ? [0, 0, 0] : pv[g] || [0, 0, 0]);\r\n  // 부위 그룹: 회전축 위치에 두고, 부모 그룹 기준 상대 좌표로\r\n  const groups = { root };\r\n  for (const g of GROUPS.slice(1)) {\r\n    const grp = new THREE.Group(); grp.name = g;\r\n    groups[g] = grp;\r\n  }\r\n  for (const g of GROUPS.slice(1)) {\r\n    const parent = GROUP_PARENT[g], a = abs(g), pa = abs(parent);\r\n    groups[g].position.set(a[0] - pa[0], a[1] - pa[1], a[2] - pa[2]);\r\n    groups[parent].add(groups[g]);\r\n  }\r\n  // 재질 (모델 하나 안에서 공유)\r\n  const mats = {};\r\n  let eyeMat = null;\r\n  const matFor = (name, override) => {\r\n    const key = `${name}|${override || ''}`;\r\n    if (mats[key]) return mats[key];\r\n    const d = (spec.materials || {})[name] || { color: '#888888' };\r\n    const hex = override || (d.tint && opts.tint ? opts.tint : d.color);\r\n    let m;\r\n    if (d.glow) { m = new THREE.MeshBasicMaterial({ color: new THREE.Color(hex), fog: false }); if (!eyeMat) eyeMat = m; }\r\n    else {\r\n      m = new Mat({ color: adjustColor(THREE, hex, opts.faded) });\r\n      if (d.emissive && m.emissive) m.emissive = new THREE.Color(d.emissive);\r\n    }\r\n    m.userData.matName = name;\r\n    if (d.glow) m.userData.glow = true;\r\n    mats[key] = m;\r\n    return m;\r\n  };\r\n  const meshes = [];\r\n  const eyes = new THREE.Group(); eyes.name = 'eyes';\r\n  for (const p of spec.parts || []) {\r\n    if (p.chance !== undefined && p.chance < 1 && rng() >= p.chance) continue;\r\n    const g = groups[p.in] ? p.in : 'root';\r\n    const geo = partGeometry(THREE, p);\r\n    const mat = matFor(p.mat, p.color);\r\n    const m = new THREE.Mesh(geo, mat);\r\n    const a = abs(g), pos = p.pos || [0, 0, 0];\r\n    m.position.set(pos[0] - a[0], pos[1] - a[1], pos[2] - a[2]);\r\n    if (p.rot) m.rotation.set(p.rot[0] * Math.PI / 180, (p.rot[1] || 0) * Math.PI / 180, (p.rot[2] || 0) * Math.PI / 180);\r\n    if (p.scale) m.scale.set(p.scale[0], p.scale[1] ?? p.scale[0], p.scale[2] ?? p.scale[0]);\r\n    m.userData.part = p;\r\n    m.name = p.id || '';\r\n    groups[g].add(m);\r\n    meshes.push(m);\r\n  }\r\n  if (opts.merge && opts.mergeGeometries) mergeGroups(THREE, groups, opts.mergeGeometries);\r\n  // 기본 자세 (pose: { torsoLean: 앞으로 숙임 °, headTilt: 고개 숙임 ° }) — 방랑자처럼 구부정한 모델\r\n  const pose = spec.pose || {};\r\n  groups.torso.rotation.x = -(pose.torsoLean || 0) * Math.PI / 180;\r\n  groups.head.rotation.x = -(pose.headTilt || 0) * Math.PI / 180;\r\n  groups.torso.userData.baseLean = groups.torso.rotation.x;\r\n  // 빛나는 재질 부품(눈)은 eyes 로 모은다 (게임이 쫓을 때 눈 색을 바꾼다)\r\n  root.userData = {\r\n    limbs: { armL: groups.armL, armR: groups.armR, legL: groups.legL, legR: groups.legR },\r\n    torso: groups.torso, head: groups.head, eyes, eyeMat,\r\n    height: spec.height || 1.75, kind: spec.kind || spec.name, parts: meshes, groups,\r\n  };\r\n  return root;\r\n}\r\n\r\n/** 부위마다 같은 재질의 메시를 하나로 합친다 (부품 수백 개 → 그리기 호출 수십 개) */\r\nfunction mergeGroups(THREE, groups, mergeGeometries) {\r\n  for (const grp of Object.values(groups)) {\r\n    const byMat = new Map();\r\n    for (const c of [...grp.children]) {\r\n      if (!c.isMesh) continue;\r\n      if (!byMat.has(c.material)) byMat.set(c.material, []);\r\n      byMat.get(c.material).push(c);\r\n    }\r\n    for (const [mat, list] of byMat) {\r\n      if (list.length < 2) continue;\r\n      const geos = list.map(m => {\r\n        m.updateMatrix();\r\n        const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();\r\n        g.applyMatrix4(m.matrix);\r\n        for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);\r\n        return g;\r\n      });\r\n      const merged = mergeGeometries(geos, false);\r\n      for (const g of geos) g.dispose();\r\n      if (!merged) continue;\r\n      for (const m of list) { grp.remove(m); m.geometry.dispose(); }\r\n      const mm = new THREE.Mesh(merged, mat);\r\n      mm.name = `${grp.name}:${mat.userData.matName || ''}`;\r\n      grp.add(mm);\r\n    }\r\n  }\r\n}\r\n\r\n/** 걷기 자세: 팔다리 흔들기. speed 0..1, crouch 면 낮게 */\r\nexport function poseWalk(group, phase, speed, crouch = false) {\r\n  const L = group.userData.limbs; if (!L) return;\r\n  const s = Math.sin(phase) * 0.7 * speed;\r\n  L.legL.rotation.x = s; L.legR.rotation.x = -s;\r\n  L.armL.rotation.x = -s * 0.8; L.armR.rotation.x = s * 0.8;\r\n  group.scale.y = crouch ? 0.65 : 1;\r\n}\r\n";
+const B = await import(URL.createObjectURL(new Blob([BUILD_SRC], { type: 'text/javascript' })));
+// 처음 상태 (game/client/three/models/level0.json)
+const BASE = {
+ "version": 1,
+ "models": {
+  "howler": {
+   "name": "howler",
+   "kind": "howler",
+   "height": 2.3,
+   "pivots": {
+    "torso": [
+     0,
+     1.05,
+     0
+    ],
+    "head": [
+     0,
+     1.98,
+     -0.05
+    ],
+    "armL": [
+     -0.25,
+     1.86,
+     0
+    ],
+    "armR": [
+     0.25,
+     1.86,
+     0
+    ],
+    "legL": [
+     -0.11,
+     1.05,
+     0
+    ],
+    "legR": [
+     0.11,
+     1.05,
+     0
+    ]
+   },
+   "materials": {
+    "skin": {
+     "color": "#17130f"
+    },
+    "skinDark": {
+     "color": "#0b0907"
+    },
+    "ridge": {
+     "color": "#2a231b"
+    },
+    "mouth": {
+     "color": "#2c0905"
+    },
+    "teeth": {
+     "color": "#c4b99c"
+    },
+    "eye": {
+     "color": "#ffe6a0",
+     "glow": true
+    },
+    "socket": {
+     "color": "#040303"
+    }
+   },
+   "parts": [
+    {
+     "id": "pelvis",
+     "shape": "box",
+     "size": [
+      0.26,
+      0.12,
+      0.14
+     ],
+     "pos": [
+      0,
+      1.06,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "hipL",
+     "shape": "sphere",
+     "size": [
+      0.07
+     ],
+     "pos": [
+      -0.11,
+      1.04,
+      0
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "hipR",
+     "shape": "sphere",
+     "size": [
+      0.07
+     ],
+     "pos": [
+      0.11,
+      1.04,
+      0
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "spine1",
+     "shape": "sphere",
+     "size": [
+      0.05
+     ],
+     "pos": [
+      0,
+      1.12,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra1",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.12,
+      0.095
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine2",
+     "shape": "sphere",
+     "size": [
+      0.049
+     ],
+     "pos": [
+      0,
+      1.195,
+      0.059
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra2",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.195,
+      0.104
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine3",
+     "shape": "sphere",
+     "size": [
+      0.048
+     ],
+     "pos": [
+      0,
+      1.269,
+      0.066
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra3",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.269,
+      0.111
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine4",
+     "shape": "sphere",
+     "size": [
+      0.047
+     ],
+     "pos": [
+      0,
+      1.344,
+      0.071
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra4",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.344,
+      0.116
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine5",
+     "shape": "sphere",
+     "size": [
+      0.046
+     ],
+     "pos": [
+      0,
+      1.418,
+      0.074
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra5",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.418,
+      0.119
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine6",
+     "shape": "sphere",
+     "size": [
+      0.045
+     ],
+     "pos": [
+      0,
+      1.493,
+      0.072
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra6",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.493,
+      0.117
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine7",
+     "shape": "sphere",
+     "size": [
+      0.043
+     ],
+     "pos": [
+      0,
+      1.567,
+      0.067
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra7",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.567,
+      0.112
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine8",
+     "shape": "sphere",
+     "size": [
+      0.042
+     ],
+     "pos": [
+      0,
+      1.642,
+      0.057
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra8",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.642,
+      0.102
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine9",
+     "shape": "sphere",
+     "size": [
+      0.041
+     ],
+     "pos": [
+      0,
+      1.716,
+      0.044
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra9",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.716,
+      0.089
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine10",
+     "shape": "sphere",
+     "size": [
+      0.04
+     ],
+     "pos": [
+      0,
+      1.791,
+      0.028
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra10",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.791,
+      0.073
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine11",
+     "shape": "sphere",
+     "size": [
+      0.039
+     ],
+     "pos": [
+      0,
+      1.865,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra11",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.865,
+      0.055
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "spine12",
+     "shape": "sphere",
+     "size": [
+      0.038
+     ],
+     "pos": [
+      0,
+      1.94,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "vertebra12",
+     "shape": "box",
+     "size": [
+      0.03,
+      0.025,
+      0.035
+     ],
+     "pos": [
+      0,
+      1.94,
+      0.035
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "belly",
+     "shape": "capsule",
+     "size": [
+      0.1,
+      0.22
+     ],
+     "pos": [
+      0,
+      1.25,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "scale": [
+      1.2,
+      1,
+      0.75
+     ]
+    },
+    {
+     "id": "ribL1",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.143
+     ],
+     "pos": [
+      -0.079,
+      1.42,
+      -0.03
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      -70
+     ]
+    },
+    {
+     "id": "ribBackL1",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.115
+     ],
+     "pos": [
+      -0.072,
+      1.43,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      -75
+     ]
+    },
+    {
+     "id": "ribR1",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.143
+     ],
+     "pos": [
+      0.079,
+      1.42,
+      -0.03
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      70
+     ]
+    },
+    {
+     "id": "ribBackR1",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.115
+     ],
+     "pos": [
+      0.072,
+      1.43,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      75
+     ]
+    },
+    {
+     "id": "ribL2",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.155
+     ],
+     "pos": [
+      -0.085,
+      1.485,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      -72
+     ]
+    },
+    {
+     "id": "ribBackL2",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.124
+     ],
+     "pos": [
+      -0.077,
+      1.495,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      -75
+     ]
+    },
+    {
+     "id": "ribR2",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.155
+     ],
+     "pos": [
+      0.085,
+      1.485,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      72
+     ]
+    },
+    {
+     "id": "ribBackR2",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.124
+     ],
+     "pos": [
+      0.077,
+      1.495,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      75
+     ]
+    },
+    {
+     "id": "ribL3",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.162
+     ],
+     "pos": [
+      -0.089,
+      1.55,
+      -0.03
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      -74
+     ]
+    },
+    {
+     "id": "ribBackL3",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.13
+     ],
+     "pos": [
+      -0.081,
+      1.56,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      -75
+     ]
+    },
+    {
+     "id": "ribR3",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.162
+     ],
+     "pos": [
+      0.089,
+      1.55,
+      -0.03
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      74
+     ]
+    },
+    {
+     "id": "ribBackR3",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.13
+     ],
+     "pos": [
+      0.081,
+      1.56,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      75
+     ]
+    },
+    {
+     "id": "ribL4",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.165
+     ],
+     "pos": [
+      -0.091,
+      1.615,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      -76
+     ]
+    },
+    {
+     "id": "ribBackL4",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.132
+     ],
+     "pos": [
+      -0.082,
+      1.625,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      -75
+     ]
+    },
+    {
+     "id": "ribR4",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.165
+     ],
+     "pos": [
+      0.091,
+      1.615,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      76
+     ]
+    },
+    {
+     "id": "ribBackR4",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.132
+     ],
+     "pos": [
+      0.083,
+      1.625,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      75
+     ]
+    },
+    {
+     "id": "ribL5",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.162
+     ],
+     "pos": [
+      -0.089,
+      1.68,
+      -0.03
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      -78
+     ]
+    },
+    {
+     "id": "ribBackL5",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.13
+     ],
+     "pos": [
+      -0.081,
+      1.69,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      -75
+     ]
+    },
+    {
+     "id": "ribR5",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.162
+     ],
+     "pos": [
+      0.089,
+      1.68,
+      -0.03
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      78
+     ]
+    },
+    {
+     "id": "ribBackR5",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.13
+     ],
+     "pos": [
+      0.081,
+      1.69,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      75
+     ]
+    },
+    {
+     "id": "ribL6",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.155
+     ],
+     "pos": [
+      -0.085,
+      1.745,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      -80
+     ]
+    },
+    {
+     "id": "ribBackL6",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.124
+     ],
+     "pos": [
+      -0.077,
+      1.755,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      -75
+     ]
+    },
+    {
+     "id": "ribR6",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.155
+     ],
+     "pos": [
+      0.085,
+      1.745,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      80
+     ]
+    },
+    {
+     "id": "ribBackR6",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.124
+     ],
+     "pos": [
+      0.077,
+      1.755,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      75
+     ]
+    },
+    {
+     "id": "ribL7",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.143
+     ],
+     "pos": [
+      -0.079,
+      1.81,
+      -0.03
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      -82
+     ]
+    },
+    {
+     "id": "ribBackL7",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.115
+     ],
+     "pos": [
+      -0.072,
+      1.82,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      -75
+     ]
+    },
+    {
+     "id": "ribR7",
+     "shape": "capsule",
+     "size": [
+      0.016,
+      0.143
+     ],
+     "pos": [
+      0.079,
+      1.81,
+      -0.03
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      82
+     ]
+    },
+    {
+     "id": "ribBackR7",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.115
+     ],
+     "pos": [
+      0.072,
+      1.82,
+      0.05
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      75
+     ]
+    },
+    {
+     "id": "sternum",
+     "shape": "box",
+     "size": [
+      0.035,
+      0.42,
+      0.03
+     ],
+     "pos": [
+      0,
+      1.62,
+      -0.1
+     ],
+     "mat": "ridge",
+     "in": "torso"
+    },
+    {
+     "id": "chest",
+     "shape": "capsule",
+     "size": [
+      0.13,
+      0.3
+     ],
+     "pos": [
+      0,
+      1.64,
+      -0.005
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "scale": [
+      1.25,
+      1,
+      0.68
+     ]
+    },
+    {
+     "id": "shoulderL",
+     "shape": "sphere",
+     "size": [
+      0.065
+     ],
+     "pos": [
+      -0.24,
+      1.86,
+      0
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "clavicleL",
+     "shape": "capsule",
+     "size": [
+      0.018,
+      0.171
+     ],
+     "pos": [
+      -0.12,
+      1.88,
+      -0.035
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      68.199,
+      0,
+      74.93
+     ]
+    },
+    {
+     "id": "trapL",
+     "shape": "sphere",
+     "size": [
+      0.07
+     ],
+     "pos": [
+      -0.12,
+      1.9,
+      0.03
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "scale": [
+      1.3,
+      0.6,
+      0.9
+     ]
+    },
+    {
+     "id": "shoulderR",
+     "shape": "sphere",
+     "size": [
+      0.065
+     ],
+     "pos": [
+      0.24,
+      1.86,
+      0
+     ],
+     "mat": "skin",
+     "in": "torso"
+    },
+    {
+     "id": "clavicleR",
+     "shape": "capsule",
+     "size": [
+      0.018,
+      0.171
+     ],
+     "pos": [
+      0.12,
+      1.88,
+      -0.035
+     ],
+     "mat": "ridge",
+     "in": "torso",
+     "rot": [
+      68.199,
+      0,
+      -74.93
+     ]
+    },
+    {
+     "id": "trapR",
+     "shape": "sphere",
+     "size": [
+      0.07
+     ],
+     "pos": [
+      0.12,
+      1.9,
+      0.03
+     ],
+     "mat": "skin",
+     "in": "torso",
+     "scale": [
+      1.3,
+      0.6,
+      0.9
+     ]
+    },
+    {
+     "id": "neck1",
+     "shape": "cylinder",
+     "size": [
+      0.042,
+      0.048,
+      0.05
+     ],
+     "pos": [
+      0,
+      1.9,
+      -0.02
+     ],
+     "mat": "skin",
+     "in": "head"
+    },
+    {
+     "id": "neck2",
+     "shape": "cylinder",
+     "size": [
+      0.042,
+      0.048,
+      0.05
+     ],
+     "pos": [
+      0,
+      1.93,
+      -0.028
+     ],
+     "mat": "skin",
+     "in": "head"
+    },
+    {
+     "id": "neck3",
+     "shape": "cylinder",
+     "size": [
+      0.042,
+      0.048,
+      0.05
+     ],
+     "pos": [
+      0,
+      1.96,
+      -0.036
+     ],
+     "mat": "skin",
+     "in": "head"
+    },
+    {
+     "id": "neck4",
+     "shape": "cylinder",
+     "size": [
+      0.042,
+      0.048,
+      0.05
+     ],
+     "pos": [
+      0,
+      1.99,
+      -0.044
+     ],
+     "mat": "skin",
+     "in": "head"
+    },
+    {
+     "id": "neckTendonL",
+     "shape": "capsule",
+     "size": [
+      0.01,
+      0.1
+     ],
+     "pos": [
+      -0.03,
+      1.94,
+      -0.05
+     ],
+     "mat": "ridge",
+     "in": "head",
+     "rot": [
+      10,
+      0,
+      8
+     ]
+    },
+    {
+     "id": "neckTendonR",
+     "shape": "capsule",
+     "size": [
+      0.01,
+      0.1
+     ],
+     "pos": [
+      0.03,
+      1.94,
+      -0.05
+     ],
+     "mat": "ridge",
+     "in": "head",
+     "rot": [
+      10,
+      0,
+      -8
+     ]
+    },
+    {
+     "id": "skull",
+     "shape": "sphere",
+     "size": [
+      0.15
+     ],
+     "pos": [
+      0,
+      2.14,
+      0
+     ],
+     "mat": "skinDark",
+     "in": "head",
+     "scale": [
+      0.86,
+      1.28,
+      1
+     ]
+    },
+    {
+     "id": "cranium",
+     "shape": "sphere",
+     "size": [
+      0.12
+     ],
+     "pos": [
+      0,
+      2.24,
+      0.03
+     ],
+     "mat": "skinDark",
+     "in": "head",
+     "scale": [
+      0.9,
+      1,
+      1.05
+     ]
+    },
+    {
+     "id": "brow",
+     "shape": "box",
+     "size": [
+      0.19,
+      0.03,
+      0.05
+     ],
+     "pos": [
+      0,
+      2.17,
+      -0.12
+     ],
+     "mat": "ridge",
+     "in": "head",
+     "rot": [
+      -8,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "cheekL",
+     "shape": "sphere",
+     "size": [
+      0.05
+     ],
+     "pos": [
+      -0.07,
+      2.06,
+      -0.08
+     ],
+     "mat": "skinDark",
+     "in": "head",
+     "scale": [
+      0.8,
+      1.2,
+      0.9
+     ]
+    },
+    {
+     "id": "socketL",
+     "shape": "sphere",
+     "size": [
+      0.034
+     ],
+     "pos": [
+      -0.055,
+      2.14,
+      -0.115
+     ],
+     "mat": "socket",
+     "in": "head",
+     "scale": [
+      1.2,
+      0.9,
+      0.6
+     ]
+    },
+    {
+     "id": "eyeL",
+     "shape": "sphere",
+     "size": [
+      0.016
+     ],
+     "pos": [
+      -0.055,
+      2.14,
+      -0.135
+     ],
+     "mat": "eye",
+     "in": "head"
+    },
+    {
+     "id": "earL",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.07,
+      0.04
+     ],
+     "pos": [
+      -0.125,
+      2.12,
+      0
+     ],
+     "mat": "skinDark",
+     "in": "head",
+     "rot": [
+      0,
+      0,
+      -15
+     ]
+    },
+    {
+     "id": "cheekR",
+     "shape": "sphere",
+     "size": [
+      0.05
+     ],
+     "pos": [
+      0.07,
+      2.06,
+      -0.08
+     ],
+     "mat": "skinDark",
+     "in": "head",
+     "scale": [
+      0.8,
+      1.2,
+      0.9
+     ]
+    },
+    {
+     "id": "socketR",
+     "shape": "sphere",
+     "size": [
+      0.034
+     ],
+     "pos": [
+      0.055,
+      2.14,
+      -0.115
+     ],
+     "mat": "socket",
+     "in": "head",
+     "scale": [
+      1.2,
+      0.9,
+      0.6
+     ]
+    },
+    {
+     "id": "eyeR",
+     "shape": "sphere",
+     "size": [
+      0.016
+     ],
+     "pos": [
+      0.055,
+      2.14,
+      -0.135
+     ],
+     "mat": "eye",
+     "in": "head"
+    },
+    {
+     "id": "earR",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.07,
+      0.04
+     ],
+     "pos": [
+      0.125,
+      2.12,
+      0
+     ],
+     "mat": "skinDark",
+     "in": "head",
+     "rot": [
+      0,
+      0,
+      15
+     ]
+    },
+    {
+     "id": "nose",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.05,
+      0.025
+     ],
+     "pos": [
+      0,
+      2.09,
+      -0.135
+     ],
+     "mat": "ridge",
+     "in": "head",
+     "rot": [
+      -15,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "jaw",
+     "shape": "box",
+     "size": [
+      0.15,
+      0.06,
+      0.12
+     ],
+     "pos": [
+      0,
+      1.97,
+      -0.07
+     ],
+     "mat": "skinDark",
+     "in": "head",
+     "rot": [
+      12,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "mouth",
+     "shape": "box",
+     "size": [
+      0.12,
+      0.035,
+      0.03
+     ],
+     "pos": [
+      0,
+      2.01,
+      -0.13
+     ],
+     "mat": "mouth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop1",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      -0.05,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot1",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      -0.044,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop2",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      -0.038,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot2",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      -0.032,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop3",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      -0.025,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot3",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      -0.019,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop4",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      -0.012,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot4",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      -0.006,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop5",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      0,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot5",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      0.006,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop6",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      0.012,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot6",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      0.018,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop7",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      0.025,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot7",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      0.031,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop8",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      0.038,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot8",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      0.044,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "toothTop9",
+     "shape": "cone",
+     "size": [
+      0.006,
+      0.022
+     ],
+     "pos": [
+      0.05,
+      2.022,
+      -0.142
+     ],
+     "mat": "teeth",
+     "in": "head",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toothBot9",
+     "shape": "cone",
+     "size": [
+      0.005,
+      0.018
+     ],
+     "pos": [
+      0.056,
+      1.998,
+      -0.14
+     ],
+     "mat": "teeth",
+     "in": "head"
+    },
+    {
+     "id": "upperArmL",
+     "shape": "capsule",
+     "size": [
+      0.042,
+      0.369
+     ],
+     "pos": [
+      -0.27,
+      1.625,
+      0.015
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      176.186,
+      0,
+      5.068
+     ]
+    },
+    {
+     "id": "bicepTendonL",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.295
+     ],
+     "pos": [
+      -0.27,
+      1.61,
+      -0.02
+     ],
+     "mat": "ridge",
+     "in": "armL",
+     "rot": [
+      176.424,
+      0,
+      7.111
+     ]
+    },
+    {
+     "id": "elbowL",
+     "shape": "sphere",
+     "size": [
+      0.045
+     ],
+     "pos": [
+      -0.29,
+      1.4,
+      0.03
+     ],
+     "mat": "ridge",
+     "in": "armL"
+    },
+    {
+     "id": "forearmL",
+     "shape": "capsule",
+     "size": [
+      0.034,
+      0.415
+     ],
+     "pos": [
+      -0.295,
+      1.16,
+      0.005
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      -174.053,
+      0,
+      1.187
+     ]
+    },
+    {
+     "id": "forearmBoneL",
+     "shape": "capsule",
+     "size": [
+      0.012,
+      0.367
+     ],
+     "pos": [
+      -0.312,
+      1.165,
+      0.015
+     ],
+     "mat": "ridge",
+     "in": "armL",
+     "rot": [
+      -175.601,
+      0,
+      0.732
+     ]
+    },
+    {
+     "id": "wristL",
+     "shape": "sphere",
+     "size": [
+      0.033
+     ],
+     "pos": [
+      -0.3,
+      0.92,
+      -0.02
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "palmL",
+     "shape": "box",
+     "size": [
+      0.035,
+      0.11,
+      0.08
+     ],
+     "pos": [
+      -0.3,
+      0.84,
+      -0.02
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL0_1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.049
+     ],
+     "pos": [
+      -0.304,
+      0.747,
+      -0.05
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL0_1",
+     "shape": "sphere",
+     "size": [
+      0.011
+     ],
+     "pos": [
+      -0.304,
+      0.78,
+      -0.05
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL0_2",
+     "shape": "capsule",
+     "size": [
+      0.008,
+      0.042
+     ],
+     "pos": [
+      -0.304,
+      0.685,
+      -0.053
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      -173.991,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL0_2",
+     "shape": "sphere",
+     "size": [
+      0.009
+     ],
+     "pos": [
+      -0.304,
+      0.714,
+      -0.05
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL0_3",
+     "shape": "capsule",
+     "size": [
+      0.006,
+      0.037
+     ],
+     "pos": [
+      -0.304,
+      0.633,
+      -0.056
+     ],
+     "mat": "ridge",
+     "in": "armL",
+     "rot": [
+      -165.822,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL0_3",
+     "shape": "sphere",
+     "size": [
+      0.008
+     ],
+     "pos": [
+      -0.304,
+      0.657,
+      -0.05
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL1_1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.059
+     ],
+     "pos": [
+      -0.304,
+      0.742,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL1_1",
+     "shape": "sphere",
+     "size": [
+      0.011
+     ],
+     "pos": [
+      -0.304,
+      0.78,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL1_2",
+     "shape": "capsule",
+     "size": [
+      0.008,
+      0.051
+     ],
+     "pos": [
+      -0.304,
+      0.67,
+      -0.033
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      -174.806,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL1_2",
+     "shape": "sphere",
+     "size": [
+      0.009
+     ],
+     "pos": [
+      -0.304,
+      0.703,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL1_3",
+     "shape": "capsule",
+     "size": [
+      0.006,
+      0.044
+     ],
+     "pos": [
+      -0.304,
+      0.609,
+      -0.036
+     ],
+     "mat": "ridge",
+     "in": "armL",
+     "rot": [
+      -167.692,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL1_3",
+     "shape": "sphere",
+     "size": [
+      0.008
+     ],
+     "pos": [
+      -0.304,
+      0.637,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL2_1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.059
+     ],
+     "pos": [
+      -0.304,
+      0.742,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL2_1",
+     "shape": "sphere",
+     "size": [
+      0.011
+     ],
+     "pos": [
+      -0.304,
+      0.78,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL2_2",
+     "shape": "capsule",
+     "size": [
+      0.008,
+      0.051
+     ],
+     "pos": [
+      -0.304,
+      0.67,
+      -0.013
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      -174.806,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL2_2",
+     "shape": "sphere",
+     "size": [
+      0.009
+     ],
+     "pos": [
+      -0.304,
+      0.703,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL2_3",
+     "shape": "capsule",
+     "size": [
+      0.006,
+      0.044
+     ],
+     "pos": [
+      -0.304,
+      0.609,
+      -0.016
+     ],
+     "mat": "ridge",
+     "in": "armL",
+     "rot": [
+      -167.692,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL2_3",
+     "shape": "sphere",
+     "size": [
+      0.008
+     ],
+     "pos": [
+      -0.304,
+      0.637,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL3_1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.049
+     ],
+     "pos": [
+      -0.304,
+      0.747,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL3_1",
+     "shape": "sphere",
+     "size": [
+      0.011
+     ],
+     "pos": [
+      -0.304,
+      0.78,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL3_2",
+     "shape": "capsule",
+     "size": [
+      0.008,
+      0.042
+     ],
+     "pos": [
+      -0.304,
+      0.685,
+      0.007
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      -173.991,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL3_2",
+     "shape": "sphere",
+     "size": [
+      0.009
+     ],
+     "pos": [
+      -0.304,
+      0.714,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "fingerL3_3",
+     "shape": "capsule",
+     "size": [
+      0.006,
+      0.037
+     ],
+     "pos": [
+      -0.304,
+      0.633,
+      0.004
+     ],
+     "mat": "ridge",
+     "in": "armL",
+     "rot": [
+      -165.822,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleL3_3",
+     "shape": "sphere",
+     "size": [
+      0.008
+     ],
+     "pos": [
+      -0.304,
+      0.657,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "armL"
+    },
+    {
+     "id": "thumbL",
+     "shape": "capsule",
+     "size": [
+      0.01,
+      0.073
+     ],
+     "pos": [
+      -0.305,
+      0.815,
+      -0.08
+     ],
+     "mat": "skin",
+     "in": "armL",
+     "rot": [
+      -167.471,
+      0,
+      6.19
+     ]
+    },
+    {
+     "id": "upperArmR",
+     "shape": "capsule",
+     "size": [
+      0.042,
+      0.369
+     ],
+     "pos": [
+      0.27,
+      1.625,
+      0.015
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      176.186,
+      0,
+      -5.068
+     ]
+    },
+    {
+     "id": "bicepTendonR",
+     "shape": "capsule",
+     "size": [
+      0.014,
+      0.295
+     ],
+     "pos": [
+      0.27,
+      1.61,
+      -0.02
+     ],
+     "mat": "ridge",
+     "in": "armR",
+     "rot": [
+      176.424,
+      0,
+      -7.111
+     ]
+    },
+    {
+     "id": "elbowR",
+     "shape": "sphere",
+     "size": [
+      0.045
+     ],
+     "pos": [
+      0.29,
+      1.4,
+      0.03
+     ],
+     "mat": "ridge",
+     "in": "armR"
+    },
+    {
+     "id": "forearmR",
+     "shape": "capsule",
+     "size": [
+      0.034,
+      0.415
+     ],
+     "pos": [
+      0.295,
+      1.16,
+      0.005
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      -174.053,
+      0,
+      -1.187
+     ]
+    },
+    {
+     "id": "forearmBoneR",
+     "shape": "capsule",
+     "size": [
+      0.012,
+      0.367
+     ],
+     "pos": [
+      0.313,
+      1.165,
+      0.015
+     ],
+     "mat": "ridge",
+     "in": "armR",
+     "rot": [
+      -175.601,
+      0,
+      -0.732
+     ]
+    },
+    {
+     "id": "wristR",
+     "shape": "sphere",
+     "size": [
+      0.033
+     ],
+     "pos": [
+      0.3,
+      0.92,
+      -0.02
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "palmR",
+     "shape": "box",
+     "size": [
+      0.035,
+      0.11,
+      0.08
+     ],
+     "pos": [
+      0.3,
+      0.84,
+      -0.02
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR0_1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.049
+     ],
+     "pos": [
+      0.304,
+      0.747,
+      -0.05
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR0_1",
+     "shape": "sphere",
+     "size": [
+      0.011
+     ],
+     "pos": [
+      0.304,
+      0.78,
+      -0.05
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR0_2",
+     "shape": "capsule",
+     "size": [
+      0.008,
+      0.042
+     ],
+     "pos": [
+      0.304,
+      0.685,
+      -0.053
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      -173.991,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR0_2",
+     "shape": "sphere",
+     "size": [
+      0.009
+     ],
+     "pos": [
+      0.304,
+      0.714,
+      -0.05
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR0_3",
+     "shape": "capsule",
+     "size": [
+      0.006,
+      0.037
+     ],
+     "pos": [
+      0.304,
+      0.633,
+      -0.056
+     ],
+     "mat": "ridge",
+     "in": "armR",
+     "rot": [
+      -165.822,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR0_3",
+     "shape": "sphere",
+     "size": [
+      0.008
+     ],
+     "pos": [
+      0.304,
+      0.657,
+      -0.05
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR1_1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.059
+     ],
+     "pos": [
+      0.304,
+      0.742,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR1_1",
+     "shape": "sphere",
+     "size": [
+      0.011
+     ],
+     "pos": [
+      0.304,
+      0.78,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR1_2",
+     "shape": "capsule",
+     "size": [
+      0.008,
+      0.051
+     ],
+     "pos": [
+      0.304,
+      0.67,
+      -0.033
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      -174.806,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR1_2",
+     "shape": "sphere",
+     "size": [
+      0.009
+     ],
+     "pos": [
+      0.304,
+      0.703,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR1_3",
+     "shape": "capsule",
+     "size": [
+      0.006,
+      0.044
+     ],
+     "pos": [
+      0.304,
+      0.609,
+      -0.036
+     ],
+     "mat": "ridge",
+     "in": "armR",
+     "rot": [
+      -167.692,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR1_3",
+     "shape": "sphere",
+     "size": [
+      0.008
+     ],
+     "pos": [
+      0.304,
+      0.637,
+      -0.03
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR2_1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.059
+     ],
+     "pos": [
+      0.304,
+      0.742,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR2_1",
+     "shape": "sphere",
+     "size": [
+      0.011
+     ],
+     "pos": [
+      0.304,
+      0.78,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR2_2",
+     "shape": "capsule",
+     "size": [
+      0.008,
+      0.051
+     ],
+     "pos": [
+      0.304,
+      0.67,
+      -0.013
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      -174.806,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR2_2",
+     "shape": "sphere",
+     "size": [
+      0.009
+     ],
+     "pos": [
+      0.304,
+      0.703,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR2_3",
+     "shape": "capsule",
+     "size": [
+      0.006,
+      0.044
+     ],
+     "pos": [
+      0.304,
+      0.609,
+      -0.016
+     ],
+     "mat": "ridge",
+     "in": "armR",
+     "rot": [
+      -167.692,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR2_3",
+     "shape": "sphere",
+     "size": [
+      0.008
+     ],
+     "pos": [
+      0.304,
+      0.637,
+      -0.01
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR3_1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.049
+     ],
+     "pos": [
+      0.304,
+      0.747,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      180,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR3_1",
+     "shape": "sphere",
+     "size": [
+      0.011
+     ],
+     "pos": [
+      0.304,
+      0.78,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR3_2",
+     "shape": "capsule",
+     "size": [
+      0.008,
+      0.042
+     ],
+     "pos": [
+      0.304,
+      0.685,
+      0.007
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      -173.991,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR3_2",
+     "shape": "sphere",
+     "size": [
+      0.009
+     ],
+     "pos": [
+      0.304,
+      0.714,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "fingerR3_3",
+     "shape": "capsule",
+     "size": [
+      0.006,
+      0.037
+     ],
+     "pos": [
+      0.304,
+      0.633,
+      0.004
+     ],
+     "mat": "ridge",
+     "in": "armR",
+     "rot": [
+      -165.822,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "knuckleR3_3",
+     "shape": "sphere",
+     "size": [
+      0.008
+     ],
+     "pos": [
+      0.304,
+      0.657,
+      0.01
+     ],
+     "mat": "skin",
+     "in": "armR"
+    },
+    {
+     "id": "thumbR",
+     "shape": "capsule",
+     "size": [
+      0.01,
+      0.073
+     ],
+     "pos": [
+      0.305,
+      0.815,
+      -0.08
+     ],
+     "mat": "skin",
+     "in": "armR",
+     "rot": [
+      -167.471,
+      0,
+      -6.19
+     ]
+    },
+    {
+     "id": "thighL",
+     "shape": "capsule",
+     "size": [
+      0.055,
+      0.361
+     ],
+     "pos": [
+      -0.115,
+      0.795,
+      -0.015
+     ],
+     "mat": "skin",
+     "in": "legL",
+     "rot": [
+      -176.348,
+      0,
+      1.216
+     ]
+    },
+    {
+     "id": "kneecapL",
+     "shape": "sphere",
+     "size": [
+      0.04
+     ],
+     "pos": [
+      -0.12,
+      0.56,
+      -0.065
+     ],
+     "mat": "ridge",
+     "in": "legL",
+     "scale": [
+      1,
+      1.2,
+      0.7
+     ]
+    },
+    {
+     "id": "shinL",
+     "shape": "capsule",
+     "size": [
+      0.04,
+      0.393
+     ],
+     "pos": [
+      -0.12,
+      0.325,
+      -0.005
+     ],
+     "mat": "skin",
+     "in": "legL",
+     "rot": [
+      173.928,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "shinBoneL",
+     "shape": "capsule",
+     "size": [
+      0.012,
+      0.32
+     ],
+     "pos": [
+      -0.12,
+      0.34,
+      -0.037
+     ],
+     "mat": "ridge",
+     "in": "legL",
+     "rot": [
+      170.811,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "calfL",
+     "shape": "capsule",
+     "size": [
+      0.034,
+      0.148
+     ],
+     "pos": [
+      -0.12,
+      0.395,
+      0.025
+     ],
+     "mat": "skin",
+     "in": "legL",
+     "rot": [
+      166.608,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "ankleL",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      -0.12,
+      0.09,
+      0.02
+     ],
+     "mat": "skin",
+     "in": "legL"
+    },
+    {
+     "id": "heelL",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      -0.12,
+      0.035,
+      0.06
+     ],
+     "mat": "skin",
+     "in": "legL"
+    },
+    {
+     "id": "footL",
+     "shape": "box",
+     "size": [
+      0.07,
+      0.035,
+      0.2
+     ],
+     "pos": [
+      -0.12,
+      0.02,
+      -0.06
+     ],
+     "mat": "skin",
+     "in": "legL"
+    },
+    {
+     "id": "toeL1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.045
+     ],
+     "pos": [
+      -0.144,
+      0.012,
+      -0.18
+     ],
+     "mat": "ridge",
+     "in": "legL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toeL2",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.045
+     ],
+     "pos": [
+      -0.128,
+      0.012,
+      -0.18
+     ],
+     "mat": "ridge",
+     "in": "legL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toeL3",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.045
+     ],
+     "pos": [
+      -0.112,
+      0.012,
+      -0.18
+     ],
+     "mat": "ridge",
+     "in": "legL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toeL4",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.045
+     ],
+     "pos": [
+      -0.096,
+      0.012,
+      -0.18
+     ],
+     "mat": "ridge",
+     "in": "legL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "thighR",
+     "shape": "capsule",
+     "size": [
+      0.055,
+      0.361
+     ],
+     "pos": [
+      0.115,
+      0.795,
+      -0.015
+     ],
+     "mat": "skin",
+     "in": "legR",
+     "rot": [
+      -176.348,
+      0,
+      -1.216
+     ]
+    },
+    {
+     "id": "kneecapR",
+     "shape": "sphere",
+     "size": [
+      0.04
+     ],
+     "pos": [
+      0.12,
+      0.56,
+      -0.065
+     ],
+     "mat": "ridge",
+     "in": "legR",
+     "scale": [
+      1,
+      1.2,
+      0.7
+     ]
+    },
+    {
+     "id": "shinR",
+     "shape": "capsule",
+     "size": [
+      0.04,
+      0.393
+     ],
+     "pos": [
+      0.12,
+      0.325,
+      -0.005
+     ],
+     "mat": "skin",
+     "in": "legR",
+     "rot": [
+      173.928,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "shinBoneR",
+     "shape": "capsule",
+     "size": [
+      0.012,
+      0.32
+     ],
+     "pos": [
+      0.12,
+      0.34,
+      -0.037
+     ],
+     "mat": "ridge",
+     "in": "legR",
+     "rot": [
+      170.811,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "calfR",
+     "shape": "capsule",
+     "size": [
+      0.034,
+      0.148
+     ],
+     "pos": [
+      0.12,
+      0.395,
+      0.025
+     ],
+     "mat": "skin",
+     "in": "legR",
+     "rot": [
+      166.608,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "ankleR",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      0.12,
+      0.09,
+      0.02
+     ],
+     "mat": "skin",
+     "in": "legR"
+    },
+    {
+     "id": "heelR",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      0.12,
+      0.035,
+      0.06
+     ],
+     "mat": "skin",
+     "in": "legR"
+    },
+    {
+     "id": "footR",
+     "shape": "box",
+     "size": [
+      0.07,
+      0.035,
+      0.2
+     ],
+     "pos": [
+      0.12,
+      0.02,
+      -0.06
+     ],
+     "mat": "skin",
+     "in": "legR"
+    },
+    {
+     "id": "toeR1",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.045
+     ],
+     "pos": [
+      0.096,
+      0.012,
+      -0.18
+     ],
+     "mat": "ridge",
+     "in": "legR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toeR2",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.045
+     ],
+     "pos": [
+      0.112,
+      0.012,
+      -0.18
+     ],
+     "mat": "ridge",
+     "in": "legR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toeR3",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.045
+     ],
+     "pos": [
+      0.128,
+      0.012,
+      -0.18
+     ],
+     "mat": "ridge",
+     "in": "legR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "toeR4",
+     "shape": "capsule",
+     "size": [
+      0.009,
+      0.045
+     ],
+     "pos": [
+      0.144,
+      0.012,
+      -0.18
+     ],
+     "mat": "ridge",
+     "in": "legR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  "player": {
+   "name": "player",
+   "kind": "player",
+   "height": 1.75,
+   "pivots": {
+    "torso": [
+     0,
+     0.86,
+     0
+    ],
+    "head": [
+     0,
+     1.48,
+     0
+    ],
+    "armL": [
+     -0.26,
+     1.38,
+     0
+    ],
+    "armR": [
+     0.26,
+     1.38,
+     0
+    ],
+    "legL": [
+     -0.1,
+     0.86,
+     0
+    ],
+    "legR": [
+     0.1,
+     0.86,
+     0
+    ]
+   },
+   "materials": {
+    "suit": {
+     "color": "#e7b92e",
+     "tint": true
+    },
+    "suitShade": {
+     "color": "#b89020",
+     "tint": false
+    },
+    "rubber": {
+     "color": "#1c1c1a"
+    },
+    "visor": {
+     "color": "#0d1518",
+     "emissive": "#0a1418"
+    },
+    "metal": {
+     "color": "#6a6a64"
+    },
+    "filter": {
+     "color": "#2b2b28"
+    },
+    "tape": {
+     "color": "#9a9a90"
+    },
+    "stripe": {
+     "color": "#d8d8c8"
+    },
+    "lamp": {
+     "color": "#fff4c8",
+     "glow": true
+    }
+   },
+   "parts": [
+    {
+     "id": "body",
+     "shape": "capsule",
+     "size": [
+      0.19,
+      0.42
+     ],
+     "pos": [
+      0,
+      1.1,
+      0
+     ],
+     "mat": "suit",
+     "in": "torso",
+     "scale": [
+      1.1,
+      1,
+      0.85
+     ]
+    },
+    {
+     "id": "chestPlate",
+     "shape": "box",
+     "size": [
+      0.3,
+      0.22,
+      0.05
+     ],
+     "pos": [
+      0,
+      1.22,
+      -0.14
+     ],
+     "mat": "suit",
+     "in": "torso",
+     "rot": [
+      -6,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "zipper",
+     "shape": "box",
+     "size": [
+      0.012,
+      0.5,
+      0.01
+     ],
+     "pos": [
+      0,
+      1.08,
+      -0.172
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth1",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      0.9,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth2",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      0.97,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth3",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      1.04,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth4",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      1.11,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth5",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      1.18,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth6",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      1.25,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "stripeChest",
+     "shape": "torus",
+     "size": [
+      0.205,
+      0.012
+     ],
+     "pos": [
+      0,
+      1.25,
+      0
+     ],
+     "mat": "stripe",
+     "in": "torso",
+     "rot": [
+      90,
+      0,
+      0
+     ],
+     "scale": [
+      1.08,
+      0.86,
+      1
+     ]
+    },
+    {
+     "id": "stripeWaist",
+     "shape": "torus",
+     "size": [
+      0.2,
+      0.01
+     ],
+     "pos": [
+      0,
+      0.98,
+      0
+     ],
+     "mat": "stripe",
+     "in": "torso",
+     "rot": [
+      90,
+      0,
+      0
+     ],
+     "scale": [
+      1.08,
+      0.86,
+      1
+     ]
+    },
+    {
+     "id": "belt",
+     "shape": "cylinder",
+     "size": [
+      0.215,
+      0.215,
+      0.05
+     ],
+     "pos": [
+      0,
+      0.9,
+      0
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "scale": [
+      1.06,
+      1,
+      0.86
+     ]
+    },
+    {
+     "id": "buckle",
+     "shape": "box",
+     "size": [
+      0.07,
+      0.045,
+      0.02
+     ],
+     "pos": [
+      0,
+      0.9,
+      -0.19
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "pouchL",
+     "shape": "box",
+     "size": [
+      0.08,
+      0.09,
+      0.05
+     ],
+     "pos": [
+      -0.15,
+      0.89,
+      -0.14
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      0
+     ]
+    },
+    {
+     "id": "pouchFlapL",
+     "shape": "box",
+     "size": [
+      0.082,
+      0.025,
+      0.055
+     ],
+     "pos": [
+      -0.15,
+      0.93,
+      -0.142
+     ],
+     "mat": "filter",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      0
+     ]
+    },
+    {
+     "id": "shoulderPadL",
+     "shape": "sphere",
+     "size": [
+      0.085
+     ],
+     "pos": [
+      -0.22,
+      1.36,
+      0
+     ],
+     "mat": "suit",
+     "in": "torso",
+     "scale": [
+      1.1,
+      0.75,
+      1
+     ]
+    },
+    {
+     "id": "strapL",
+     "shape": "box",
+     "size": [
+      0.045,
+      0.42,
+      0.02
+     ],
+     "pos": [
+      -0.11,
+      1.16,
+      -0.16
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      -8,
+      0,
+      -4
+     ]
+    },
+    {
+     "id": "strapBackL",
+     "shape": "box",
+     "size": [
+      0.045,
+      0.42,
+      0.02
+     ],
+     "pos": [
+      -0.11,
+      1.16,
+      0.17
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      8,
+      0,
+      -4
+     ]
+    },
+    {
+     "id": "wrinkleL1",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      -0.17,
+      1,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      -60,
+      90
+     ]
+    },
+    {
+     "id": "wrinkleL2",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      -0.17,
+      1.08,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      -60,
+      90
+     ]
+    },
+    {
+     "id": "wrinkleL3",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      -0.17,
+      1.16,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      -60,
+      90
+     ]
+    },
+    {
+     "id": "pouchR",
+     "shape": "box",
+     "size": [
+      0.08,
+      0.09,
+      0.05
+     ],
+     "pos": [
+      0.15,
+      0.89,
+      -0.14
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      0
+     ]
+    },
+    {
+     "id": "pouchFlapR",
+     "shape": "box",
+     "size": [
+      0.082,
+      0.025,
+      0.055
+     ],
+     "pos": [
+      0.15,
+      0.93,
+      -0.142
+     ],
+     "mat": "filter",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      0
+     ]
+    },
+    {
+     "id": "shoulderPadR",
+     "shape": "sphere",
+     "size": [
+      0.085
+     ],
+     "pos": [
+      0.22,
+      1.36,
+      0
+     ],
+     "mat": "suit",
+     "in": "torso",
+     "scale": [
+      1.1,
+      0.75,
+      1
+     ]
+    },
+    {
+     "id": "strapR",
+     "shape": "box",
+     "size": [
+      0.045,
+      0.42,
+      0.02
+     ],
+     "pos": [
+      0.11,
+      1.16,
+      -0.16
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      -8,
+      0,
+      4
+     ]
+    },
+    {
+     "id": "strapBackR",
+     "shape": "box",
+     "size": [
+      0.045,
+      0.42,
+      0.02
+     ],
+     "pos": [
+      0.11,
+      1.16,
+      0.17
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      8,
+      0,
+      4
+     ]
+    },
+    {
+     "id": "wrinkleR1",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      0.17,
+      1,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      60,
+      90
+     ]
+    },
+    {
+     "id": "wrinkleR2",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      0.17,
+      1.08,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      60,
+      90
+     ]
+    },
+    {
+     "id": "wrinkleR3",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      0.17,
+      1.16,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      60,
+      90
+     ]
+    },
+    {
+     "id": "nameTag",
+     "shape": "box",
+     "size": [
+      0.08,
+      0.035,
+      0.008
+     ],
+     "pos": [
+      0.09,
+      1.3,
+      -0.165
+     ],
+     "mat": "tape",
+     "in": "torso",
+     "rot": [
+      -6,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "packFrame",
+     "shape": "box",
+     "size": [
+      0.3,
+      0.42,
+      0.06
+     ],
+     "pos": [
+      0,
+      1.15,
+      0.2
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "tankL",
+     "shape": "cylinder",
+     "size": [
+      0.065,
+      0.065,
+      0.38
+     ],
+     "pos": [
+      -0.075,
+      1.16,
+      0.27
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "tankCapL",
+     "shape": "sphere",
+     "size": [
+      0.065
+     ],
+     "pos": [
+      -0.075,
+      1.35,
+      0.27
+     ],
+     "mat": "metal",
+     "in": "torso",
+     "scale": [
+      1,
+      0.5,
+      1
+     ]
+    },
+    {
+     "id": "tankR",
+     "shape": "cylinder",
+     "size": [
+      0.065,
+      0.065,
+      0.38
+     ],
+     "pos": [
+      0.075,
+      1.16,
+      0.27
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "tankCapR",
+     "shape": "sphere",
+     "size": [
+      0.065
+     ],
+     "pos": [
+      0.075,
+      1.35,
+      0.27
+     ],
+     "mat": "metal",
+     "in": "torso",
+     "scale": [
+      1,
+      0.5,
+      1
+     ]
+    },
+    {
+     "id": "valve",
+     "shape": "cylinder",
+     "size": [
+      0.02,
+      0.02,
+      0.06
+     ],
+     "pos": [
+      0,
+      1.4,
+      0.27
+     ],
+     "mat": "filter",
+     "in": "torso"
+    },
+    {
+     "id": "valveWheel",
+     "shape": "torus",
+     "size": [
+      0.03,
+      0.007
+     ],
+     "pos": [
+      0,
+      1.43,
+      0.27
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "hose1",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.13,
+      1.42,
+      0.21
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose2",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.124,
+      1.451,
+      0.185
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose3",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.118,
+      1.481,
+      0.159
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose4",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.112,
+      1.509,
+      0.134
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose5",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.106,
+      1.533,
+      0.109
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose6",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.1,
+      1.554,
+      0.083
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose7",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.094,
+      1.57,
+      0.058
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose8",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.088,
+      1.581,
+      0.033
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose9",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.082,
+      1.587,
+      0.007
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose10",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.076,
+      1.588,
+      -0.018
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose11",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.07,
+      1.584,
+      -0.043
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose12",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.064,
+      1.575,
+      -0.069
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose13",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.058,
+      1.563,
+      -0.094
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose14",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.052,
+      1.547,
+      -0.119
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose15",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.046,
+      1.529,
+      -0.145
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose16",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.04,
+      1.51,
+      -0.17
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hood",
+     "shape": "sphere",
+     "size": [
+      0.155
+     ],
+     "pos": [
+      0,
+      1.6,
+      0.01
+     ],
+     "mat": "suit",
+     "in": "head",
+     "scale": [
+      1,
+      1.12,
+      1.05
+     ]
+    },
+    {
+     "id": "hoodNeck",
+     "shape": "cylinder",
+     "size": [
+      0.12,
+      0.15,
+      0.1
+     ],
+     "pos": [
+      0,
+      1.47,
+      0
+     ],
+     "mat": "suit",
+     "in": "head"
+    },
+    {
+     "id": "hoodSeam",
+     "shape": "torus",
+     "size": [
+      0.14,
+      0.01
+     ],
+     "pos": [
+      0,
+      1.52,
+      0
+     ],
+     "mat": "suitShade",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "visor1",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      -0.104,
+      1.625,
+      -0.114
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      41.253,
+      0
+     ]
+    },
+    {
+     "id": "visor2",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      -0.073,
+      1.625,
+      -0.135
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      27.502,
+      0
+     ]
+    },
+    {
+     "id": "visor3",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      -0.038,
+      1.625,
+      -0.148
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      13.751,
+      0
+     ]
+    },
+    {
+     "id": "visor4",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      0,
+      1.625,
+      -0.153
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "visor5",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      0.038,
+      1.625,
+      -0.148
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      -13.751,
+      0
+     ]
+    },
+    {
+     "id": "visor6",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      0.073,
+      1.625,
+      -0.135
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      -27.502,
+      0
+     ]
+    },
+    {
+     "id": "visor7",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      0.104,
+      1.625,
+      -0.114
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      -41.253,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop1",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.106,
+      1.692,
+      -0.115
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      41.253,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot1",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.106,
+      1.558,
+      -0.115
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      41.253,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop2",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.074,
+      1.692,
+      -0.137
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      27.502,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot2",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.074,
+      1.558,
+      -0.137
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      27.502,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop3",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.038,
+      1.692,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      13.751,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot3",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.038,
+      1.558,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      13.751,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop4",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0,
+      1.692,
+      -0.155
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot4",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0,
+      1.558,
+      -0.155
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop5",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.038,
+      1.692,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -13.751,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot5",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.038,
+      1.558,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -13.751,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop6",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.074,
+      1.692,
+      -0.137
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -27.502,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot6",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.074,
+      1.558,
+      -0.137
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -27.502,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop7",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.106,
+      1.692,
+      -0.115
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -41.253,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot7",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.106,
+      1.558,
+      -0.115
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -41.253,
+      0
+     ]
+    },
+    {
+     "id": "respirator",
+     "shape": "cylinder",
+     "size": [
+      0.05,
+      0.065,
+      0.07
+     ],
+     "pos": [
+      0,
+      1.53,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "respiratorGrill",
+     "shape": "cylinder",
+     "size": [
+      0.035,
+      0.035,
+      0.01
+     ],
+     "pos": [
+      0,
+      1.53,
+      -0.19
+     ],
+     "mat": "metal",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "filterL",
+     "shape": "cylinder",
+     "size": [
+      0.042,
+      0.042,
+      0.05
+     ],
+     "pos": [
+      -0.085,
+      1.51,
+      -0.14
+     ],
+     "mat": "filter",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      30
+     ]
+    },
+    {
+     "id": "filterRingL",
+     "shape": "torus",
+     "size": [
+      0.042,
+      0.006
+     ],
+     "pos": [
+      -0.1,
+      1.51,
+      -0.165
+     ],
+     "mat": "metal",
+     "in": "head",
+     "rot": [
+      0,
+      -30,
+      0
+     ]
+    },
+    {
+     "id": "hoodStrapL",
+     "shape": "box",
+     "size": [
+      0.012,
+      0.012,
+      0.22
+     ],
+     "pos": [
+      -0.15,
+      1.6,
+      0
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "filterR",
+     "shape": "cylinder",
+     "size": [
+      0.042,
+      0.042,
+      0.05
+     ],
+     "pos": [
+      0.085,
+      1.51,
+      -0.14
+     ],
+     "mat": "filter",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      -30
+     ]
+    },
+    {
+     "id": "filterRingR",
+     "shape": "torus",
+     "size": [
+      0.042,
+      0.006
+     ],
+     "pos": [
+      0.1,
+      1.51,
+      -0.165
+     ],
+     "mat": "metal",
+     "in": "head",
+     "rot": [
+      0,
+      30,
+      0
+     ]
+    },
+    {
+     "id": "hoodStrapR",
+     "shape": "box",
+     "size": [
+      0.012,
+      0.012,
+      0.22
+     ],
+     "pos": [
+      0.15,
+      1.6,
+      0
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "sleeveL",
+     "shape": "capsule",
+     "size": [
+      0.065,
+      0.123
+     ],
+     "pos": [
+      -0.275,
+      1.245,
+      0.01
+     ],
+     "mat": "suit",
+     "in": "armL",
+     "rot": [
+      175.426,
+      0,
+      6.821
+     ]
+    },
+    {
+     "id": "elbowFoldL",
+     "shape": "torus",
+     "size": [
+      0.055,
+      0.012
+     ],
+     "pos": [
+      -0.29,
+      1.12,
+      0.02
+     ],
+     "mat": "suitShade",
+     "in": "armL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "elbowFold2L",
+     "shape": "torus",
+     "size": [
+      0.052,
+      0.01
+     ],
+     "pos": [
+      -0.29,
+      1.09,
+      0.02
+     ],
+     "mat": "suitShade",
+     "in": "armL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "forearmL",
+     "shape": "capsule",
+     "size": [
+      0.056,
+      0.131
+     ],
+     "pos": [
+      -0.29,
+      1,
+      0
+     ],
+     "mat": "suit",
+     "in": "armL",
+     "rot": [
+      -170.538,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "stripeArmL",
+     "shape": "torus",
+     "size": [
+      0.06,
+      0.008
+     ],
+     "pos": [
+      -0.29,
+      1,
+      0
+     ],
+     "mat": "stripe",
+     "in": "armL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "cuffL",
+     "shape": "cylinder",
+     "size": [
+      0.06,
+      0.055,
+      0.06
+     ],
+     "pos": [
+      -0.29,
+      0.89,
+      -0.02
+     ],
+     "mat": "rubber",
+     "in": "armL"
+    },
+    {
+     "id": "tapeWristL",
+     "shape": "cylinder",
+     "size": [
+      0.062,
+      0.062,
+      0.025
+     ],
+     "pos": [
+      -0.29,
+      0.93,
+      -0.02
+     ],
+     "mat": "tape",
+     "in": "armL",
+     "chance": 0.6
+    },
+    {
+     "id": "handL",
+     "shape": "box",
+     "size": [
+      0.05,
+      0.09,
+      0.085
+     ],
+     "pos": [
+      -0.29,
+      0.81,
+      -0.02
+     ],
+     "mat": "rubber",
+     "in": "armL"
+    },
+    {
+     "id": "gloveL0_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      -0.287,
+      0.735,
+      -0.054
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -173.48,
+      0,
+      -4.059
+     ]
+    },
+    {
+     "id": "gloveL1_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      -0.287,
+      0.735,
+      -0.034
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -173.48,
+      0,
+      -4.059
+     ]
+    },
+    {
+     "id": "gloveL2_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      -0.287,
+      0.735,
+      -0.014
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -173.48,
+      0,
+      -4.059
+     ]
+    },
+    {
+     "id": "gloveL3_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      -0.287,
+      0.735,
+      0.006
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -173.48,
+      0,
+      -4.059
+     ]
+    },
+    {
+     "id": "gloveThumbL",
+     "shape": "capsule",
+     "size": [
+      0.012,
+      0.051
+     ],
+     "pos": [
+      -0.285,
+      0.795,
+      -0.078
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -160.346,
+      0,
+      -7.662
+     ]
+    },
+    {
+     "id": "sleeveR",
+     "shape": "capsule",
+     "size": [
+      0.065,
+      0.123
+     ],
+     "pos": [
+      0.275,
+      1.245,
+      0.01
+     ],
+     "mat": "suit",
+     "in": "armR",
+     "rot": [
+      175.426,
+      0,
+      -6.821
+     ]
+    },
+    {
+     "id": "elbowFoldR",
+     "shape": "torus",
+     "size": [
+      0.055,
+      0.012
+     ],
+     "pos": [
+      0.29,
+      1.12,
+      0.02
+     ],
+     "mat": "suitShade",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "elbowFold2R",
+     "shape": "torus",
+     "size": [
+      0.052,
+      0.01
+     ],
+     "pos": [
+      0.29,
+      1.09,
+      0.02
+     ],
+     "mat": "suitShade",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "forearmR",
+     "shape": "capsule",
+     "size": [
+      0.056,
+      0.131
+     ],
+     "pos": [
+      0.29,
+      1,
+      0
+     ],
+     "mat": "suit",
+     "in": "armR",
+     "rot": [
+      -170.538,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "stripeArmR",
+     "shape": "torus",
+     "size": [
+      0.06,
+      0.008
+     ],
+     "pos": [
+      0.29,
+      1,
+      0
+     ],
+     "mat": "stripe",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "cuffR",
+     "shape": "cylinder",
+     "size": [
+      0.06,
+      0.055,
+      0.06
+     ],
+     "pos": [
+      0.29,
+      0.89,
+      -0.02
+     ],
+     "mat": "rubber",
+     "in": "armR"
+    },
+    {
+     "id": "tapeWristR",
+     "shape": "cylinder",
+     "size": [
+      0.062,
+      0.062,
+      0.025
+     ],
+     "pos": [
+      0.29,
+      0.93,
+      -0.02
+     ],
+     "mat": "tape",
+     "in": "armR",
+     "chance": 0.6
+    },
+    {
+     "id": "handR",
+     "shape": "box",
+     "size": [
+      0.05,
+      0.09,
+      0.085
+     ],
+     "pos": [
+      0.29,
+      0.81,
+      -0.02
+     ],
+     "mat": "rubber",
+     "in": "armR"
+    },
+    {
+     "id": "gloveR0_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      0.288,
+      0.735,
+      -0.054
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -173.48,
+      0,
+      4.059
+     ]
+    },
+    {
+     "id": "gloveR1_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      0.288,
+      0.735,
+      -0.034
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -173.48,
+      0,
+      4.059
+     ]
+    },
+    {
+     "id": "gloveR2_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      0.288,
+      0.735,
+      -0.014
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -173.48,
+      0,
+      4.059
+     ]
+    },
+    {
+     "id": "gloveR3_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      0.288,
+      0.735,
+      0.006
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -173.48,
+      0,
+      4.059
+     ]
+    },
+    {
+     "id": "gloveThumbR",
+     "shape": "capsule",
+     "size": [
+      0.012,
+      0.051
+     ],
+     "pos": [
+      0.285,
+      0.795,
+      -0.078
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -160.346,
+      0,
+      7.662
+     ]
+    },
+    {
+     "id": "flashlight",
+     "shape": "cylinder",
+     "size": [
+      0.018,
+      0.018,
+      0.16
+     ],
+     "pos": [
+      0.29,
+      0.79,
+      -0.08
+     ],
+     "mat": "metal",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "flashlightHead",
+     "shape": "cylinder",
+     "size": [
+      0.028,
+      0.02,
+      0.04
+     ],
+     "pos": [
+      0.29,
+      0.79,
+      -0.17
+     ],
+     "mat": "metal",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "flashlightLens",
+     "shape": "cylinder",
+     "size": [
+      0.024,
+      0.024,
+      0.005
+     ],
+     "pos": [
+      0.29,
+      0.79,
+      -0.19
+     ],
+     "mat": "lamp",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "thighL",
+     "shape": "capsule",
+     "size": [
+      0.082,
+      0.226
+     ],
+     "pos": [
+      -0.103,
+      0.665,
+      -0.005
+     ],
+     "mat": "suit",
+     "in": "legL",
+     "rot": [
+      -178.531,
+      0,
+      0.734
+     ]
+    },
+    {
+     "id": "kneePadL",
+     "shape": "box",
+     "size": [
+      0.1,
+      0.1,
+      0.03
+     ],
+     "pos": [
+      -0.105,
+      0.47,
+      -0.085
+     ],
+     "mat": "rubber",
+     "in": "legL",
+     "rot": [
+      -5,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "shinL",
+     "shape": "capsule",
+     "size": [
+      0.072,
+      0.126
+     ],
+     "pos": [
+      -0.105,
+      0.335,
+      -0.005
+     ],
+     "mat": "suit",
+     "in": "legL",
+     "rot": [
+      177.879,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "stripeLegL",
+     "shape": "torus",
+     "size": [
+      0.077,
+      0.009
+     ],
+     "pos": [
+      -0.105,
+      0.32,
+      0
+     ],
+     "mat": "stripe",
+     "in": "legL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "pantFoldL",
+     "shape": "torus",
+     "size": [
+      0.075,
+      0.01
+     ],
+     "pos": [
+      -0.105,
+      0.6,
+      0
+     ],
+     "mat": "suitShade",
+     "in": "legL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "bootShaftL",
+     "shape": "cylinder",
+     "size": [
+      0.072,
+      0.075,
+      0.16
+     ],
+     "pos": [
+      -0.105,
+      0.14,
+      0
+     ],
+     "mat": "rubber",
+     "in": "legL"
+    },
+    {
+     "id": "bootFootL",
+     "shape": "box",
+     "size": [
+      0.1,
+      0.07,
+      0.2
+     ],
+     "pos": [
+      -0.105,
+      0.045,
+      -0.05
+     ],
+     "mat": "rubber",
+     "in": "legL"
+    },
+    {
+     "id": "bootToeL",
+     "shape": "sphere",
+     "size": [
+      0.052
+     ],
+     "pos": [
+      -0.105,
+      0.045,
+      -0.14
+     ],
+     "mat": "rubber",
+     "in": "legL",
+     "scale": [
+      1,
+      0.75,
+      1
+     ]
+    },
+    {
+     "id": "soleL",
+     "shape": "box",
+     "size": [
+      0.11,
+      0.022,
+      0.25
+     ],
+     "pos": [
+      -0.105,
+      0.011,
+      -0.05
+     ],
+     "mat": "filter",
+     "in": "legL"
+    },
+    {
+     "id": "laceL1",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      -0.105,
+      0.09,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legL"
+    },
+    {
+     "id": "laceL2",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      -0.105,
+      0.125,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legL"
+    },
+    {
+     "id": "laceL3",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      -0.105,
+      0.16,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legL"
+    },
+    {
+     "id": "thighR",
+     "shape": "capsule",
+     "size": [
+      0.082,
+      0.226
+     ],
+     "pos": [
+      0.103,
+      0.665,
+      -0.005
+     ],
+     "mat": "suit",
+     "in": "legR",
+     "rot": [
+      -178.531,
+      0,
+      -0.734
+     ]
+    },
+    {
+     "id": "kneePadR",
+     "shape": "box",
+     "size": [
+      0.1,
+      0.1,
+      0.03
+     ],
+     "pos": [
+      0.105,
+      0.47,
+      -0.085
+     ],
+     "mat": "rubber",
+     "in": "legR",
+     "rot": [
+      -5,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "shinR",
+     "shape": "capsule",
+     "size": [
+      0.072,
+      0.126
+     ],
+     "pos": [
+      0.105,
+      0.335,
+      -0.005
+     ],
+     "mat": "suit",
+     "in": "legR",
+     "rot": [
+      177.879,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "stripeLegR",
+     "shape": "torus",
+     "size": [
+      0.077,
+      0.009
+     ],
+     "pos": [
+      0.105,
+      0.32,
+      0
+     ],
+     "mat": "stripe",
+     "in": "legR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "pantFoldR",
+     "shape": "torus",
+     "size": [
+      0.075,
+      0.01
+     ],
+     "pos": [
+      0.105,
+      0.6,
+      0
+     ],
+     "mat": "suitShade",
+     "in": "legR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "bootShaftR",
+     "shape": "cylinder",
+     "size": [
+      0.072,
+      0.075,
+      0.16
+     ],
+     "pos": [
+      0.105,
+      0.14,
+      0
+     ],
+     "mat": "rubber",
+     "in": "legR"
+    },
+    {
+     "id": "bootFootR",
+     "shape": "box",
+     "size": [
+      0.1,
+      0.07,
+      0.2
+     ],
+     "pos": [
+      0.105,
+      0.045,
+      -0.05
+     ],
+     "mat": "rubber",
+     "in": "legR"
+    },
+    {
+     "id": "bootToeR",
+     "shape": "sphere",
+     "size": [
+      0.052
+     ],
+     "pos": [
+      0.105,
+      0.045,
+      -0.14
+     ],
+     "mat": "rubber",
+     "in": "legR",
+     "scale": [
+      1,
+      0.75,
+      1
+     ]
+    },
+    {
+     "id": "soleR",
+     "shape": "box",
+     "size": [
+      0.11,
+      0.022,
+      0.25
+     ],
+     "pos": [
+      0.105,
+      0.011,
+      -0.05
+     ],
+     "mat": "filter",
+     "in": "legR"
+    },
+    {
+     "id": "laceR1",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      0.105,
+      0.09,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legR"
+    },
+    {
+     "id": "laceR2",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      0.105,
+      0.125,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legR"
+    },
+    {
+     "id": "laceR3",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      0.105,
+      0.16,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legR"
+    },
+    {
+     "id": "tapePatchL",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.02,
+      0.01
+     ],
+     "pos": [
+      -0.12,
+      1.05,
+      -0.168
+     ],
+     "mat": "tape",
+     "in": "torso",
+     "rot": [
+      0,
+      0,
+      30
+     ],
+     "chance": 0.35
+    },
+    {
+     "id": "tapePatchR",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.02,
+      0.01
+     ],
+     "pos": [
+      0.13,
+      0.62,
+      -0.09
+     ],
+     "mat": "tape",
+     "in": "legR",
+     "rot": [
+      0,
+      0,
+      -20
+     ],
+     "chance": 0.35
+    }
+   ]
+  },
+  "wanderer": {
+   "name": "wanderer",
+   "kind": "wanderer",
+   "height": 1.75,
+   "pivots": {
+    "torso": [
+     0,
+     0.86,
+     0
+    ],
+    "head": [
+     0,
+     1.48,
+     0
+    ],
+    "armL": [
+     -0.26,
+     1.38,
+     0
+    ],
+    "armR": [
+     0.26,
+     1.38,
+     0
+    ],
+    "legL": [
+     -0.1,
+     0.86,
+     0
+    ],
+    "legR": [
+     0.1,
+     0.86,
+     0
+    ]
+   },
+   "materials": {
+    "suit": {
+     "color": "#e7b92e",
+     "tint": true
+    },
+    "suitShade": {
+     "color": "#b89020",
+     "tint": false
+    },
+    "rubber": {
+     "color": "#1c1c1a"
+    },
+    "visor": {
+     "color": "#0d1518",
+     "emissive": "#0a1418"
+    },
+    "metal": {
+     "color": "#6a6a64"
+    },
+    "filter": {
+     "color": "#2b2b28"
+    },
+    "tape": {
+     "color": "#9a9a90"
+    },
+    "stripe": {
+     "color": "#d8d8c8"
+    },
+    "grime": {
+     "color": "#3a3020"
+    },
+    "tear": {
+     "color": "#120f0a"
+    }
+   },
+   "parts": [
+    {
+     "id": "body",
+     "shape": "capsule",
+     "size": [
+      0.19,
+      0.42
+     ],
+     "pos": [
+      0,
+      1.1,
+      0
+     ],
+     "mat": "suit",
+     "in": "torso",
+     "scale": [
+      1.1,
+      1,
+      0.85
+     ]
+    },
+    {
+     "id": "chestPlate",
+     "shape": "box",
+     "size": [
+      0.3,
+      0.22,
+      0.05
+     ],
+     "pos": [
+      0,
+      1.22,
+      -0.14
+     ],
+     "mat": "suit",
+     "in": "torso",
+     "rot": [
+      -6,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "zipper",
+     "shape": "box",
+     "size": [
+      0.012,
+      0.5,
+      0.01
+     ],
+     "pos": [
+      0,
+      1.08,
+      -0.172
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth1",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      0.9,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth2",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      0.97,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth3",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      1.04,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth4",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      1.11,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth5",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      1.18,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "zipTooth6",
+     "shape": "box",
+     "size": [
+      0.02,
+      0.006,
+      0.006
+     ],
+     "pos": [
+      0,
+      1.25,
+      -0.176
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "stripeChest",
+     "shape": "torus",
+     "size": [
+      0.205,
+      0.012
+     ],
+     "pos": [
+      0,
+      1.25,
+      0
+     ],
+     "mat": "stripe",
+     "in": "torso",
+     "rot": [
+      90,
+      0,
+      0
+     ],
+     "scale": [
+      1.08,
+      0.86,
+      1
+     ]
+    },
+    {
+     "id": "stripeWaist",
+     "shape": "torus",
+     "size": [
+      0.2,
+      0.01
+     ],
+     "pos": [
+      0,
+      0.98,
+      0
+     ],
+     "mat": "stripe",
+     "in": "torso",
+     "rot": [
+      90,
+      0,
+      0
+     ],
+     "scale": [
+      1.08,
+      0.86,
+      1
+     ]
+    },
+    {
+     "id": "belt",
+     "shape": "cylinder",
+     "size": [
+      0.215,
+      0.215,
+      0.05
+     ],
+     "pos": [
+      0,
+      0.9,
+      0
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "scale": [
+      1.06,
+      1,
+      0.86
+     ]
+    },
+    {
+     "id": "buckle",
+     "shape": "box",
+     "size": [
+      0.07,
+      0.045,
+      0.02
+     ],
+     "pos": [
+      0,
+      0.9,
+      -0.19
+     ],
+     "mat": "metal",
+     "in": "torso"
+    },
+    {
+     "id": "pouchL",
+     "shape": "box",
+     "size": [
+      0.08,
+      0.09,
+      0.05
+     ],
+     "pos": [
+      -0.15,
+      0.89,
+      -0.14
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      0
+     ],
+     "chance": 0.55
+    },
+    {
+     "id": "pouchFlapL",
+     "shape": "box",
+     "size": [
+      0.082,
+      0.025,
+      0.055
+     ],
+     "pos": [
+      -0.15,
+      0.93,
+      -0.142
+     ],
+     "mat": "filter",
+     "in": "torso",
+     "rot": [
+      0,
+      -25,
+      0
+     ],
+     "chance": 0.55
+    },
+    {
+     "id": "shoulderPadL",
+     "shape": "sphere",
+     "size": [
+      0.085
+     ],
+     "pos": [
+      -0.22,
+      1.36,
+      0
+     ],
+     "mat": "suit",
+     "in": "torso",
+     "scale": [
+      1.1,
+      0.75,
+      1
+     ]
+    },
+    {
+     "id": "strapL",
+     "shape": "box",
+     "size": [
+      0.045,
+      0.42,
+      0.02
+     ],
+     "pos": [
+      -0.11,
+      1.16,
+      -0.16
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      -8,
+      0,
+      -4
+     ]
+    },
+    {
+     "id": "strapBackL",
+     "shape": "box",
+     "size": [
+      0.045,
+      0.42,
+      0.02
+     ],
+     "pos": [
+      -0.11,
+      1.16,
+      0.17
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      8,
+      0,
+      -4
+     ]
+    },
+    {
+     "id": "wrinkleL1",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      -0.17,
+      1,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      -60,
+      90
+     ]
+    },
+    {
+     "id": "wrinkleL2",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      -0.17,
+      1.08,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      -60,
+      90
+     ]
+    },
+    {
+     "id": "wrinkleL3",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      -0.17,
+      1.16,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      -60,
+      90
+     ]
+    },
+    {
+     "id": "pouchR",
+     "shape": "box",
+     "size": [
+      0.08,
+      0.09,
+      0.05
+     ],
+     "pos": [
+      0.15,
+      0.89,
+      -0.14
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      0
+     ],
+     "chance": 0.55
+    },
+    {
+     "id": "pouchFlapR",
+     "shape": "box",
+     "size": [
+      0.082,
+      0.025,
+      0.055
+     ],
+     "pos": [
+      0.15,
+      0.93,
+      -0.142
+     ],
+     "mat": "filter",
+     "in": "torso",
+     "rot": [
+      0,
+      25,
+      0
+     ],
+     "chance": 0.55
+    },
+    {
+     "id": "shoulderPadR",
+     "shape": "sphere",
+     "size": [
+      0.085
+     ],
+     "pos": [
+      0.22,
+      1.36,
+      0
+     ],
+     "mat": "suit",
+     "in": "torso",
+     "scale": [
+      1.1,
+      0.75,
+      1
+     ]
+    },
+    {
+     "id": "strapR",
+     "shape": "box",
+     "size": [
+      0.045,
+      0.42,
+      0.02
+     ],
+     "pos": [
+      0.11,
+      1.16,
+      -0.16
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      -8,
+      0,
+      4
+     ]
+    },
+    {
+     "id": "strapBackR",
+     "shape": "box",
+     "size": [
+      0.045,
+      0.42,
+      0.02
+     ],
+     "pos": [
+      0.11,
+      1.16,
+      0.17
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      8,
+      0,
+      4
+     ]
+    },
+    {
+     "id": "wrinkleR1",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      0.17,
+      1,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      60,
+      90
+     ]
+    },
+    {
+     "id": "wrinkleR2",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      0.17,
+      1.08,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      60,
+      90
+     ]
+    },
+    {
+     "id": "wrinkleR3",
+     "shape": "torus",
+     "size": [
+      0.05,
+      0.008
+     ],
+     "pos": [
+      0.17,
+      1.16,
+      -0.08
+     ],
+     "mat": "suitShade",
+     "in": "torso",
+     "rot": [
+      0,
+      60,
+      90
+     ]
+    },
+    {
+     "id": "nameTag",
+     "shape": "box",
+     "size": [
+      0.08,
+      0.035,
+      0.008
+     ],
+     "pos": [
+      0.09,
+      1.3,
+      -0.165
+     ],
+     "mat": "tape",
+     "in": "torso",
+     "rot": [
+      -6,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "packFrame",
+     "shape": "box",
+     "size": [
+      0.3,
+      0.42,
+      0.06
+     ],
+     "pos": [
+      0,
+      1.15,
+      0.2
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "chance": 0.7
+    },
+    {
+     "id": "tankL",
+     "shape": "cylinder",
+     "size": [
+      0.065,
+      0.065,
+      0.38
+     ],
+     "pos": [
+      -0.075,
+      1.16,
+      0.27
+     ],
+     "mat": "metal",
+     "in": "torso",
+     "chance": 0.6
+    },
+    {
+     "id": "tankCapL",
+     "shape": "sphere",
+     "size": [
+      0.065
+     ],
+     "pos": [
+      -0.075,
+      1.35,
+      0.27
+     ],
+     "mat": "metal",
+     "in": "torso",
+     "scale": [
+      1,
+      0.5,
+      1
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "tankR",
+     "shape": "cylinder",
+     "size": [
+      0.065,
+      0.065,
+      0.38
+     ],
+     "pos": [
+      0.075,
+      1.16,
+      0.27
+     ],
+     "mat": "metal",
+     "in": "torso",
+     "chance": 0.6
+    },
+    {
+     "id": "tankCapR",
+     "shape": "sphere",
+     "size": [
+      0.065
+     ],
+     "pos": [
+      0.075,
+      1.35,
+      0.27
+     ],
+     "mat": "metal",
+     "in": "torso",
+     "scale": [
+      1,
+      0.5,
+      1
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "valve",
+     "shape": "cylinder",
+     "size": [
+      0.02,
+      0.02,
+      0.06
+     ],
+     "pos": [
+      0,
+      1.4,
+      0.27
+     ],
+     "mat": "filter",
+     "in": "torso"
+    },
+    {
+     "id": "valveWheel",
+     "shape": "torus",
+     "size": [
+      0.03,
+      0.007
+     ],
+     "pos": [
+      0,
+      1.43,
+      0.27
+     ],
+     "mat": "rubber",
+     "in": "torso",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "hose1",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.13,
+      1.42,
+      0.21
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose2",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.124,
+      1.451,
+      0.185
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose3",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.118,
+      1.481,
+      0.159
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose4",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.112,
+      1.509,
+      0.134
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose5",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.106,
+      1.533,
+      0.109
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose6",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.1,
+      1.554,
+      0.083
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose7",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.094,
+      1.57,
+      0.058
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose8",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.088,
+      1.581,
+      0.033
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose9",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.082,
+      1.587,
+      0.007
+     ],
+     "mat": "rubber",
+     "in": "torso"
+    },
+    {
+     "id": "hose10",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.076,
+      1.588,
+      -0.018
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose11",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.07,
+      1.584,
+      -0.043
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose12",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.064,
+      1.575,
+      -0.069
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose13",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.058,
+      1.563,
+      -0.094
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose14",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.052,
+      1.547,
+      -0.119
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose15",
+     "shape": "sphere",
+     "size": [
+      0.025
+     ],
+     "pos": [
+      0.046,
+      1.529,
+      -0.145
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hose16",
+     "shape": "sphere",
+     "size": [
+      0.021
+     ],
+     "pos": [
+      0.04,
+      1.51,
+      -0.17
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "hood",
+     "shape": "sphere",
+     "size": [
+      0.155
+     ],
+     "pos": [
+      0,
+      1.6,
+      0.01
+     ],
+     "mat": "suit",
+     "in": "head",
+     "scale": [
+      1,
+      1.12,
+      1.05
+     ]
+    },
+    {
+     "id": "hoodNeck",
+     "shape": "cylinder",
+     "size": [
+      0.12,
+      0.15,
+      0.1
+     ],
+     "pos": [
+      0,
+      1.47,
+      0
+     ],
+     "mat": "suit",
+     "in": "head"
+    },
+    {
+     "id": "hoodSeam",
+     "shape": "torus",
+     "size": [
+      0.14,
+      0.01
+     ],
+     "pos": [
+      0,
+      1.52,
+      0
+     ],
+     "mat": "suitShade",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "visor1",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      -0.104,
+      1.625,
+      -0.114
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      41.253,
+      0
+     ]
+    },
+    {
+     "id": "visor2",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      -0.073,
+      1.625,
+      -0.135
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      27.502,
+      0
+     ]
+    },
+    {
+     "id": "visor3",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      -0.038,
+      1.625,
+      -0.148
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      13.751,
+      0
+     ]
+    },
+    {
+     "id": "visor4",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      0,
+      1.625,
+      -0.153
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "visor5",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      0.038,
+      1.625,
+      -0.148
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      -13.751,
+      0
+     ]
+    },
+    {
+     "id": "visor6",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      0.073,
+      1.625,
+      -0.135
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      -27.502,
+      0
+     ]
+    },
+    {
+     "id": "visor7",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.125,
+      0.014
+     ],
+     "pos": [
+      0.104,
+      1.625,
+      -0.114
+     ],
+     "mat": "visor",
+     "in": "head",
+     "rot": [
+      -6,
+      -41.253,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop1",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.106,
+      1.692,
+      -0.115
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      41.253,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot1",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.106,
+      1.558,
+      -0.115
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      41.253,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop2",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.074,
+      1.692,
+      -0.137
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      27.502,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot2",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.074,
+      1.558,
+      -0.137
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      27.502,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop3",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.038,
+      1.692,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      13.751,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot3",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      -0.038,
+      1.558,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      13.751,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop4",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0,
+      1.692,
+      -0.155
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot4",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0,
+      1.558,
+      -0.155
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop5",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.038,
+      1.692,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -13.751,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot5",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.038,
+      1.558,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -13.751,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop6",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.074,
+      1.692,
+      -0.137
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -27.502,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot6",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.074,
+      1.558,
+      -0.137
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -27.502,
+      0
+     ]
+    },
+    {
+     "id": "visorRimTop7",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.106,
+      1.692,
+      -0.115
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -41.253,
+      0
+     ]
+    },
+    {
+     "id": "visorRimBot7",
+     "shape": "box",
+     "size": [
+      0.064,
+      0.014,
+      0.02
+     ],
+     "pos": [
+      0.106,
+      1.558,
+      -0.115
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      0,
+      -41.253,
+      0
+     ]
+    },
+    {
+     "id": "respirator",
+     "shape": "cylinder",
+     "size": [
+      0.05,
+      0.065,
+      0.07
+     ],
+     "pos": [
+      0,
+      1.53,
+      -0.15
+     ],
+     "mat": "rubber",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "respiratorGrill",
+     "shape": "cylinder",
+     "size": [
+      0.035,
+      0.035,
+      0.01
+     ],
+     "pos": [
+      0,
+      1.53,
+      -0.19
+     ],
+     "mat": "metal",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "filterL",
+     "shape": "cylinder",
+     "size": [
+      0.042,
+      0.042,
+      0.05
+     ],
+     "pos": [
+      -0.085,
+      1.51,
+      -0.14
+     ],
+     "mat": "filter",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      30
+     ],
+     "chance": 0.65
+    },
+    {
+     "id": "filterRingL",
+     "shape": "torus",
+     "size": [
+      0.042,
+      0.006
+     ],
+     "pos": [
+      -0.1,
+      1.51,
+      -0.165
+     ],
+     "mat": "metal",
+     "in": "head",
+     "rot": [
+      0,
+      -30,
+      0
+     ],
+     "chance": 0.65
+    },
+    {
+     "id": "hoodStrapL",
+     "shape": "box",
+     "size": [
+      0.012,
+      0.012,
+      0.22
+     ],
+     "pos": [
+      -0.15,
+      1.6,
+      0
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "filterR",
+     "shape": "cylinder",
+     "size": [
+      0.042,
+      0.042,
+      0.05
+     ],
+     "pos": [
+      0.085,
+      1.51,
+      -0.14
+     ],
+     "mat": "filter",
+     "in": "head",
+     "rot": [
+      90,
+      0,
+      -30
+     ],
+     "chance": 0.65
+    },
+    {
+     "id": "filterRingR",
+     "shape": "torus",
+     "size": [
+      0.042,
+      0.006
+     ],
+     "pos": [
+      0.1,
+      1.51,
+      -0.165
+     ],
+     "mat": "metal",
+     "in": "head",
+     "rot": [
+      0,
+      30,
+      0
+     ],
+     "chance": 0.65
+    },
+    {
+     "id": "hoodStrapR",
+     "shape": "box",
+     "size": [
+      0.012,
+      0.012,
+      0.22
+     ],
+     "pos": [
+      0.15,
+      1.6,
+      0
+     ],
+     "mat": "rubber",
+     "in": "head"
+    },
+    {
+     "id": "sleeveL",
+     "shape": "capsule",
+     "size": [
+      0.065,
+      0.123
+     ],
+     "pos": [
+      -0.275,
+      1.245,
+      0.01
+     ],
+     "mat": "suit",
+     "in": "armL",
+     "rot": [
+      175.426,
+      0,
+      6.821
+     ]
+    },
+    {
+     "id": "elbowFoldL",
+     "shape": "torus",
+     "size": [
+      0.055,
+      0.012
+     ],
+     "pos": [
+      -0.29,
+      1.12,
+      0.02
+     ],
+     "mat": "suitShade",
+     "in": "armL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "elbowFold2L",
+     "shape": "torus",
+     "size": [
+      0.052,
+      0.01
+     ],
+     "pos": [
+      -0.29,
+      1.09,
+      0.02
+     ],
+     "mat": "suitShade",
+     "in": "armL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "forearmL",
+     "shape": "capsule",
+     "size": [
+      0.056,
+      0.131
+     ],
+     "pos": [
+      -0.29,
+      1,
+      0
+     ],
+     "mat": "suit",
+     "in": "armL",
+     "rot": [
+      -170.538,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "stripeArmL",
+     "shape": "torus",
+     "size": [
+      0.06,
+      0.008
+     ],
+     "pos": [
+      -0.29,
+      1,
+      0
+     ],
+     "mat": "stripe",
+     "in": "armL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "cuffL",
+     "shape": "cylinder",
+     "size": [
+      0.06,
+      0.055,
+      0.06
+     ],
+     "pos": [
+      -0.29,
+      0.89,
+      -0.02
+     ],
+     "mat": "rubber",
+     "in": "armL"
+    },
+    {
+     "id": "tapeWristL",
+     "shape": "cylinder",
+     "size": [
+      0.062,
+      0.062,
+      0.025
+     ],
+     "pos": [
+      -0.29,
+      0.93,
+      -0.02
+     ],
+     "mat": "tape",
+     "in": "armL",
+     "chance": 0.4
+    },
+    {
+     "id": "handL",
+     "shape": "box",
+     "size": [
+      0.05,
+      0.09,
+      0.085
+     ],
+     "pos": [
+      -0.29,
+      0.81,
+      -0.02
+     ],
+     "mat": "rubber",
+     "in": "armL"
+    },
+    {
+     "id": "gloveL0_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      -0.287,
+      0.735,
+      -0.054
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -173.48,
+      0,
+      -4.059
+     ]
+    },
+    {
+     "id": "gloveL1_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      -0.287,
+      0.735,
+      -0.034
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -173.48,
+      0,
+      -4.059
+     ]
+    },
+    {
+     "id": "gloveL2_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      -0.287,
+      0.735,
+      -0.014
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -173.48,
+      0,
+      -4.059
+     ]
+    },
+    {
+     "id": "gloveL3_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      -0.287,
+      0.735,
+      0.006
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -173.48,
+      0,
+      -4.059
+     ]
+    },
+    {
+     "id": "gloveThumbL",
+     "shape": "capsule",
+     "size": [
+      0.012,
+      0.051
+     ],
+     "pos": [
+      -0.285,
+      0.795,
+      -0.078
+     ],
+     "mat": "rubber",
+     "in": "armL",
+     "rot": [
+      -160.346,
+      0,
+      -7.662
+     ]
+    },
+    {
+     "id": "sleeveR",
+     "shape": "capsule",
+     "size": [
+      0.065,
+      0.123
+     ],
+     "pos": [
+      0.275,
+      1.245,
+      0.01
+     ],
+     "mat": "suit",
+     "in": "armR",
+     "rot": [
+      175.426,
+      0,
+      -6.821
+     ]
+    },
+    {
+     "id": "elbowFoldR",
+     "shape": "torus",
+     "size": [
+      0.055,
+      0.012
+     ],
+     "pos": [
+      0.29,
+      1.12,
+      0.02
+     ],
+     "mat": "suitShade",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "elbowFold2R",
+     "shape": "torus",
+     "size": [
+      0.052,
+      0.01
+     ],
+     "pos": [
+      0.29,
+      1.09,
+      0.02
+     ],
+     "mat": "suitShade",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "forearmR",
+     "shape": "capsule",
+     "size": [
+      0.056,
+      0.131
+     ],
+     "pos": [
+      0.29,
+      1,
+      0
+     ],
+     "mat": "suit",
+     "in": "armR",
+     "rot": [
+      -170.538,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "stripeArmR",
+     "shape": "torus",
+     "size": [
+      0.06,
+      0.008
+     ],
+     "pos": [
+      0.29,
+      1,
+      0
+     ],
+     "mat": "stripe",
+     "in": "armR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "cuffR",
+     "shape": "cylinder",
+     "size": [
+      0.06,
+      0.055,
+      0.06
+     ],
+     "pos": [
+      0.29,
+      0.89,
+      -0.02
+     ],
+     "mat": "rubber",
+     "in": "armR"
+    },
+    {
+     "id": "tapeWristR",
+     "shape": "cylinder",
+     "size": [
+      0.062,
+      0.062,
+      0.025
+     ],
+     "pos": [
+      0.29,
+      0.93,
+      -0.02
+     ],
+     "mat": "tape",
+     "in": "armR",
+     "chance": 0.4
+    },
+    {
+     "id": "handR",
+     "shape": "box",
+     "size": [
+      0.05,
+      0.09,
+      0.085
+     ],
+     "pos": [
+      0.29,
+      0.81,
+      -0.02
+     ],
+     "mat": "rubber",
+     "in": "armR"
+    },
+    {
+     "id": "gloveR0_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      0.288,
+      0.735,
+      -0.054
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -173.48,
+      0,
+      4.059
+     ]
+    },
+    {
+     "id": "gloveR1_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      0.288,
+      0.735,
+      -0.034
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -173.48,
+      0,
+      4.059
+     ]
+    },
+    {
+     "id": "gloveR2_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      0.288,
+      0.735,
+      -0.014
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -173.48,
+      0,
+      4.059
+     ]
+    },
+    {
+     "id": "gloveR3_1",
+     "shape": "capsule",
+     "size": [
+      0.011,
+      0.049
+     ],
+     "pos": [
+      0.288,
+      0.735,
+      0.006
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -173.48,
+      0,
+      4.059
+     ]
+    },
+    {
+     "id": "gloveThumbR",
+     "shape": "capsule",
+     "size": [
+      0.012,
+      0.051
+     ],
+     "pos": [
+      0.285,
+      0.795,
+      -0.078
+     ],
+     "mat": "rubber",
+     "in": "armR",
+     "rot": [
+      -160.346,
+      0,
+      7.662
+     ]
+    },
+    {
+     "id": "thighL",
+     "shape": "capsule",
+     "size": [
+      0.082,
+      0.226
+     ],
+     "pos": [
+      -0.103,
+      0.665,
+      -0.005
+     ],
+     "mat": "suit",
+     "in": "legL",
+     "rot": [
+      -178.531,
+      0,
+      0.734
+     ]
+    },
+    {
+     "id": "kneePadL",
+     "shape": "box",
+     "size": [
+      0.1,
+      0.1,
+      0.03
+     ],
+     "pos": [
+      -0.105,
+      0.47,
+      -0.085
+     ],
+     "mat": "rubber",
+     "in": "legL",
+     "rot": [
+      -5,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "shinL",
+     "shape": "capsule",
+     "size": [
+      0.072,
+      0.126
+     ],
+     "pos": [
+      -0.105,
+      0.335,
+      -0.005
+     ],
+     "mat": "suit",
+     "in": "legL",
+     "rot": [
+      177.879,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "stripeLegL",
+     "shape": "torus",
+     "size": [
+      0.077,
+      0.009
+     ],
+     "pos": [
+      -0.105,
+      0.32,
+      0
+     ],
+     "mat": "stripe",
+     "in": "legL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "pantFoldL",
+     "shape": "torus",
+     "size": [
+      0.075,
+      0.01
+     ],
+     "pos": [
+      -0.105,
+      0.6,
+      0
+     ],
+     "mat": "suitShade",
+     "in": "legL",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "bootShaftL",
+     "shape": "cylinder",
+     "size": [
+      0.072,
+      0.075,
+      0.16
+     ],
+     "pos": [
+      -0.105,
+      0.14,
+      0
+     ],
+     "mat": "rubber",
+     "in": "legL"
+    },
+    {
+     "id": "bootFootL",
+     "shape": "box",
+     "size": [
+      0.1,
+      0.07,
+      0.2
+     ],
+     "pos": [
+      -0.105,
+      0.045,
+      -0.05
+     ],
+     "mat": "rubber",
+     "in": "legL"
+    },
+    {
+     "id": "bootToeL",
+     "shape": "sphere",
+     "size": [
+      0.052
+     ],
+     "pos": [
+      -0.105,
+      0.045,
+      -0.14
+     ],
+     "mat": "rubber",
+     "in": "legL",
+     "scale": [
+      1,
+      0.75,
+      1
+     ]
+    },
+    {
+     "id": "soleL",
+     "shape": "box",
+     "size": [
+      0.11,
+      0.022,
+      0.25
+     ],
+     "pos": [
+      -0.105,
+      0.011,
+      -0.05
+     ],
+     "mat": "filter",
+     "in": "legL"
+    },
+    {
+     "id": "laceL1",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      -0.105,
+      0.09,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legL"
+    },
+    {
+     "id": "laceL2",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      -0.105,
+      0.125,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legL"
+    },
+    {
+     "id": "laceL3",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      -0.105,
+      0.16,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legL"
+    },
+    {
+     "id": "thighR",
+     "shape": "capsule",
+     "size": [
+      0.082,
+      0.226
+     ],
+     "pos": [
+      0.103,
+      0.665,
+      -0.005
+     ],
+     "mat": "suit",
+     "in": "legR",
+     "rot": [
+      -178.531,
+      0,
+      -0.734
+     ]
+    },
+    {
+     "id": "kneePadR",
+     "shape": "box",
+     "size": [
+      0.1,
+      0.1,
+      0.03
+     ],
+     "pos": [
+      0.105,
+      0.47,
+      -0.085
+     ],
+     "mat": "rubber",
+     "in": "legR",
+     "rot": [
+      -5,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "shinR",
+     "shape": "capsule",
+     "size": [
+      0.072,
+      0.126
+     ],
+     "pos": [
+      0.105,
+      0.335,
+      -0.005
+     ],
+     "mat": "suit",
+     "in": "legR",
+     "rot": [
+      177.879,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "stripeLegR",
+     "shape": "torus",
+     "size": [
+      0.077,
+      0.009
+     ],
+     "pos": [
+      0.105,
+      0.32,
+      0
+     ],
+     "mat": "stripe",
+     "in": "legR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "pantFoldR",
+     "shape": "torus",
+     "size": [
+      0.075,
+      0.01
+     ],
+     "pos": [
+      0.105,
+      0.6,
+      0
+     ],
+     "mat": "suitShade",
+     "in": "legR",
+     "rot": [
+      90,
+      0,
+      0
+     ]
+    },
+    {
+     "id": "bootShaftR",
+     "shape": "cylinder",
+     "size": [
+      0.072,
+      0.075,
+      0.16
+     ],
+     "pos": [
+      0.105,
+      0.14,
+      0
+     ],
+     "mat": "rubber",
+     "in": "legR"
+    },
+    {
+     "id": "bootFootR",
+     "shape": "box",
+     "size": [
+      0.1,
+      0.07,
+      0.2
+     ],
+     "pos": [
+      0.105,
+      0.045,
+      -0.05
+     ],
+     "mat": "rubber",
+     "in": "legR"
+    },
+    {
+     "id": "bootToeR",
+     "shape": "sphere",
+     "size": [
+      0.052
+     ],
+     "pos": [
+      0.105,
+      0.045,
+      -0.14
+     ],
+     "mat": "rubber",
+     "in": "legR",
+     "scale": [
+      1,
+      0.75,
+      1
+     ]
+    },
+    {
+     "id": "soleR",
+     "shape": "box",
+     "size": [
+      0.11,
+      0.022,
+      0.25
+     ],
+     "pos": [
+      0.105,
+      0.011,
+      -0.05
+     ],
+     "mat": "filter",
+     "in": "legR"
+    },
+    {
+     "id": "laceR1",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      0.105,
+      0.09,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legR"
+    },
+    {
+     "id": "laceR2",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      0.105,
+      0.125,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legR"
+    },
+    {
+     "id": "laceR3",
+     "shape": "box",
+     "size": [
+      0.06,
+      0.008,
+      0.008
+     ],
+     "pos": [
+      0.105,
+      0.16,
+      -0.074
+     ],
+     "mat": "tape",
+     "in": "legR"
+    },
+    {
+     "id": "tearChest",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      0.08,
+      1.15,
+      -0.165
+     ],
+     "mat": "tear",
+     "in": "torso",
+     "scale": [
+      1.3,
+      1,
+      0.35
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "tearBelly",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      -0.1,
+      0.98,
+      -0.155
+     ],
+     "mat": "tear",
+     "in": "torso",
+     "scale": [
+      1.3,
+      1,
+      0.35
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "grimeBack",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      0,
+      1,
+      0.17
+     ],
+     "mat": "grime",
+     "in": "torso",
+     "scale": [
+      1.3,
+      1,
+      0.35
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "tearThighL",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      -0.15,
+      0.7,
+      -0.06
+     ],
+     "mat": "tear",
+     "in": "legL",
+     "scale": [
+      1.3,
+      1,
+      0.35
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "grimeShinR",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      0.11,
+      0.3,
+      -0.07
+     ],
+     "mat": "grime",
+     "in": "legR",
+     "scale": [
+      1.3,
+      1,
+      0.35
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "tearSleeveL",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      -0.33,
+      1.2,
+      -0.03
+     ],
+     "mat": "tear",
+     "in": "armL",
+     "scale": [
+      1.3,
+      1,
+      0.35
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "grimeHood",
+     "shape": "sphere",
+     "size": [
+      0.035
+     ],
+     "pos": [
+      0.06,
+      1.72,
+      -0.06
+     ],
+     "mat": "grime",
+     "in": "head",
+     "scale": [
+      1.3,
+      1,
+      0.35
+     ],
+     "chance": 0.6
+    },
+    {
+     "id": "crackVisor",
+     "shape": "box",
+     "size": [
+      0.004,
+      0.09,
+      0.004
+     ],
+     "pos": [
+      0.03,
+      1.63,
+      -0.142
+     ],
+     "mat": "stripe",
+     "in": "head",
+     "rot": [
+      0,
+      0,
+      25
+     ],
+     "chance": 0.5
+    }
+   ],
+   "pose": {
+    "torsoLean": 8,
+    "headTilt": 12
+   }
+  }
+ }
+};
+const BASE_STAMP = "b3aff625";
+const STORE = 'backrooms.modelEditor.v1';
+
+const clone = o => JSON.parse(JSON.stringify(o));
+const $ = id => document.getElementById(id);
+const SHAPES = { box: ['폭', '높이', '깊이'], sphere: ['반지름'], capsule: ['반지름', '길이'], cylinder: ['위 반지름', '아래 반지름', '높이'], cone: ['반지름', '높이'], torus: ['반지름', '굵기'] };
+const SHAPE_KO = { box: '상자', sphere: '구', capsule: '캡슐', cylinder: '원기둥', cone: '원뿔', torus: '고리' };
+const GROUP_KO = { root: '몸 전체', torso: '몸통', head: '머리', armL: '왼팔', armR: '오른팔', legL: '왼다리', legR: '오른다리' };
+const MODEL_KO = { howler: '하울러', player: '플레이어 (방호복)', wanderer: '방랑자' };
+
+// ---------------------------------------------------------------- 상태 (브라우저에 자동 저장)
+let S;
+function freshState() { return { stamp: BASE_STAMP, data: clone(BASE), notes: { all: '', models: {}, parts: {} }, model: Object.keys(BASE.models)[0] }; }
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
+  S = saved && saved.data && saved.stamp === BASE_STAMP ? saved : null;
+  if (saved && saved.stamp !== BASE_STAMP) setTimeout(() => toast('게임 쪽 모델이 바뀌어서 새 버전으로 시작한다 (이전 작업은 "불러오기"로 열 수 있게 파일로 저장해 두었으면 그걸 쓰세요)', true), 500);
+} catch { S = null; }
+if (!S) S = freshState();
+const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch { /* 저장 불가 */ } };
+const spec = () => S.data.models[S.model];
+let sel = -1;                 // 선택한 부품 번호 (spec().parts)
+let seed = 1, walking = false, bright = true, showRef = true;
+const undo = [], redo = [];
+function snapshot() { undo.push(JSON.stringify(S.data)); if (undo.length > 200) undo.shift(); redo.length = 0; }
+function commit() { save(); rebuild(); renderLists(); }
+
+// ---------------------------------------------------------------- 3D 화면
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+view.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 50);
+camera.position.set(1.6, 1.6, -2.6);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.target.set(0, 1.0, 0); orbit.enableDamping = true;
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setSize(0.8);
+scene.add(gizmo.getHelper ? gizmo.getHelper() : gizmo);
+gizmo.addEventListener('dragging-changed', e => { orbit.enabled = !e.value; if (e.value) snapshot(); else { save(); renderLists(); renderPartPanel(); } });
+gizmo.addEventListener('objectChange', () => {   // 손잡이로 옮긴 결과를 부품 데이터로
+  const m = gizmo.object, p = m?.userData.part; if (!p) return;
+  const a = pivotAbs(p.in);
+  p.pos = [m.position.x + a[0], m.position.y + a[1], m.position.z + a[2]].map(r3);
+  const rot = [m.rotation.x, m.rotation.y, m.rotation.z].map(v => r3(v * 180 / Math.PI));
+  if (rot.some(v => v !== 0)) p.rot = rot; else delete p.rot;
+  const sc = [m.scale.x, m.scale.y, m.scale.z].map(r3);
+  if (sc.some(v => v !== 1)) p.scale = sc; else delete p.scale;
+  selBox.setFromObject(m);
+  renderPartPanel(true);
+});
+const r3 = v => Math.round(v * 1000) / 1000;
+const pivotAbs = g => (!g || g === 'root' ? [0, 0, 0] : spec().pivots?.[g] || [0, 0, 0]);
+
+// 조명: 밝게 보기 / 게임처럼 (어두운 복도 + 형광등 + 손전등 느낌)
+const hemi = new THREE.HemisphereLight(0xfff6e0, 0x3a3222, 1.6);
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(-2, 4, -3);
+const rim = new THREE.DirectionalLight(0xffe8b0, 0.8); rim.position.set(2, 2, 3);
+const lamp = new THREE.PointLight(0xfff2c8, 6, 8, 2); lamp.position.set(0, 2.6, -0.6);
+const ambDark = new THREE.AmbientLight(0xfff4dc, 0.08);
+scene.add(hemi, key, rim, lamp, ambDark);
+function applyLight() {
+  hemi.visible = key.visible = rim.visible = bright;
+  lamp.visible = ambDark.visible = !bright;
+  scene.background = new THREE.Color(bright ? 0x2a2620 : 0x0a0904);
+  scene.fog = bright ? null : new THREE.FogExp2(0x1a1608, 0.18);
+  $('btnLight').textContent = bright ? '밝게 보기' : '게임처럼';
+  $('btnLight').classList.toggle('on', !bright);
+}
+// 기준선: 바닥 격자, 1.75m 막대(플레이어 키), 1m 눈금
+const refGroup = new THREE.Group();
+const grid = new THREE.GridHelper(4, 16, 0x6a5c30, 0x3a3320); refGroup.add(grid);
+const stick = new THREE.Mesh(new THREE.BoxGeometry(0.02, 1.75, 0.02), new THREE.MeshBasicMaterial({ color: 0x4fa0ff }));
+stick.position.set(-0.7, 0.875, 0); refGroup.add(stick);
+for (const y of [1, 2]) { const t = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.008, 0.008), new THREE.MeshBasicMaterial({ color: 0x4fa0ff })); t.position.set(-0.7, y, 0); refGroup.add(t); }
+const front = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.12, 8), new THREE.MeshBasicMaterial({ color: 0xff7040 }));
+front.rotation.x = -Math.PI / 2; front.position.set(0, 0.02, -0.55); refGroup.add(front);   // 앞쪽 표시 (-z)
+scene.add(refGroup);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), new THREE.MeshLambertMaterial({ color: 0x6a5a34 }));
+floor.rotation.x = -Math.PI / 2; floor.position.y = -0.001; scene.add(floor);
+
+let modelObj = null;
+const selBox = new THREE.Box3Helper(new THREE.Box3(), 0x4fd0ff);
+scene.add(selBox);
+function rebuild() {
+  if (modelObj) { scene.remove(modelObj); modelObj.traverse(o => { o.geometry?.dispose(); }); }
+  const sp = spec();
+  modelObj = B.buildModel(THREE, sp, { seed, tint: sp.materials?.suit?.color, faded: S.model === 'wanderer', Material: THREE.MeshStandardMaterial });
+  modelObj.traverse(o => { if (o.material && !o.material.userData.glow && o.material.roughness !== undefined) { o.material.roughness = 0.85; o.material.metalness = 0.0; } });
+  scene.add(modelObj);
+  attachSel();
+  const n = modelObj.userData.parts.length;
+  $('stats').innerHTML = `${MODEL_KO[S.model] || S.model} · 붙은 부품 ${n} / ${sp.parts.length} · 키 ${sp.height}m · 모습 ${seed}`;
+}
+function meshOfSel() { return sel < 0 ? null : modelObj.userData.parts.find(m => m.userData.part === spec().parts[sel]) || null; }
+function attachSel() {
+  const m = meshOfSel();
+  if (m) { gizmo.attach(m); selBox.visible = true; selBox.box.setFromObject(m); }
+  else { gizmo.detach(); selBox.visible = false; }
+}
+
+// 클릭으로 부품 고르기
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4 || gizmo.dragging) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObjects(modelObj.userData.parts, false)[0];
+  select(hit ? spec().parts.indexOf(hit.object.userData.part) : -1);
+});
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+let t = 0, last = performance.now();
+renderer.setAnimationLoop(now => {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (walking && modelObj && !gizmo.dragging) { t += dt; B.poseWalk(modelObj, t * 7, 1); if (selBox.visible) { const m = meshOfSel(); if (m) selBox.box.setFromObject(m); } }
+  orbit.update();
+  renderer.render(scene, camera);
+});
+
+// ---------------------------------------------------------------- 왼쪽: 부품 목록
+const baseParts = () => new Map((BASE.models[S.model]?.parts || []).map(p => [p.id, JSON.stringify(p)]));
+function renderLists() {
+  const sp = spec(), q = $('search').value.trim().toLowerCase(), base = baseParts();
+  const ul = $('parts'); ul.innerHTML = '';
+  $('partCount').textContent = `(${sp.parts.length})`;
+  const byGroup = {};
+  sp.parts.forEach((p, i) => { if (q && !p.id.toLowerCase().includes(q)) return; (byGroup[p.in || 'root'] ||= []).push([p, i]); });
+  for (const g of B.GROUPS) {
+    if (!byGroup[g]) continue;
+    const h = document.createElement('li'); h.className = 'groupHead'; h.textContent = `${GROUP_KO[g]} (${g})`; ul.append(h);
+    for (const [p, i] of byGroup[g]) {
+      const li = document.createElement('li');
+      const b = base.get(p.id);
+      li.className = (i === sel ? 'sel ' : '') + (!b ? 'added ' : b !== JSON.stringify(p) ? 'changed ' : '') + (S.notes.parts[S.model]?.[p.id] ? 'noted' : '');
+      li.innerHTML = `<span class="n"></span><span class="g"></span>`;
+      li.firstChild.textContent = p.id; li.lastChild.textContent = SHAPE_KO[p.shape] + (p.chance !== undefined && p.chance < 1 ? ` ${Math.round(p.chance * 100)}%` : '');
+      li.onclick = () => select(i);
+      ul.append(li);
+    }
+  }
+  renderMats(); renderModelPanel(); renderPartPanel();
+  $('noteModel').value = S.notes.models[S.model] || '';
+  $('noteAll').value = S.notes.all || '';
+}
+function select(i) {
+  sel = i;
+  attachSel(); renderLists();
+  const li = document.querySelector('#parts li.sel'); li?.scrollIntoView({ block: 'nearest' });
+}
+
+// ---------------------------------------------------------------- 오른쪽: 부품 속성
+function numInput(val, step, onChange, w) {
+  const el = document.createElement('input'); el.type = 'number'; el.step = step; el.value = val;
+  if (w) el.style.width = w;
+  el.onfocus = () => snapshot();
+  el.oninput = () => { const v = parseFloat(el.value); if (Number.isFinite(v)) onChange(v); };
+  el.onchange = () => { save(); renderLists(); };
+  return el;
+}
+function vecRow(label, arr, n, step, onChange, labels) {
+  const row = document.createElement('div'); row.className = 'row vec';
+  const lb = document.createElement('label'); lb.textContent = label; row.append(lb);
+  for (let k = 0; k < n; k++) {
+    const wrap = document.createElement('span');
+    if (labels) { const s = document.createElement('span'); s.className = 'muted'; s.textContent = labels[k] + ' '; wrap.append(s); }
+    wrap.append(numInput(arr[k] ?? 0, step, v => { arr[k] = v; onChange(); }));
+    row.append(wrap);
+  }
+  return row;
+}
+function renderPartPanel(onlyValues) {
+  const box = $('partPanel'), sp = spec(), p = sp.parts[sel];
+  if (onlyValues && p && document.activeElement && box.contains(document.activeElement)) return;
+  box.innerHTML = '';
+  const h = document.createElement('h2'); h.textContent = p ? `부품: ${p.id}` : '부품 (화면이나 목록에서 고르세요)'; box.append(h);
+  if (!p) return;
+  const live = () => { rebuildKeepSel(); };
+  // 이름
+  let row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = '<label>이름</label>';
+  const nameIn = document.createElement('input'); nameIn.value = p.id; nameIn.style.width = '170px';
+  nameIn.onchange = () => {
+    const v = nameIn.value.trim(); if (!v || sp.parts.some((q, i) => i !== sel && q.id === v)) { toast('같은 이름이 이미 있다', true); nameIn.value = p.id; return; }
+    snapshot(); const notes = S.notes.parts[S.model]; if (notes?.[p.id]) { notes[v] = notes[p.id]; delete notes[p.id]; }
+    p.id = v; commit();
+  };
+  row.append(nameIn); box.append(row);
+  // 모양 / 부위 / 재질
+  row = document.createElement('div'); row.className = 'row';
+  const mk = (label, opts, val, on) => { const l = document.createElement('label'); l.textContent = label; const s = document.createElement('select'); for (const [k, n] of opts) { const o = document.createElement('option'); o.value = k; o.textContent = n; s.append(o); } s.value = val; s.onchange = () => { snapshot(); on(s.value); commit(); }; row.append(l, s); };
+  mk('모양', Object.keys(SHAPES).map(k => [k, SHAPE_KO[k]]), p.shape, v => { p.shape = v; const need = SHAPES[v].length; p.size = Array.from({ length: need }, (_, k) => p.size[k] ?? 0.05); });
+  box.append(row); row = document.createElement('div'); row.className = 'row';
+  mk('부위', B.GROUPS.map(g => [g, GROUP_KO[g]]), p.in || 'root', v => { p.in = v; });
+  box.append(row); row = document.createElement('div'); row.className = 'row';
+  mk('재질', Object.keys(sp.materials).map(k => [k, k]), p.mat, v => { p.mat = v; });
+  box.append(row);
+  // 크기·위치·회전·비율
+  box.append(vecRow('크기(m)', p.size, SHAPES[p.shape].length, 0.005, live, SHAPES[p.shape]));
+  box.append(vecRow('위치(m)', p.pos, 3, 0.005, live, ['x', 'y', 'z']));
+  p.rot ||= [0, 0, 0];
+  box.append(vecRow('회전(°)', p.rot, 3, 1, live, ['x', 'y', 'z']));
+  p.scale ||= [1, 1, 1];
+  box.append(vecRow('비율', p.scale, 3, 0.05, live, ['x', 'y', 'z']));
+  // 색 (재질 색 대신)
+  row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = '<label>색</label>';
+  const col = document.createElement('input'); col.type = 'color'; col.value = p.color || sp.materials[p.mat]?.color || '#888888';
+  col.onfocus = () => snapshot();
+  col.oninput = () => { p.color = col.value; live(); };
+  col.onchange = () => { save(); renderLists(); };
+  const clr = document.createElement('button'); clr.textContent = p.color ? '재질 색으로' : '(재질 색 사용 중)'; clr.disabled = !p.color;
+  clr.onclick = () => { snapshot(); delete p.color; commit(); };
+  row.append(col, clr); box.append(row);
+  // 확률
+  row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = '<label>확률</label>';
+  const ch = document.createElement('input'); ch.type = 'range'; ch.min = 0; ch.max = 100; ch.value = Math.round((p.chance ?? 1) * 100); ch.style.width = '130px';
+  const chv = document.createElement('span'); chv.className = 'muted'; chv.textContent = `${ch.value}% (모습마다 이 확률로 붙는다)`;
+  ch.onfocus = () => snapshot();
+  ch.oninput = () => { const v = ch.value / 100; if (v >= 1) delete p.chance; else p.chance = v; chv.textContent = `${ch.value}% (모습마다 이 확률로 붙는다)`; live(); };
+  ch.onchange = () => { save(); renderLists(); };
+  row.append(ch, chv); box.append(row);
+  // 이 부품 메모
+  const nl = document.createElement('label'); nl.className = 'muted'; nl.textContent = '이 부품 수정할 점'; box.append(nl);
+  const ta = document.createElement('textarea'); ta.placeholder = '예: 이 갈비뼈를 더 튀어나오게…';
+  ta.value = S.notes.parts[S.model]?.[p.id] || '';
+  ta.oninput = () => { (S.notes.parts[S.model] ||= {}); if (ta.value.trim()) S.notes.parts[S.model][p.id] = ta.value; else delete S.notes.parts[S.model][p.id]; save(); };
+  ta.onchange = () => renderLists();
+  box.append(ta);
+  // 0 회전/1 비율은 데이터에서 뺀다
+  if (p.rot.every(v => v === 0)) delete p.rot;
+  if (p.scale.every(v => v === 1)) delete p.scale;
+}
+function rebuildKeepSel() {
+  const p = spec().parts[sel];
+  if (p) { if (p.rot && p.rot.every(v => v === 0)) delete p.rot; if (p.scale && p.scale.every(v => v === 1)) delete p.scale; }
+  save(); rebuild();
+}
+
+// 재질
+function renderMats() {
+  const box = $('mats'), sp = spec(); box.innerHTML = '';
+  for (const [name, m] of Object.entries(sp.materials)) {
+    const row = document.createElement('div'); row.className = 'mat';
+    const c = document.createElement('input'); c.type = 'color'; c.value = m.color;
+    c.onfocus = () => snapshot();
+    c.oninput = () => { m.color = c.value; save(); rebuild(); };
+    const n = document.createElement('span'); n.textContent = name;
+    const used = sp.parts.filter(p => p.mat === name).length;
+    const tags = [m.glow ? '빛남' : '', m.tint ? '플레이어 색' : '', `${used}개`].filter(Boolean).map(x => `<span class="tag">${x}</span>`).join(' ');
+    n.innerHTML += ' ' + tags;
+    row.append(c, n); box.append(row);
+  }
+  const add = document.createElement('button'); add.textContent = '+ 재질 추가';
+  add.onclick = () => { const nm = prompt('새 재질 이름 (영문)'); if (!nm || sp.materials[nm]) return; snapshot(); sp.materials[nm] = { color: '#888888' }; commit(); };
+  box.append(add);
+}
+// 모델: 키, 자세, 회전축
+function renderModelPanel() {
+  const box = $('modelPanel'), sp = spec(); box.innerHTML = '';
+  let row = document.createElement('div'); row.className = 'row';
+  const l = document.createElement('label'); l.textContent = '키(m)'; row.append(l, numInput(sp.height, 0.05, v => { sp.height = v; save(); rebuild(); })); box.append(row);
+  const pose = sp.pose || {};
+  const setPose = (k, v) => { sp.pose = { ...(sp.pose || {}), [k]: v }; if (!sp.pose.torsoLean && !sp.pose.headTilt) delete sp.pose; save(); rebuild(); };
+  row = document.createElement('div'); row.className = 'row';
+  const l2 = document.createElement('label'); l2.textContent = '숙임(°)';
+  row.append(l2, numInput(pose.torsoLean || 0, 1, v => setPose('torsoLean', v), '54px'));
+  const l3 = document.createElement('label'); l3.textContent = '고개(°)';
+  row.append(l3, numInput(pose.headTilt || 0, 1, v => setPose('headTilt', v), '54px'));
+  box.append(row);
+  const hp = document.createElement('div'); hp.className = 'muted'; hp.textContent = '회전축 (걸을 때 팔다리가 도는 점, 서 있는 자세 기준 좌표)'; box.append(hp);
+  for (const g of B.GROUPS.slice(1)) {
+    sp.pivots[g] ||= [0, 0, 0];
+    box.append(vecRow(GROUP_KO[g], sp.pivots[g], 3, 0.01, () => { save(); rebuild(); }, ['x', 'y', 'z']));
+  }
+}
+
+// ---------------------------------------------------------------- 편집 동작
+function uniqueId(base) { const ids = new Set(spec().parts.map(p => p.id)); let i = 1, id = base; while (ids.has(id)) id = `${base}${++i}`; return id; }
+$('btnAdd').onclick = () => {
+  snapshot();
+  const sp = spec(), ref = sp.parts[sel];
+  const p = { id: uniqueId('new'), shape: 'box', size: [0.05, 0.05, 0.05], pos: ref ? [ref.pos[0] + 0.06, ref.pos[1], ref.pos[2]] : [0, 1, 0], mat: ref?.mat || Object.keys(sp.materials)[0], in: ref?.in || 'root' };
+  sp.parts.push(p); sel = sp.parts.length - 1; commit(); attachSel();
+};
+$('btnDup').onclick = () => {
+  const sp = spec(), p = sp.parts[sel]; if (!p) return;
+  snapshot(); const c = clone(p); c.id = uniqueId(p.id.replace(/\d+$/, '') || p.id); c.pos = [c.pos[0] + 0.03, c.pos[1], c.pos[2]];
+  sp.parts.splice(sel + 1, 0, c); sel++; commit(); attachSel();
+};
+$('btnMirror').onclick = () => {
+  const sp = spec(), p = sp.parts[sel]; if (!p) return;
+  snapshot(); const c = clone(p);
+  const swap = s => s.replace(/L(?=\d*_?\d*$)/, '\u0000').replace(/R(?=\d*_?\d*$)/, 'L').replace('\u0000', 'R');
+  c.id = uniqueId(swap(p.id) === p.id ? `${p.id}M` : swap(p.id));
+  c.pos = [-c.pos[0], c.pos[1], c.pos[2]];
+  if (c.rot) c.rot = [c.rot[0], -c.rot[1], -c.rot[2]];
+  if (c.in === 'armL' || c.in === 'armR' || c.in === 'legL' || c.in === 'legR') c.in = c.in.endsWith('L') ? c.in.slice(0, -1) + 'R' : c.in.slice(0, -1) + 'L';
+  sp.parts.splice(sel + 1, 0, c); sel++; commit(); attachSel();
+};
+$('btnDel').onclick = () => {
+  const sp = spec(); if (sel < 0) return;
+  snapshot(); sp.parts.splice(sel, 1); sel = Math.min(sel, sp.parts.length - 1); commit(); attachSel();
+};
+function doUndo() { if (!undo.length) return; redo.push(JSON.stringify(S.data)); S.data = JSON.parse(undo.pop()); sel = Math.min(sel, spec().parts.length - 1); commit(); }
+function doRedo() { if (!redo.length) return; undo.push(JSON.stringify(S.data)); S.data = JSON.parse(redo.pop()); commit(); }
+$('btnUndo').onclick = doUndo; $('btnRedo').onclick = doRedo;
+addEventListener('keydown', e => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); doRedo(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && !typing) { e.preventDefault(); $('btnDup').click(); }
+  else if (typing) return;
+  else if (e.key === 'Delete') $('btnDel').click();
+  else if (e.key === 'Escape') select(-1);
+  else if (e.key === 'w' || e.key === 'W') gizmo.setMode('translate');
+  else if (e.key === 'e' || e.key === 'E') gizmo.setMode('rotate');
+  else if (e.key === 'r' || e.key === 'R') gizmo.setMode('scale');
+});
+$('search').oninput = renderLists;
+$('noteModel').oninput = e => { S.notes.models[S.model] = e.target.value; save(); };
+$('noteAll').oninput = e => { S.notes.all = e.target.value; save(); };
+$('btnWalk').onclick = () => { walking = !walking; $('btnWalk').classList.toggle('on', walking); if (!walking) rebuild(); };
+$('btnSeed').onclick = () => { seed = (seed % 9999) + 1; rebuild(); };
+$('btnLight').onclick = () => { bright = !bright; applyLight(); };
+$('btnRef').onclick = () => { showRef = !showRef; refGroup.visible = showRef; $('btnRef').classList.toggle('on', showRef); };
+
+// 모델 고르기
+const ms = $('modelSel');
+for (const k of Object.keys(S.data.models)) { const o = document.createElement('option'); o.value = k; o.textContent = MODEL_KO[k] || k; ms.append(o); }
+ms.value = S.model;
+ms.onchange = () => { S.model = ms.value; sel = -1; save(); rebuild(); renderLists(); frame(); };
+function frame() { const h = spec().height || 1.75; orbit.target.set(0, h * 0.55, 0); camera.position.set(h * 0.9, h * 0.85, -h * 1.45); }
+
+// ---------------------------------------------------------------- 내보내기: Claude 에게 줄 내용
+/** 처음 상태와 비교한 바뀐 점 (부품은 이름으로 비교) */
+function diff() {
+  const out = {};
+  for (const [name, m] of Object.entries(S.data.models)) {
+    const b = BASE.models[name], d = {};
+    if (!b) { out[name] = { newModel: m }; continue; }
+    for (const k of ['height', 'pose', 'pivots']) if (JSON.stringify(m[k] ?? null) !== JSON.stringify(b[k] ?? null)) d[k] = m[k];
+    const mats = {};
+    for (const [k, v] of Object.entries(m.materials)) if (JSON.stringify(v) !== JSON.stringify(b.materials[k])) mats[k] = v;
+    if (Object.keys(mats).length) d.materials = mats;
+    const bp = new Map(b.parts.map(p => [p.id, p])), mp = new Map(m.parts.map(p => [p.id, p]));
+    const changed = [], added = [], removed = [];
+    for (const p of m.parts) { const o = bp.get(p.id); if (!o) added.push(p); else if (JSON.stringify(o) !== JSON.stringify(p)) changed.push(p); }
+    for (const p of b.parts) if (!mp.has(p.id)) removed.push(p.id);
+    if (changed.length) d.changed = changed;
+    if (added.length) d.added = added;
+    if (removed.length) d.removed = removed;
+    if (Object.keys(d).length) out[name] = d;
+  }
+  return out;
+}
+function exportText() {
+  const N = S.notes, lines = ['[백룸 모델 편집 결과]', `기준: level0.json ${BASE_STAMP}`, ''];
+  if (N.all?.trim()) lines.push('■ 전체 메모', N.all.trim(), '');
+  for (const name of Object.keys(S.data.models)) {
+    const mn = N.models[name]?.trim(), pn = Object.entries(N.parts[name] || {}).filter(([, v]) => v.trim());
+    if (!mn && !pn.length) continue;
+    lines.push(`■ ${MODEL_KO[name] || name} (${name})`);
+    if (mn) lines.push(mn);
+    for (const [id, v] of pn) lines.push(`  - 부품 ${id}: ${v.trim()}`);
+    lines.push('');
+  }
+  const d = diff();
+  lines.push(Object.keys(d).length ? '■ 직접 고친 데이터 (처음 상태와 다른 것만)' : '■ 직접 고친 데이터: 없음');
+  if (Object.keys(d).length) lines.push('```json', JSON.stringify(d), '```');
+  return lines.join('\n');
+}
+$('btnCopy').onclick = async () => {
+  const text = exportText();
+  try { await navigator.clipboard.writeText(text); toast(`복사했다 (${Math.round(text.length / 1024 * 10) / 10}KB) — Claude 에게 붙여 넣으세요`); }
+  catch { $('dlgText').value = text; $('copyDlg').showModal(); $('dlgText').select(); }
+};
+$('dlgClose').onclick = () => $('copyDlg').close();
+$('btnSave').onclick = () => {
+  const blob = new Blob([JSON.stringify({ ...S.data, notes: S.notes, stamp: BASE_STAMP }, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'backrooms-models.json'; a.click();
+  toast('backrooms-models.json 으로 저장했다 (다운로드 폴더). 이 파일 위치를 Claude 에게 알려 줘도 된다');
+};
+$('btnLoad').onclick = () => $('fileIn').click();
+$('fileIn').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    if (!j.models) throw new Error('models 가 없다');
+    snapshot();
+    S.data = { version: j.version || 1, models: j.models };
+    if (j.notes) S.notes = j.notes;
+    if (!S.data.models[S.model]) S.model = Object.keys(S.data.models)[0];
+    sel = -1; commit(); toast('불러왔다');
+  } catch (err) { toast(`불러오기 실패: ${err.message}`, true); }
+  e.target.value = '';
+};
+$('btnReset').onclick = () => {
+  if (!confirm('모든 수정과 메모를 버리고 처음 상태로 돌아갈까요? (되돌리기로 한 번 복구할 수 있다)')) return;
+  snapshot(); const keep = S.model; S = freshState(); S.model = keep; sel = -1; commit();
+};
+let toastT = 0;
+function toast(msg, err) { const el = $('toast'); el.textContent = msg; el.className = err ? 'err' : ''; el.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => { el.style.display = 'none'; }, 3200); }
+
+applyLight(); resize(); rebuild(); renderLists(); frame();
+window.__editor = { S, spec, select, exportText, rebuild };   // 자동 확인용
+</script>
+</body>
+</html>

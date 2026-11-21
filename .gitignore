@@ -1,4 +1,13 @@
 node_modules/
 .next/
+.next-dev/
 npm-debug.log*
 .DS_Store
+.next-*/
+*.blend1
+# Blender 중간 결과는 tools/blender/*.py 로 다시 만든다. 손으로 다듬을 .blend 와 미리보기만 남긴다
+tools/blender/out/*
+!tools/blender/out/level0-v2.blend
+!tools/blender/out/v2-characters.png
+!tools/blender/out/v2-items.png
+!tools/blender/out/v2-firstperson.png

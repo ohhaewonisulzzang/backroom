@@ -79,6 +79,33 @@ Level 0 은 **1인칭 3D**(three.js)로 플레이한다. 다른 레벨은 지금
   - 실제 그래픽 카드에서의 fps 는 아직 재 보지 않았다
   - 사람 감정 표현 동작(춤 등)은 3D 에서 보이지 않고 말풍선만 뜬다
 
+### Blender 모델과 1인칭 손 (`tools/blender/`, `public/models/`)
+
+Level 0 의 하울러·플레이어·방랑자, 아이템 9종, 1인칭 손·손전등은 Blender 로 만든 `.glb` 를 쓴다 (`public/models/level0/`, `public/models/items/`).
+불러오기 전이나 실패하면 아래 데이터 모델로 대신 그린다.
+
+- **다시 만들기**: Blender 를 켜고(Blender MCP 애드온이 9876 포트를 연다) `python tools/blender/bsend.py tools/blender/models2.py` → `.glb` 를 다시 내보낸다.
+  미리보기는 `python tools/blender/bsend.py tools/blender/render2.py` (`tools/blender/out/v2_*.png`).
+  Claude Code 에는 MCP 서버 `blender`(`uvx blender-mcp@2.0.0`)가 이 프로젝트용으로 등록돼 있다.
+- **만드는 방식**: 같은 부위·재질의 살 조각을 복셀 리메시로 녹여 붙이고(갈비뼈·옷 주름이 표면에 드러난다), 눈구멍·입은 불리언으로 파낸 뒤 면 수를 줄인다
+  (하울러 1.4만, 방호복 1.2만 삼각형). 부위 노드(torso/head/armL/armR/legL/legR)가 게임의 걷기 회전축이다. 게임은 불러올 때 부위·재질별로 메시를 합친다.
+- **1인칭 손** (`game/client/three/viewmodel.js`): 아이템을 들면 오른손이 쥐고, 손전등을 켜면 왼손이 앞으로 겨눈다.
+  숨쉬기·걸음 출렁임·시점 따라오기·바꿀 때 내렸다 올리기, 그리고 쓰는 동작(마시기, 카메라 들어 찍기, 살충제 뿌리기, 조명탄·폭죽 던지기,
+  나침반 펼치기(바늘이 목표를 가리킨다), 투시경 쓰기, 주사기 찌르기)이 있다. 장면을 다 그린 뒤 깊이만 지우고 덧그려서 벽에 파묻히지 않는다.
+
+### 3D 모델 편집기 (`tools/model-editor.html`)
+
+Level 0 의 하울러·플레이어(방호복)·방랑자 3D 모델은 작은 기본 도형 수백 개를 촘촘히 겹친 **부품 목록**(`game/client/three/models/level0.json`)으로 만든다.
+게임은 부위·재질별로 하나로 합쳐 그리므로 부품이 많아도 그리기 호출은 적다.
+
+- **열기**: `tools/model-editor.html` 을 더블클릭한다 (three.js 를 인터넷에서 받는다).
+- **고치기**: 부품을 화면이나 목록에서 고르고 위치·크기·회전·비율·색·확률을 바꾼다. `W`/`E`/`R` 로 이동·회전·크기 손잡이를 쓴다.
+  추가·복제·좌우 대칭·삭제·되돌리기(Ctrl+Z)가 있고, 재질 색·키·자세·회전축도 고칠 수 있다. 수정한 내용은 브라우저에 자동 저장된다.
+- **메모**: 부품마다, 모델마다, 전체에 "수정할 점"을 적는다.
+- **Claude 에게 주기**: "Claude에게 줄 내용 복사"를 누르면 메모와 직접 고친 데이터(처음 상태와 다른 것만)가 복사된다. 대화에 붙여 넣으면 그걸 보고 `level0.json` 을 고친다.
+  "파일로 저장"은 전체 데이터를 `.json` 으로 내려받는다.
+- **다시 만들기**: `level0.json` 이나 빌더(`game/client/three/models/build.js`)를 고친 뒤 `node tools/build-model-editor.mjs` 를 돌리면 편집기 HTML 이 새로 만들어진다.
+
 ### 테스트 모드
 
 개발 서버(`npm run dev`)에서는 게임 중 **`` ` `` 키**(숫자 1 왼쪽)를 누르면 테스트 패널이 열린다.

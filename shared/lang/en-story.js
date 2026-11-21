@@ -239,10 +239,10 @@ export default {
   '아이템': 'Items',
   '조작': 'Controls',
 
-  '컴퓨터나 태블릿으로 접속해서 같이 하자': 'Join me on a computer or tablet',
+  '컴퓨터로 접속해서 같이 하자': 'Join me on a computer',
   '현실에서 노클립하면, 끝없이 이어지는 노란 방에 떨어진다.': 'Noclip out of reality, and you fall into endless yellow rooms.',
-  '휴대폰에서는 플레이할 수 없습니다': 'This game can\'t be played on a phone',
-  '컴퓨터나 태블릿으로 접속하세요.': 'Please visit on a computer or tablet.',
+  '휴대폰·태블릿에서는 플레이할 수 없습니다': 'This game can\'t be played on a phone or tablet',
+  '컴퓨터로 접속하세요.': 'Please visit on a computer.',
   '이 페이지에서는 게임을 미리 둘러볼 수 있어요.': 'Here you can take a look around the game.',
   '링크 복사됨!': 'Link copied!',
   '링크 보내기 / 복사': 'Share / copy link',
@@ -271,6 +271,5 @@ export default {
   '대처법': 'Counter',
   '조작법': 'Controls',
   '컴퓨터': 'Computer',
-  '태블릿은 화면의 이동 스틱 · 조준 스틱 · 버튼으로 조작한다.': 'On tablets, use the on-screen move stick, aim stick and buttons.',
-  '컴퓨터나 태블릿에서 만나요.': 'See you on a computer or tablet.',
+  '컴퓨터에서 만나요.': 'See you on a computer.',
 };

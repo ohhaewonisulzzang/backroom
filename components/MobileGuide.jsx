@@ -6,7 +6,7 @@ import { BESTIARY, typesInLevel, levelsOf } from '../game/client/bestiary.js';
 import { t, getLang, setLang, onLangChange, LANGS } from '../shared/i18n.js';
 
 /**
- * 휴대폰 전용 안내 사이트. 게임은 컴퓨터/태블릿에서만 되므로, 휴대폰에서는 게임 소개를 둘러볼 수 있게 한다.
+ * 휴대폰·태블릿 전용 안내 사이트. 게임은 컴퓨터에서만 되므로, 휴대폰·태블릿에서는 게임 소개를 둘러볼 수 있게 한다.
  *  섹션: 안내(접속 방법) · 이야기 · 게임 방법 · 레벨 탐험(지도 미리보기) · 괴물 도감(움직이는 그림) · 아이템 · 조작법
  */
 const ITEM_DESC = {
@@ -29,7 +29,7 @@ const HOW = [
   ['함께', '최대 4명. 보이스 챗은 거리에 따라 작아지고, 괴물이 들은 목소리를 흉내 내기도 한다.'],
 ];
 const CONTROLS = [['W A S D', '이동'], ['마우스', '조준 / 손전등 방향'], ['Shift', '달리기'], ['C', '웅크리기 (조용히)'], ['F', '손전등'],
-  ['E', '숨기 · 퍼즐 · 쪽지 · 상호작용'], ['1 ~ 4', '아이템 사용'], ['G + 숫자', '아이템 버리기'], [',', '감정 표현'], ['Enter', '채팅'], ['M', '마이크'], ['ESC', '메뉴 · 괴물 도감']];
+  ['E', '숨기 · 퍼즐 · 쪽지 · 상호작용'], ['1 ~ 4', '아이템 사용'], ['G + 숫자', '아이템 버리기'], [',', '감정 표현'], ['Enter', '채팅'], ['M', '마이크'], ['N', '마우스 커서 풀기'], ['ESC', '메뉴 · 괴물 도감']];
 const SECTIONS = [['notice', '접속'], ['story', '이야기'], ['how', '방법'], ['levels', '레벨'], ['monsters', '괴물'], ['items', '아이템'], ['keys', '조작']];
 
 /** 화면에 보일 때만 움직이는 괴물 그림 */
@@ -114,7 +114,7 @@ export default function MobileGuide() {
   const share = async () => {
     const url = window.location.href.split('#')[0];
     try {
-      if (navigator.share) await navigator.share({ title: 'BACKROOMS', text: t('컴퓨터나 태블릿으로 접속해서 같이 하자'), url });
+      if (navigator.share) await navigator.share({ title: 'BACKROOMS', text: t('컴퓨터로 접속해서 같이 하자'), url });
       else { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); }
     } catch { /* 공유 취소 */ }
   };
@@ -140,8 +140,8 @@ export default function MobileGuide() {
         <h1>BACKROOMS</h1>
         <p className="g-sub">{t('현실에서 노클립하면, 끝없이 이어지는 노란 방에 떨어진다.')}</p>
         <div className="g-notice">
-          <b>{t('휴대폰에서는 플레이할 수 없습니다')}</b>
-          <p>{t('컴퓨터나 태블릿으로 접속하세요.')}<br />{t('이 페이지에서는 게임을 미리 둘러볼 수 있어요.')}</p>
+          <b>{t('휴대폰·태블릿에서는 플레이할 수 없습니다')}</b>
+          <p>{t('컴퓨터로 접속하세요.')}<br />{t('이 페이지에서는 게임을 미리 둘러볼 수 있어요.')}</p>
           <button className="g-btn" onClick={share}>{copied ? t('링크 복사됨!') : t('링크 보내기 / 복사')}</button>
         </div>
         <button className="g-down" onClick={() => go('story')}>▼ {t('둘러보기')}</button>
@@ -225,11 +225,10 @@ export default function MobileGuide() {
         <table className="g-keys"><tbody>
           {CONTROLS.map(([k, a]) => <tr key={k}><td><kbd>{t(k)}</kbd></td><td>{t(a)}</td></tr>)}
         </tbody></table>
-        <p className="g-dim">{t('태블릿은 화면의 이동 스틱 · 조준 스틱 · 버튼으로 조작한다.')}</p>
       </section>
 
       <footer className="g-foot">
-        <p>{t('컴퓨터나 태블릿에서 만나요.')}</p>
+        <p>{t('컴퓨터에서 만나요.')}</p>
         <button className="g-btn" onClick={share}>{copied ? t('링크 복사됨!') : t('링크 보내기 / 복사')}</button>
       </footer>
     </div>

@@ -28,7 +28,7 @@ const Game = {
   phase: 'menu',              // menu | connecting | lobby | game
   menu: null,                 // 메인 메뉴 배경 장면 (천천히 떠도는 카메라)
   lobby: null,
-  settings: { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true, threeD: true, quality: 'medium', mouseSens: 1 },
+  settings: { volume: 0.7, shake: true, menuScares: true, deathScares: true, gameScares: true, gore: true, threeD: true, quality: 'medium', mouseSens: 1, fpsCap: 0, showFps: false },
   view3D: false,              // 이번 프레임을 3D(Level 0, three.js)로 그리는가 — 1인칭 조작도 이걸 따른다
   scare: null, scareCd: 0, nextScare: 30,   // 게임 중 점프스케어 { type, t, dur } / 다음까지 최소 간격 / 환각 점프스케어 타이머
   boatIdleT: 0, boatWarned: false,          // 보트 위에서 가만히 있던 시간 (익사자가 발밑에서 솟아나기 전 경고)
@@ -107,6 +107,7 @@ const Game = {
     if (!k?.puzzle || k.collected) return;
     this.puzzleOpen = i;
     Input.keys.clear();
+    Input.unlockPointer();                       // 1인칭: 퍼즐은 마우스로 푼다 (닫은 뒤 화면을 클릭하면 다시 시점 잠금)
     Sound.beep(660);
     UI.showPuzzle?.({ index: i, puzzle: k.puzzle, level: this.levelIndex });
   },
@@ -165,7 +166,7 @@ const Game = {
     this.monsters = (d.monsters || []).map(s => { const m = new ClientMonster(); m.reset(s); return m; });
     this.items = (d.items || []).map(it => ({ ...it }));
     this.flares = (d.flares || []).map(f => ({ ...f, until: this.time + Math.max(0, (f.until - Date.now()) / 1000), dur: 30 }));
-    this.fx = []; this.compassT = 0; this.flashT = 0; this.emoteOpen = false; this.nightVisionT = 0; this.useHold = null; this.effects = [];
+    this.fx = []; this.vmUse = null; this.compassT = 0; this.flashT = 0; this.emoteOpen = false; this.nightVisionT = 0; this.useHold = null; this.effects = [];
     this.noteOpen = false; this.noteRead = false; this.nearNote = false;
     if (this.local) { this.local.adrenalineT = 0; this.local.boostT = 0; }
     this.gore = []; this.hallu = []; this.halluT = 0; this.rainbowT = 0; this.prevSanity = undefined;
@@ -995,6 +996,7 @@ const handlers = {
     const view = Game.viewTarget();
     const near = view ? clamp(1 - Math.hypot(fx.x - view.x, fx.y - view.y) / (TS * 10), 0, 1) : 0;
     const mine = fx.by === Game.myId;
+    if (mine) Game.vmUse = { type: fx.type, t: 0 };   // 3D 1인칭 손: 쓰는 동작
     switch (fx.type) {
       case 'almondWater':      // 정신력 회복 (값은 서버가 계산해 스냅샷으로 온다)
         if (mine) { const p = Game.local; p.sanity = Math.min(CONFIG.SANITY.MAX, (p.sanity ?? 100) + ITEM_TYPES.almondWater.sanity); Game.hallu = []; Sound.drink(); }
@@ -1075,9 +1077,12 @@ const handlers = {
     if (god !== undefined) Game.test.god = god;
     Game.msg(`[TEST] ${text}`, 2.5);
   },
-  onCorrect({ x, y }) {
+  onCorrect({ x, y, why }) {
+    const dx = Game.local.x - x, dy = Game.local.y - y;
+    if (Math.hypot(dx, dy) > 1) console.info(`[위치 보정] ${why || ''} ${Math.round(Math.hypot(dx, dy))}px`);
     Game.local.x = x;
     Game.local.y = y;
+    if (Game.view3D) renderer3d?.onCorrect(dx, dy);   // 3D: 카메라가 휙 튀지 않게 0.15초에 걸쳐 따라간다
   },
   onJoinError({ message, vars }) {
     toMenu(t(message, vars), 'multi');
@@ -1111,6 +1116,7 @@ function sync3D() {
     else Game.level3dDirty = true;
   }
   if (want && Game.level3dDirty) { Game.level3dDirty = false; renderer3d.setLevel(Game.level, Game.settings.quality); }
+  canvas2d?.classList.toggle('free', want && !Input.locked);   // 3D 에서 잠금이 풀려 있으면(N·채팅 등) 커서를 보인다
 }
 
 export function startGame({ canvas, canvas3d: c3d, ui }) {
@@ -1149,7 +1155,10 @@ export function startGame({ canvas, canvas3d: c3d, ui }) {
   };
   const useEnd = () => { Game.useDown = false; Game.useHold = null; };
   Input.onMouseDown(() => {
-    if (Game.view3D && !Game.paused && !Input.locked && Game.phase === 'game') { Input.lockPointer(canvas); return; }   // 1인칭: 첫 클릭은 시점 잠금
+    if (Game.view3D && !Game.paused && !Input.locked && Game.phase === 'game') {   // 1인칭: 첫 클릭은 시점 잠금 (퍼즐·밸브 창이 열려 있으면 그 창을 쓰는 클릭이다)
+      if (Game.puzzleOpen < 0 && Game.valveOpen < 0) Input.lockPointer(canvas);
+      return;
+    }
     useStart();
   });
   // 1인칭: ESC·Alt+Tab 으로 포인터 잠금이 풀리면 일시정지 메뉴 (브라우저가 그 ESC 를 keydown 으로 주지 않는다)
@@ -1172,6 +1181,12 @@ export function startGame({ canvas, canvas3d: c3d, ui }) {
     UI.togglePause?.();
   });
   Input.onAction('chat', () => { if (!Game.paused) Game.openChat(); });
+  // 1인칭: N 으로 마우스 잠금을 풀어 커서를 움직인다 (일시정지 없이). 다시 N 이나 화면 클릭이면 시점 잠금
+  Input.onAction('cursor', () => {
+    if (!Game.view3D || Game.phase !== 'game' || Game.paused || Game.chatOpen) return;
+    if (Input.locked) Input.unlockPointer();
+    else Input.lockPointer(canvas);
+  });
   Input.onAction('mic', () => {
     if (!Voice.enabled) { UI.notify?.(t('보이스 챗이 꺼져 있다 — 설정 → 보이스 챗에서 켜라')); return; }
     const on = Voice.toggleMic();
@@ -1229,10 +1244,38 @@ export function startGame({ canvas, canvas3d: c3d, ui }) {
   Voice.onSpeaking = on => { if (Game.phase === 'game') net.speaking(on); };
   Voice.onState = vc => net.voiceState(vc);
 
-  let raf = 0, last = performance.now();
+  // ---- 프레임: 모니터 주사율(144Hz·240Hz 포함)만큼 돈다. 설정의 '프레임 한도'가 있으면 그 간격이 될 때까지 건너뛴다
+  let raf = 0, last = performance.now(), paced = last, tick = last;
+  const gaps = [];                                   // 최근 rAF 간격 → 모니터 주사율 추정
+  const fpsEl = document.createElement('div');       // 설정 'FPS 표시'
+  fpsEl.className = 'fps-counter';
+  document.body.appendChild(fpsEl);
+  let fpsN = 0, fpsT = 0, gapN = 0;
   const frame = now => {
-    const dt = Math.min(0.05, (now - last) / 1000);
+    raf = requestAnimationFrame(frame);
+    const gap = now - paced; paced = now;
+    if (gap > 0 && gap < 100) { gaps.push(gap); if (gaps.length > 60) gaps.shift(); }
+    if (gaps.length >= 30 && ++gapN % 30 === 0) {
+      // 짧은 쪽 10% 간격 = 모니터 한 번 그리는 시간. 무거운 장면에서 프레임이 떨어져도 주사율을 낮게 잘못 재지 않게 지금까지 잰 값 중 큰 쪽
+      const g = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length * 0.1)];
+      Game.refreshHz = Math.max(Game.refreshHz || 0, Math.min(500, Math.round(1000 / g)));
+    }
+    const cap = Number(Game.settings.fpsCap) || 0;
+    if (cap > 0) {
+      // 아직 다음 프레임 차례가 아니면 건너뛴다. 차례 시각(tick)은 간격만큼씩 나아가므로 60 한도를 144Hz 모니터에서 써도 평균 60 이 된다
+      const iv = 1000 / cap;
+      if (now - tick < iv - 1) return;              // 1ms 여유: rAF 시각이 조금씩 흔들린다
+      tick = Math.max(tick + iv, now - iv);         // 한참 밀렸으면(탭 전환 등) 따라잡으려 몰아 그리지 않는다
+    } else tick = now;
+    Game.fpsTarget = cap > 0 ? Math.min(cap, Game.refreshHz || cap) : (Game.refreshHz || 60);
+    const real = (now - last) / 1000, dt = Math.min(0.05, real);
     last = now;
+    // 화면이 0.25초 넘게 멈췄다면(셰이더 만들기·GC·탭 전환) 그동안 쌓인 마우스 이동을 버린다.
+    // 게임은 dt 를 0.05초로 자르므로 멈춘 동안 몸은 거의 안 움직였는데, 시점만 한꺼번에 돌면 "순간이동"처럼 보인다
+    if (real > 0.25) Input.look.dx = Input.look.dy = 0;
+    fpsN++; fpsT += real;
+    if (fpsT >= 0.5) { fpsEl.textContent = `${Math.round(fpsN / fpsT)} FPS`; fpsN = 0; fpsT = 0; }
+    fpsEl.style.display = Game.settings.showFps ? 'block' : 'none';
     sync3D();
     Game.update(dt);
     if (Game.phase === 'game') {
@@ -1244,7 +1287,6 @@ export function startGame({ canvas, canvas3d: c3d, ui }) {
     }
     else if (Game.phase === 'ending') renderer.renderEnding(Game, dt);
     else if (Game.menu) renderer.renderMenu(Game, dt);
-    raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
   window.Game = Game; Game.renderer = renderer; Game.input = Input; // 디버그용 (브라우저 자동 확인)
@@ -1333,6 +1375,7 @@ export function startGame({ canvas, canvas3d: c3d, ui }) {
     get testMode() { return Game.testMode; },
     destroy() {
       cancelAnimationFrame(raf);
+      fpsEl.remove();
       net.disconnect();
       Input.dispose();
       renderer.dispose();

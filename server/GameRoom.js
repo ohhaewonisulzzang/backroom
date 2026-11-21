@@ -586,7 +586,8 @@ export class GameRoom {
     const solid = passMap(this.map, p.boat).isSolid(Math.floor(s.x / TS), Math.floor(s.y / TS)) || !hasLOS(this.map, p.x, p.y, s.x, s.y);
     p.lastUpdate = now;
     if (moved > maxStep || solid) {
-      this.io.to(id).emit('correct', { x: p.x, y: p.y });
+      // why: 클라이언트 콘솔에 남는다 (순간이동처럼 보이는 되돌림의 원인 추적용)
+      this.io.to(id).emit('correct', { x: p.x, y: p.y, why: solid ? 'wall' : `speed ${Math.round(moved)}>${Math.round(maxStep)}` });
       return;
     }
     p.applyInput(s);

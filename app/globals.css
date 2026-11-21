@@ -19,6 +19,7 @@ canvas#game { display: block; position: relative; cursor: crosshair; image-rende
 canvas#game3d { display: none; position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
 canvas#game3d.on { display: block; }
 canvas#game.over3d { cursor: none; }
+canvas#game.over3d.free { cursor: default; }   /* N 으로 마우스 잠금을 풀었을 때 */
 
 #overlay {
   position: fixed; inset: 0;
@@ -464,3 +465,10 @@ label.check:hover { color: var(--yellow); }
 .fs-tip .fs-x { border: none; color: var(--muted); padding: 0 6px; font-size: 20px; }
 .fs-tip .fs-x:hover { color: var(--yellow); background: none; }
 @keyframes fsin { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* 설정 'FPS 표시' (엔진이 만든다) */
+.fps-counter {
+  position: fixed; top: 8px; right: 10px; z-index: 40; pointer-events: none;
+  font: 12px/1 monospace; color: #e8e0b0; background: rgba(0, 0, 0, .55); padding: 4px 6px; border-radius: 3px;
+  display: none;
+}

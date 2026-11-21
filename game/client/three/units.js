@@ -36,5 +36,7 @@ export function facingPan(dx, dy, angle) {
   return Math.sin(Math.atan2(dy, dx) - angle);
 }
 
-/** 3D 로 그릴지: Level 0 + 설정 '3D 화면' 켜짐 + WebGL 사용 가능 */
-export const shouldUse3D = (levelIndex, settings, webgl) => levelIndex === 0 && settings?.threeD !== false && !!webgl;
+/** 3D 로 지은 레벨 (LEVELS 순번): Level 0 로비, Level 1 거주 구역(콘크리트) */
+export const LEVELS_3D = [0, 1];
+/** 3D 로 그릴지: 3D 레벨 + 설정 '3D 화면' 켜짐 + WebGL 사용 가능 */
+export const shouldUse3D = (levelIndex, settings, webgl) => LEVELS_3D.includes(levelIndex) && settings?.threeD !== false && !!webgl;

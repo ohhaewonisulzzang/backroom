@@ -2,6 +2,11 @@ import * as THREE from 'three';
 import { SUIT_HEX, MODE_RULES, CONFIG, TS } from '../../../shared/config.js';
 import { hasLOS } from '../../../shared/physics.js';
 import { toM, yawFromAngle, CEIL_H } from './units.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { buildModel, poseWalk, seedOf } from './models/build.js';
+import level0Models from './models/level0.json';
+import { ASSETS, loadAssets, cloneCharacter, cloneItem } from './assets.js';
+import { makeSmiler, makeStealer, tintMimicVisor, animateSmiler, makeTerminal } from './creatures.js';
 
 /**
  * 3D 배우와 사물: 하울러, 방호복 사람(다른 플레이어·방랑자), 열쇠·아이템·사물함·출구·쪽지·시체·조명탄·마닐라 룸 문.
@@ -11,67 +16,45 @@ import { toM, yawFromAngle, CEIL_H } from './units.js';
 const TM = 1.5;
 const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
-/** 팔다리 회전축(어깨·엉덩이)을 가진 팔다리 하나 */
-function limb(len, r, mat, x, y) {
-  const pivot = new THREE.Group();
-  pivot.position.set(x, y, 0);
-  const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 8), mat);
-  m.position.y = -len / 2 - r;
-  pivot.add(m);
-  return pivot;
+/*
+ * 사람·괴물 모델은 데이터(models/level0.json)로 짓는다: 작은 기본 도형을 촘촘히 겹친 부품 수백 개를
+ * 부위·재질별로 하나로 합쳐 그린다 (그리기 호출 수십 개). 생김새는 tools/model-editor.html 에서 고친다.
+ */
+const MODELS = level0Models.models;
+const build = (spec, opts) => buildModel(THREE, spec, { merge: true, mergeGeometries, ...opts });
+
+/*
+ * Blender 모델(public/models/*.glb)을 다 불러오면 그걸 쓰고, 그 전에는 데이터 모델로 대신 그린다.
+ * (불러오면 ActorLayer 가 이미 만든 배우를 Blender 모델로 바꿔 끼운다)
+ */
+/** 하울러: 키 2.3m, 깡마른 검은 몸, 긴 팔, 어둠 속에서 빛나는 눈. seed 로 생김새가 조금씩 다르다 */
+export function makeHowler(seed = 1) { return (ASSETS.ready && cloneCharacter('howler')) || build(MODELS.howler, { seed }); }
+
+/** 방호복 사람: 키 1.75m. faded = 방랑자 (빛바랜 색, 찢어지고 장비가 빠진 모습) */
+export function makeHazmat(colorHex, faded = false, seed = 1) {
+  const hex = typeof colorHex === 'number' ? `#${colorHex.toString(16).padStart(6, '0')}` : (colorHex || SUIT_HEX.default);
+  return (ASSETS.ready && cloneCharacter(faded ? 'wanderer' : 'player', { tint: faded ? null : hex })) || build(faded ? MODELS.wanderer : MODELS.player, { tint: hex, faded, seed });
 }
 
-/** 하울러: 키 2.3m, 깡마른 검은 몸, 긴 팔, 어둠 속에서 빛나는 눈 */
-export function makeHowler() {
-  const g = new THREE.Group();
-  const skin = lambert(0x14110d), dark = lambert(0x070605);
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.75, 4, 10), skin);
-  body.position.y = 1.55; body.scale.set(1, 1, 0.75);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), dark);
-  head.position.set(0, 2.12, -0.04); head.scale.set(0.9, 1.25, 1);
-  const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.1), dark);
-  jaw.position.set(0, 1.98, -0.13);
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffe6a0, fog: false });
-  const eyes = new THREE.Group();
-  for (const x of [-0.06, 0.06]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), eyeMat); e.position.set(x, 2.16, -0.17); eyes.add(e); }
-  const armL = limb(0.95, 0.05, skin, -0.24, 1.88), armR = limb(0.95, 0.05, skin, 0.24, 1.88);
-  const legL = limb(0.85, 0.065, skin, -0.1, 1.05), legR = limb(0.85, 0.065, skin, 0.1, 1.05);
-  const torso = new THREE.Group();     // 숙일 때 위쪽만 기울인다
-  torso.position.y = 1.05;
-  for (const o of [body, head, jaw, eyes, armL, armR]) { o.position.y -= 1.05; torso.add(o); }
-  g.add(torso, legL, legR);
-  g.userData = { eyes, eyeMat, torso, limbs: { armL, armR, legL, legR }, height: 2.3, kind: 'howler' };
-  return g;
-}
+export { poseWalk };
 
-/** 방호복 사람: 키 1.75m. faded = 빛바랜 색 (방랑자) */
-export function makeHazmat(colorHex, faded = false) {
-  const g = new THREE.Group();
-  const c = new THREE.Color(colorHex || SUIT_HEX.default);
-  if (faded) { const hsl = {}; c.getHSL(hsl); c.setHSL(hsl.h, hsl.s * 0.45, hsl.l * 0.75); }
-  const suit = lambert(c), dark = lambert(0x1a1a18), visorMat = lambert(0x0d1518, { emissive: 0x0a1418 });
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.5, 4, 10), suit);
-  body.position.y = 1.1;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), suit);
-  head.position.y = 1.58;
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.06), visorMat);
-  visor.position.set(0, 1.6, -0.13);
-  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.36, 0.14), dark);
-  pack.position.set(0, 1.15, 0.22);
-  const armL = limb(0.5, 0.06, suit, -0.27, 1.38), armR = limb(0.5, 0.06, suit, 0.27, 1.38);
-  const legL = limb(0.6, 0.075, suit, -0.1, 0.78), legR = limb(0.6, 0.075, suit, 0.1, 0.78);
-  g.add(body, head, visor, pack, armL, armR, legL, legR);
-  g.userData = { limbs: { armL, armR, legL, legR }, height: 1.75, kind: 'hazmat' };
-  return g;
-}
-
-/** 걷기 자세: 팔다리 흔들기. speed 0..1, crouch 면 낮게 */
-export function poseWalk(group, phase, speed, crouch = false) {
-  const L = group.userData.limbs; if (!L) return;
-  const s = Math.sin(phase) * 0.7 * speed;
-  L.legL.rotation.x = s; L.legR.rotation.x = -s;
-  L.armL.rotation.x = -s * 0.8; L.armR.rotation.x = s * 0.8;
-  group.scale.y = crouch ? 0.65 : 1;
+/** 움직이지 않는 사물들을 재질별로 하나로 합친다 (자식 메시까지, 월드 좌표로 굽는다) */
+function mergeStatic(group) {
+  group.updateMatrixWorld(true);
+  const byMat = new Map();
+  group.traverse(o => { if (o.isMesh) { if (!byMat.has(o.material)) byMat.set(o.material, []); byMat.get(o.material).push(o); } });
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert(), m = new THREE.Matrix4();
+  for (const [mat, list] of byMat) {
+    if (list.length < 2) continue;
+    const geos = list.map(o => { const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); return g.applyMatrix4(m.multiplyMatrices(inv, o.matrixWorld)); });
+    const merged = mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    if (!merged) continue;
+    for (const o of list) { o.geometry.dispose(); o.removeFromParent(); }
+    group.add(new THREE.Mesh(merged, mat));
+  }
+  const empty = []; group.traverse(o => { if (o !== group && !o.isMesh && !o.isLight && !o.children.length) empty.push(o); });
+  for (const o of empty) o.removeFromParent();
 }
 
 /** 벽에 붙일 방향: 칸 (tx, ty) 둘레에서 벽이 있는 쪽 (N 우선). 반환: { x, z, yaw } — 벽 앞면 위치와 벽을 등지는 yaw */
@@ -98,17 +81,47 @@ function textTex(text, color) {
 const ITEM_COLOR = { almondWater: 0xaadcf0, staminaDrink: 0x78e66e, camera: 0xdcdcc8, bugSpray: 0xe6d25a, flare: 0xf06e5a, compass: 0xe6c88c, firecracker: 0xff7850, nightVision: 0x6eff82, adrenaline: 0xff6e96 };
 
 /**
+ * 몬스터 모습 키: 바뀌면 모델을 다시 짓는다.
+ * 스킨 스틸러는 정체를 드러내기 전엔 플레이어와 같은 방호복(그 색), 드러내면 정체 모델
+ */
+function monsterLook(m) {
+  if (m.type === 'skinStealer') return m.revealed ? 'stealer' : `mimic:${m.color || 'default'}`;
+  return m.type === 'howler' || m.type === 'smiler' ? m.type : 'wanderer';
+}
+
+function makeMonster(m, look) {
+  const seed = seedOf(m.id);
+  if (look === 'howler') return makeHowler(seed);
+  if (look === 'smiler') return makeSmiler(seed);
+  if (look === 'stealer') return makeStealer(seed);
+  if (look.startsWith('mimic:')) { const a = makeHazmat(SUIT_HEX[m.color] || SUIT_HEX.default, false, seed); tintMimicVisor(a); return a; }
+  return makeHazmat(SUIT_HEX[m.color] || SUIT_HEX.default, true, seed);   // 방랑자 (그 밖의 아직 3D 모델이 없는 엔티티도)
+}
+
+/** 바닥 칸 (tx, ty) 에서 가장 트인 쪽을 보는 yaw (단말기 화면이 벽을 보지 않게) */
+function openYaw(map, tx, ty) {
+  let best = 0, bestN = -1;
+  for (const [dx, dy, yaw] of [[0, 1, 0], [1, 0, Math.PI / 2], [0, -1, Math.PI], [-1, 0, -Math.PI / 2]]) {
+    let n = 0; while (n < 4 && !map.isSolid(tx + dx * (n + 1), ty + dy * (n + 1))) n++;
+    if (n > bestN) { bestN = n; best = yaw; }
+  }
+  return best;
+}
+
+/**
  * 배우·사물 층. setLevel 에서 고정 사물을 짓고, update 에서 움직이는 것들을 맞춘다.
  * lightAt(xPx, yPx) → 0..1: 그 자리의 형광등 밝기 (구워 둔 밝기). 배우가 형광등 아래에서 밝게 보이게 쓴다
  */
 export class ActorLayer {
   constructor(scene, lightAt) {
+    loadAssets();                          // Blender 모델 불러오기 (끝나면 배우를 바꿔 끼운다)
     this.scene = scene; this.lightAt = lightAt;
     this.group = new THREE.Group(); this.group.name = 'actors';
     scene.add(this.group);
     this.monsters = new Map(); this.players = new Map();
     this.items = new Map(); this.keys = []; this.corpses = new Map(); this.flareMeshes = new Map();
     this.time = 0;
+    this.rtLit = false;                    // 울트라: 형광등 빛을 레이 트레이서가 직접 준다
     this.xrayMat = new THREE.MeshBasicMaterial({ color: 0x58ff70, transparent: true, opacity: 0.35, depthTest: false, depthWrite: false, fog: false });
     this.xrayGeo = new THREE.CapsuleGeometry(0.28, 1, 4, 8);
   }
@@ -129,6 +142,7 @@ export class ActorLayer {
       for (let k = 0; k < 4; k++) { const v = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, 0.01), lockDark); v.position.set(-0.25, 0.7 - k * 0.06, -0.255); box.add(v); }
       fixed.add(box);
     }
+    mergeStatic(fixed);   // 사물함 수십 개 × 부품 6개 → 재질별로 메시 하나씩 (그리기 호출 수 줄이기)
     // 출구 문 + EXIT 표지
     const ex = level.exitIdx % map.w, ey = (level.exitIdx / map.w) | 0;
     const es = wallSpot(map, ex, ey, 0.02);
@@ -153,6 +167,15 @@ export class ActorLayer {
       const glow = new THREE.PointLight(0xffc880, 0.8, 2.5, 2); glow.position.set(s.x, 0.3, s.z); fixed.add(glow);
     }
     this.group.add(fixed);
+    // 퍼즐 단말기 (열쇠가 그 안에 잠겨 있다. 풀면 사라진다)
+    this.terminals = (level.keys || []).map(k => {
+      if (!k.puzzle) return null;
+      const t = makeTerminal();
+      t.position.set(toM(k.x), 0, toM(k.y));
+      t.rotation.y = openYaw(map, Math.floor(k.x / TS), Math.floor(k.y / TS));
+      this.group.add(t);
+      return t;
+    });
     // 열쇠
     const keyMat = new THREE.MeshLambertMaterial({ color: 0xe8c040, emissive: 0x6a5010 });
     this.keyMat = keyMat;
@@ -174,7 +197,7 @@ export class ActorLayer {
     const ghost = !!game.modes?.ghostEntities, map = game.map;
     const range = CONFIG.VIEW_RANGE;
     const tint = (obj, x, y) => {                       // 형광등 아래면 자체 발광을 조금 (Lambert 는 실시간 조명만 받으므로)
-      const L = this.lightAt(x, y) * 0.35;
+      const L = this.rtLit ? 0 : this.lightAt(x, y) * 0.35;   // 울트라(레이 트레이싱)는 진짜 빛을 받으므로 흉내 내지 않는다
       obj.traverse(o => { if (o.isMesh && o.material.emissive && !o.userData.keepEmissive) o.material.emissive.setRGB(o.material.color.r * L, o.material.color.g * L, o.material.color.b * L); });
     };
     // ---- 몬스터 ----
@@ -183,15 +206,18 @@ export class ActorLayer {
       if (m.active === false) continue;
       seenM.add(m.id);
       let a = this.monsters.get(m.id);
+      const want = monsterLook(m);                       // 스킨 스틸러는 정체를 드러내면 모델이 바뀐다
+      if (a && ((ASSETS.ready && !a.userData.glb && !a.userData.final) || a.userData.want !== want)) { this.disposeObj(a); this.monsters.delete(m.id); a = null; }   // Blender 모델로 바꿔 끼우기 / 모습이 바뀜
       if (!a) {
-        a = m.type === 'howler' ? makeHowler() : makeHazmat(SUIT_HEX[m.color] || SUIT_HEX.default, true);
+        a = makeMonster(m, want);
+        a.userData.want = want;
         a.userData.phase = 0; a.userData.last = { x: m.x, y: m.y };
         this.addXray(a);
         a.traverse(o => { if (o.isMesh && o !== a.userData.xray) o.castShadow = true; });
         this.group.add(a); this.monsters.set(m.id, a);
       }
       const d = Math.hypot(m.x - view.x, m.y - view.y);
-      let vis = bright || hasLOS(map, view.x, view.y, m.x, m.y);
+      let vis = (bright || hasLOS(map, view.x, view.y, m.x, m.y)) && !(m.type === 'smiler' && m.state === 'vanished');
       if (nv) vis = d < range;
       if (ghost && d > MODE_RULES.GHOST) vis = false;   // '보이지 않는 공포' 모드
       a.visible = vis;
@@ -199,9 +225,10 @@ export class ActorLayer {
       if (!vis && !a.userData.xray.visible) continue;
       this.placeActor(a, m, dt);
       const chase = m.state === 'chase';
-      if (a.userData.torso) a.userData.torso.rotation.x = chase ? -0.26 : -0.05;   // 쫓을 땐 앞으로 숙인다
-      if (a.userData.eyeMat) a.userData.eyeMat.color.setHex(chase ? 0xfff2c0 : 0xb89a50);
-      tint(a, m.x, m.y);
+      if (m.type === 'howler' && a.userData.torso) a.userData.torso.rotation.x = (a.userData.torso.userData.baseLean || 0) + (chase ? -0.26 : -0.05);   // 쫓을 땐 앞으로 숙인다
+      if (a.userData.eyeMat) { a.userData.eyeMat.color.setHex(chase ? 0xfff2c0 : 0xb89a50); a.userData.eyeMat.emissive?.setHex(chase ? 0xfff2c0 : 0x8a7038); }
+      if (m.type === 'smiler') animateSmiler(a, m, this.time, camera);
+      else tint(a, m.x, m.y);
     }
     for (const [id, a] of this.monsters) if (!seenM.has(id)) { this.disposeObj(a); this.monsters.delete(id); }
     // ---- 다른 플레이어 ----
@@ -209,9 +236,9 @@ export class ActorLayer {
     for (const p of game.remotes.values()) {
       seenP.add(p.id);
       let a = this.players.get(p.id);
-      if (!a || a.userData.color !== p.color) {
+      if (!a || a.userData.color !== p.color || (ASSETS.ready && !a.userData.glb)) {
         if (a) this.disposeObj(a);
-        a = makeHazmat(SUIT_HEX[p.color] || SUIT_HEX.default, false);
+        a = makeHazmat(SUIT_HEX[p.color] || SUIT_HEX.default, false, seedOf(p.id));
         a.userData.color = p.color; a.userData.phase = 0; a.userData.last = { x: p.x, y: p.y };
         this.addXray(a);
         a.traverse(o => { if (o.isMesh && o !== a.userData.xray) o.castShadow = true; });
@@ -231,6 +258,7 @@ export class ActorLayer {
     }
     for (const [id, a] of this.players) if (!seenP.has(id)) { this.disposeObj(a); this.players.delete(id); }
     // ---- 열쇠 ----
+    game.keys.forEach((k, i) => { const t = this.terminals?.[i]; if (t) t.visible = !k.collected; });
     game.keys.forEach((k, i) => { const g = this.keys[i]; if (!g) return; g.visible = !k.collected && !k.puzzle; g.rotation.y = this.time * 1.5 + i; g.position.y = 0.9 + Math.sin(this.time * 2 + i) * 0.04; });
     // ---- 바닥 아이템 ----
     const seenI = new Set();
@@ -238,13 +266,22 @@ export class ActorLayer {
       const key = it.id ?? `${it.x},${it.y},${it.type}`; seenI.add(key);
       let o = this.items.get(key);
       if (!o) {
-        const col = ITEM_COLOR[it.type] || 0xdcdcc8;
-        o = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.1), new THREE.MeshLambertMaterial({ color: col, emissive: new THREE.Color(col).multiplyScalar(0.35) }));
-        o.userData.keepEmissive = true;
-        o.position.set(toM(it.x), 0.12, toM(it.y));
+        const model = ASSETS.ready && cloneItem(it.type);
+        if (model) {                                     // Blender 아이템 모델 (실제 크기보다 조금 크게, 바닥에서 살짝 떠서 돈다)
+          // 점 조명은 달지 않는다 (아이템 수만큼 조명이 늘면 모든 재질이 무거워지고, 줍거나 떨어질 때마다 셰이더를 다시 만든다)
+          o = new THREE.Group(); model.scale.setScalar(1.6); o.add(model);
+          o.userData.glb = true;
+        } else {
+          const col = ITEM_COLOR[it.type] || 0xdcdcc8;
+          o = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.1), new THREE.MeshLambertMaterial({ color: col, emissive: new THREE.Color(col).multiplyScalar(0.35) }));
+          o.userData.keepEmissive = true;
+        }
+        o.position.set(toM(it.x), 0.18, toM(it.y));
         this.group.add(o); this.items.set(key, o);
       }
       o.rotation.y = this.time * 0.8;
+      if (o.userData.glb) o.position.y = 0.16 + Math.sin(this.time * 2 + (o.id % 7)) * 0.025;
+      if (ASSETS.ready && !o.userData.glb) { this.disposeObj(o); this.items.delete(key); }   // 다음 프레임에 Blender 모델로
     }
     for (const [k, o] of this.items) if (!seenI.has(k)) { this.disposeObj(o); this.items.delete(k); }
     // ---- 시체 ----
@@ -303,16 +340,20 @@ export class ActorLayer {
   disposeObj(o) {
     this.group.remove(o);
     o.traverse(c => {
-      if (c.geometry && c.geometry !== this.xrayGeo) c.geometry.dispose();
-      if (c.material && c.material !== this.xrayMat && c.material !== this.keyMat) { c.material.map?.dispose?.(); c.material.dispose(); }
+      if (c.geometry && c.geometry !== this.xrayGeo && !c.userData.sharedAsset) c.geometry.dispose();   // Blender 모델 지오메트리는 원본과 공유
+      const shared = c.userData.sharedAsset && !c.userData.ownMaterial;   // 아이템 모델 재질은 원본과 공유
+      if (c.material && c.material !== this.xrayMat && c.material !== this.keyMat && !shared) { c.material.map?.dispose?.(); c.material.dispose(); }
       c.dispose?.();
     });
+    for (const t of o.userData.ownTex || []) t.dispose();   // creatures.js 가 만든 캔버스 텍스처 (재질에 안 붙어 있는 것까지)
   }
 
   clear() {
     for (const m of [this.monsters, this.players, this.items, this.corpses, this.flareMeshes]) { for (const o of m.values()) this.disposeObj(o); m.clear(); }
     for (const k of this.keys) this.disposeObj(k);
     this.keys = [];
+    for (const t of this.terminals || []) if (t) this.disposeObj(t);
+    this.terminals = [];
     if (this.fixed) { this.disposeObj(this.fixed); this.fixed = null; }
     this.exitTex?.open.dispose(); this.exitTex = null; this.exitSign = null;
     this.keyMat?.dispose(); this.keyMat = null;

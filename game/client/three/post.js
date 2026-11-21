@@ -10,6 +10,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
  *  low    : 그레인 + 비네트 (+ 정신력·야간 투시경·덜러 색)
  *  medium : + 형광등 블룸
  *  high   : + 색수차
+ *  ultra  : 레이 트레이싱 결과(rt.js, 감마가 걸린 LDR)를 선형으로 풀어서 같은 효과를 건다
  * 그레인 세기 = 0.06 + danger * 0.12. 정신력이 낮을수록 채도가 빠지고 가장자리가 어두워진다.
  * 야간 투시경은 초록 단색, 덜러 근처는 회색 (2D 오버레이 캔버스의 합성 모드로는 WebGL 화면을 물들일 수 없어서 여기서 한다)
  */
@@ -42,12 +43,24 @@ const CamShader = {
     }`,
 };
 
+/** 레이 트레이싱 결과(감마 2.2) → 선형. 첫 패스라 앞 버퍼는 읽지 않는다 */
+const RTInShader = {
+  uniforms: { tSrc: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'uniform sampler2D tSrc; varying vec2 vUv; void main() { gl_FragColor = vec4(pow(texture2D(tSrc, vUv).rgb, vec3(2.2)), 1.0); }',
+};
+
 export class PostFx {
-  constructor(gl, scene, camera, quality) {
+  /** rtTexture 가 있으면 장면을 그리지 않고 그 텍스처(레이 트레이싱 결과)에서 시작한다 */
+  constructor(gl, scene, camera, quality, rtTexture = null) {
     this.gl = gl; this.scene = scene; this.camera = camera; this.quality = quality;
     const size = gl.getSize(new THREE.Vector2());
     this.composer = new EffectComposer(gl);
-    this.composer.addPass(new RenderPass(scene, camera));
+    if (rtTexture) {
+      const src = new ShaderPass(RTInShader, 'tNone');   // tDiffuse 가 없으니 앞 버퍼를 끼워 넣지 않는다
+      src.uniforms.tSrc.value = rtTexture;
+      this.composer.addPass(src);
+    } else this.composer.addPass(new RenderPass(scene, camera));
     if (quality !== 'low') {
       this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.6, 0.5, 0.85);
       this.composer.addPass(this.bloom);
@@ -68,7 +81,7 @@ export class PostFx {
     const u = this.cam.uniforms;
     u.uTime.value = (u.uTime.value + dt) % 100;
     u.uGrain.value = 0.06 + (game.danger || 0) * 0.12 + (game.deathT > 0 ? 0.2 : 0);
-    u.uCA.value = this.quality === 'high' ? 0.006 + (game.sanityLevel || 0) * 0.01 : 0;
+    u.uCA.value = this.quality === 'high' || this.quality === 'ultra' ? 0.006 + (game.sanityLevel || 0) * 0.01 : 0;
     u.uSat.value = 1 - (game.sanityLevel || 0) * 0.8;
     u.uNV.value = game.nightVisionT > 0 ? 1 : 0;
     u.uDull.value = Math.min(0.95, Math.max(game.dull || 0, game.dullFlash || 0));

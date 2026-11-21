@@ -2,9 +2,14 @@ import * as THREE from 'three';
 import { CONFIG, TS } from '../../../shared/config.js';
 import { hasLOS } from '../../../shared/physics.js';
 import { toM, CEIL_H } from './units.js';
+import { theme3D } from './materials.js';
 
-const LAMP = 0xfff2c8;                     // 따뜻한 흰색 형광등
-const QN = { low: { lamps: 3, remote: 1, shadows: false }, medium: { lamps: 5, remote: 2, shadows: false }, high: { lamps: 8, remote: 2, shadows: true } };
+const QN = {
+  low: { lamps: 3, remote: 1, shadows: false }, medium: { lamps: 5, remote: 2, shadows: false }, high: { lamps: 8, remote: 2, shadows: true },
+  ultra: { lamps: 96, remote: 2, shadows: false, rt: true },   // 레이 트레이싱: 가까운 형광등 96개가 진짜 빛 (그림자·간접광은 rt.js)
+};
+// 레이 트레이싱 조명 세기 (거리 제곱에 반비례: 밝기 = 세기 / d²). 천장 등 바로 아래 바닥(약 2.6m)이 구워 둔 밝기와 비슷하도록
+const RT = { LAMP: 3.2, RANGE2: 15 * 15, FLASH: 9, REMOTE: 9 };
 
 /**
  * Level 0 조명:
@@ -12,12 +17,36 @@ const QN = { low: { lamps: 3, remote: 1, shadows: false }, medium: { lamps: 5, r
  *  - 깜빡임 밝기: 꺼진 등의 기여만큼 구워 둔 밝기 텍스처(lightTex)를 깎는다 (shared/map.js buildLighting 3단계와 같은 식)
  *  - 카메라에서 가까운 켜진 등 몇 개만 실시간 PointLight (괴물·사람·사물에 빛이 떨어지게)
  *  - 손전등: 내 것은 카메라에 붙인 SpotLight, 다른 사람 것은 가까운 몇 명만 SpotLight + 옅은 빛줄기
+ *  - 울트라(레이 트레이싱): 패널은 화면에만 빛나고(InstancedMesh 는 못 쓰므로 합친 메시 + 깜빡이는 등은 따로),
+ *    빛은 가까운 등 96개에 붙인 PointLight 가 낸다. 등-조명 짝은 범위를 벗어날 때만 바꾼다 (자주 바꾸면 노이즈가 남는다)
  */
+/** 같은 모양(BoxGeometry 복제본)의 상자들을 한 BufferGeometry 로 */
+function mergeBoxes(geos) {
+  const n = geos.reduce((a, g) => a + g.attributes.position.count, 0), ic = geos.reduce((a, g) => a + g.index.count, 0);
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), uv = new Float32Array(n * 2), idx = new Uint32Array(ic);
+  let v = 0, k = 0;
+  for (const g of geos) {
+    pos.set(g.attributes.position.array, v * 3); nor.set(g.attributes.normal.array, v * 3); uv.set(g.attributes.uv.array, v * 2);
+    for (const i of g.index.array) idx[k++] = i + v;
+    v += g.attributes.position.count;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  out.computeBoundingSphere();
+  return out;
+}
+
 export class LightRig {
   constructor(scene, camera, level, lightTex, quality, flickers) {
     this.scene = scene; this.camera = camera; this.level = level; this.lightTex = lightTex;
     this.q = QN[quality] || QN.medium;
     this.flickers = flickers || [];
+    const th = theme3D(level);
+    this.panelHex = th.panel;              // 테마 색: Level 0 은 따뜻한 흰색, Level 1 콘크리트는 차가운 흰색
+    const LAMP = th.lamp;
     this.group = new THREE.Group(); this.group.name = 'lights';
     scene.add(this.group);
     const lights = level.lights || [];
@@ -25,15 +54,18 @@ export class LightRig {
 
     // ---- 천장 패널 ----
     this.panelGeo = new THREE.BoxGeometry(0.6, 0.03, 1.2);
-    this.panelMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    this.panels = new THREE.InstancedMesh(this.panelGeo, this.panelMat, Math.max(1, lights.length));
-    const m = new THREE.Matrix4(), on = new THREE.Color(0xfff6d8);
-    lights.forEach((l, i) => {
-      m.makeTranslation(toM(l.x), CEIL_H - 0.016, toM(l.y));
-      this.panels.setMatrixAt(i, m); this.panels.setColorAt(i, on);
-    });
-    this.panels.count = lights.length;
-    this.group.add(this.panels);
+    if (this.q.rt) this.buildRTPanels(lights);
+    else {
+      this.panelMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      this.panels = new THREE.InstancedMesh(this.panelGeo, this.panelMat, Math.max(1, lights.length));
+      const m = new THREE.Matrix4(), on = new THREE.Color(this.panelHex);
+      lights.forEach((l, i) => {
+        m.makeTranslation(toM(l.x), CEIL_H - 0.016, toM(l.y));
+        this.panels.setMatrixAt(i, m); this.panels.setColorAt(i, on);
+      });
+      this.panels.count = lights.length;
+      this.group.add(this.panels);
+    }
 
     // ---- 깜빡임용: 등마다 칸별 기여 (꺼지면 빼고 켜지면 더한다) ----
     const L = { ...CONFIG.LIGHTS, ...(level.info?.lights || {}) }, map = level.map, w = map.w;
@@ -56,8 +88,10 @@ export class LightRig {
 
     // ---- 가까운 실시간 형광등 ----
     this.lampPool = [];
+    this.lampOf = new Map();               // (울트라) 조명 → 맡은 등
     for (let i = 0; i < this.q.lamps; i++) {
-      const p = new THREE.PointLight(LAMP, 0, 6, 2);
+      const p = this.q.rt ? new THREE.PointLight(LAMP, 0, 0, 2) : new THREE.PointLight(LAMP, 0, 6, 2);
+      if (this.q.rt) p.userData.rtRadius = 0.28;   // 패널 크기만 한 광원 → 부드러운 그림자
       this.lampPool.push(p); this.group.add(p);
     }
 
@@ -65,6 +99,7 @@ export class LightRig {
     this.flash = new THREE.SpotLight(0xfff8e8, 0, 14, 0.42, 0.65, 1.6);
     this.flash.position.set(0.18, -0.25, 0);
     this.flash.target.position.set(0, -0.2, -1);
+    this.flash.userData.rtRadius = 0.04;
     if (this.q.shadows) { this.flash.castShadow = true; this.flash.shadow.mapSize.set(512, 512); this.flash.shadow.camera.near = 0.1; }
     camera.add(this.flash, this.flash.target);
 
@@ -83,6 +118,34 @@ export class LightRig {
     this.ambientBoost = 0;
   }
 
+  /** 울트라: 켜진 등은 한 메시로 합치고, 깜빡이는 등만 따로 (재질을 켜짐/꺼짐으로 바꿔 끼운다) */
+  buildRTPanels(lights) {
+    const mk = (emissive, k) => {
+      const m = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive, emissiveIntensity: k, roughness: 0.6 });
+      m.userData.rtNoAreaLight = true;     // 빛은 PointLight 가 낸다 (발광 면 표본은 256개 한도라 1000개 넘는 패널엔 못 쓴다)
+      return m;
+    };
+    this.rtOn = mk(this.panelHex, 2.4); this.rtOff = mk(0x000000, 0); this.rtOff.color.set(0x2a2820);
+    const steady = [], flick = new Map();
+    for (const l of lights) {
+      const g = this.panelGeo.clone().translate(toM(l.x), CEIL_H - 0.016, toM(l.y));
+      if (l.flicker) {
+        const mesh = new THREE.Mesh(g, this.rtOn);
+        mesh.userData.rtExclude = true;
+        flick.set(l, mesh); this.group.add(mesh);
+      } else steady.push(g);
+    }
+    if (steady.length) {
+      const merged = mergeBoxes(steady);
+      for (const g of steady) g.dispose();
+      const mesh = new THREE.Mesh(merged, this.rtOn);
+      mesh.userData.rtExclude = true;      // 천장에 붙은 얇은 판: 그림자를 드리우면 등 바로 아래가 어두워진다
+      this.group.add(mesh);
+      this.rtSteady = mesh;
+    }
+    this.rtFlick = flick;
+  }
+
   /** 꺼지고 켜진 등의 기여를 밝기 텍스처에 반영 */
   syncFlicker() {
     const data = this.lightTex.image.data, map = this.level.map, w = map.w;
@@ -94,8 +157,10 @@ export class LightRig {
       this.offState.set(f.l, !!f.off);
       const list = this.contrib.get(f.l) || [];
       for (const [i, v] of list) { this.sum[i] += f.off ? -v : v; touched.add(i); }
-      const k = this.lights.indexOf(f.l);
-      if (k >= 0) { this.panels.setColorAt(k, new THREE.Color(f.off ? 0x2a2820 : 0xfff6d8)); this.panels.instanceColor.needsUpdate = true; }
+      if (this.panels) {
+        const k = this.lights.indexOf(f.l);
+        if (k >= 0) { this.panels.setColorAt(k, new THREE.Color(f.off ? 0x2a2820 : this.panelHex)); this.panels.instanceColor.needsUpdate = true; }
+      } else { const mesh = this.rtFlick?.get(f.l); if (mesh) mesh.material = f.off ? this.rtOff : this.rtOn; }
       dirty = true;
     }
     if (!dirty) return;
@@ -130,7 +195,8 @@ export class LightRig {
     }
     near.sort((a, b) => a[0] - b[0]);
     const flick = game.flicker?.intensity ?? 1;
-    this.lampPool.forEach((p, i) => {
+    if (this.q.rt) this.assignRTLamps(near, flick);
+    else this.lampPool.forEach((p, i) => {
       const e = near[i];
       if (!e) { p.intensity = 0; return; }
       p.position.set(toM(e[1].x), CEIL_H - 0.25, toM(e[1].y));
@@ -138,7 +204,7 @@ export class LightRig {
     });
     // 내 손전등 (보고 있는 사람)
     const v = game.viewTarget();
-    this.flash.intensity = v?.alive && v.flashlight && !v.hidden ? 7 * flick : 0;
+    this.flash.intensity = v?.alive && v.flashlight && !v.hidden ? (this.q.rt ? RT.FLASH : 7) * flick : 0;
     // 다른 사람 손전등: 가까운 순
     const others = [];
     for (const p of game.allPlayers()) {
@@ -152,8 +218,8 @@ export class LightRig {
       const p = e[1], eye = p.crouching ? 0.9 : 1.4;
       s.position.set(toM(p.x), eye, toM(p.y));
       s.target.position.set(toM(p.x) + Math.cos(p.angle), eye - 0.15, toM(p.y) + Math.sin(p.angle));
-      s.intensity = 7;
-      beam.visible = true;
+      s.intensity = this.q.rt ? RT.REMOTE : 7;
+      beam.visible = !this.q.rt;             // 울트라는 안개 속 진짜 빛줄기(볼류메트릭)가 대신한다
       beam.position.copy(s.position);
       beam.lookAt(s.target.position);
       beam.rotateY(Math.PI);                 // 원뿔은 -z 로 뻗으므로 lookAt(+z) 을 뒤집는다
@@ -163,13 +229,38 @@ export class LightRig {
     return n;
   }
 
+  /**
+   * 울트라: 가까운 켜진 등(최대 96개)에 조명을 붙인다. 이미 붙어 있는 짝은 그대로 두고,
+   * 범위를 벗어났거나 꺼진 등의 조명만 새로 들어온 등으로 옮긴다 (레이 트레이서가 조명 번호별로 쌓은 기록이 덜 깨진다)
+   */
+  assignRTLamps(near, flick) {
+    const want = new Set();
+    for (let i = 0; i < near.length && i < this.lampPool.length; i++) if (near[i][0] <= RT.RANGE2) want.add(near[i][1]);
+    const taken = new Set(), free = [];
+    for (const p of this.lampPool) {
+      const l = this.lampOf.get(p);
+      if (l && want.has(l)) taken.add(l);
+      else { this.lampOf.delete(p); free.push(p); }
+    }
+    for (const l of want) {
+      if (taken.has(l) || !free.length) continue;
+      const p = free.pop();
+      this.lampOf.set(p, l);
+      p.position.set(toM(l.x), CEIL_H - 0.32, toM(l.y));   // 광원 구(반지름 0.28m)가 천장 위로 삐져나가지 않게
+    }
+    for (const p of this.lampPool) p.intensity = this.lampOf.has(p) ? RT.LAMP * flick : 0;
+  }
+
   dispose() {
     this.scene.remove(this.group);
     this.camera.remove(this.flash, this.flash.target);
     this.flash.dispose?.();
     for (const p of this.lampPool) p.dispose?.();
     for (const { s } of this.remote) s.dispose?.();
-    this.panelGeo.dispose(); this.panelMat.dispose(); this.panels.dispose();
+    this.panelGeo.dispose(); this.panelMat?.dispose(); this.panels?.dispose();
+    this.rtSteady?.geometry.dispose();
+    for (const m of this.rtFlick?.values() || []) m.geometry.dispose();
+    this.rtOn?.dispose(); this.rtOff?.dispose();
     this.beamGeo.dispose(); this.beamMat.dispose();
   }
 }
